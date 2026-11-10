@@ -1,0 +1,161 @@
+import { useEffect, useState } from 'react';
+import { clsx } from 'clsx';
+import { gateway } from '../gateway/client';
+import { useApp } from '../store/useApp';
+import { fmtPrice, signedClass } from '../lib/format';
+import type { WatchlistRow } from '../gateway/types';
+
+export function WatchlistPanel() {
+  const conn = useApp((s) => s.conn);
+  const symbols = useApp((s) => s.symbols);
+  const symbol = useApp((s) => s.symbol);
+  const setSymbol = useApp((s) => s.setSymbol);
+  const watchlist = useApp((s) => s.watchlist);
+  const setWatchlist = useApp((s) => s.setWatchlist);
+  const rows = useApp((s) => s.watchRows);
+  const setWatchRows = useApp((s) => s.setWatchRows);
+  const [pick, setPick] = useState('');
+
+  const save = (names: string[]) => {
+    setWatchlist(names);
+    gateway.call('watchlist.set', { symbols: names }).catch(() => {
+      /* 网关没连上时先存本地，连上后自动补齐 */
+    });
+  };
+
+  // 第一次打开：用券商的可见品种补一个默认自选（最多 10 个）
+  useEffect(() => {
+    if (conn !== 'open' || watchlist.length > 0 || symbols.length === 0) return;
+    const names = symbols.filter((item) => item.visible).slice(0, 10).map((item) => item.name);
+    if (names.length > 0) save(names);
+    // save 每次渲染都是新函数，这里只关心登录后第一次补齐
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conn, watchlist.length, symbols]);
+
+  // 每 3 秒拉一次报价；组件卸载（切走标签页）就停
+  useEffect(() => {
+    if (conn !== 'open') {
+      setWatchRows([]);
+      return;
+    }
+    let alive = true;
+    const load = () => {
+      const names = useApp.getState().watchlist;
+      if (names.length === 0) {
+        setWatchRows([]);
+        return;
+      }
+      gateway
+        .call<WatchlistRow[]>('watchlist.get', { symbols: names })
+        .then((next) => {
+          if (alive) setWatchRows(next);
+        })
+        .catch(() => {
+          /* 单个 tick 取不到不打断轮询 */
+        });
+    };
+    load();
+    const timer = window.setInterval(load, 3000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [conn, watchlist, setWatchRows]);
+
+  const candidates = symbols.filter((item) => !watchlist.includes(item.name)).slice(0, 300);
+
+  return (
+    <section data-panel="watchlist">
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-[11px] font-semibold tracking-wide text-tv-muted">
+          自选 <span className="ml-1 text-tv-text">{watchlist.length}</span>
+        </span>
+        <div className="flex items-center gap-1">
+          <select
+            value={pick}
+            onChange={(event) => setPick(event.target.value)}
+            className="h-6 w-[92px] rounded border border-tv-border bg-tv-bg px-1 text-[10px] text-tv-text outline-none focus:border-tv-accent"
+          >
+            <option value="">添加品种…</option>
+            {candidates.map((item) => (
+              <option key={item.name} value={item.name}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => {
+              if (!pick) return;
+              save([...watchlist, pick]);
+              setPick('');
+            }}
+            disabled={!pick}
+            className={clsx(
+              'h-6 rounded bg-tv-border px-1.5 text-[10px] text-tv-text hover:bg-tv-hover',
+              !pick && 'cursor-not-allowed opacity-40',
+            )}
+          >
+            加
+          </button>
+        </div>
+      </div>
+
+      <div className="max-h-[320px] overflow-auto">
+        {watchlist.length === 0 && (
+          <div className="px-3 pb-3 text-[11px] text-tv-muted">
+            {conn === 'open' ? '还没有自选品种，从右上角添加' : '等待网关连接…'}
+          </div>
+        )}
+        {watchlist.map((name) => {
+          const row = rows.find((item) => item.symbol === name);
+          const active = name === symbol;
+          return (
+            <div
+              key={name}
+              onClick={() => setSymbol(name)}
+              className={clsx(
+                'group flex cursor-pointer items-center gap-2 border-t border-tv-border/60 px-3 py-1.5 text-[11px]',
+                active ? 'bg-tv-accent/10' : 'hover:bg-tv-hover/40',
+              )}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1 truncate text-tv-text">
+                  {row?.hasPosition && (
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-tv-accent"
+                      title="有持仓"
+                    />
+                  )}
+                  <span className="truncate">{name}</span>
+                </div>
+                <div className="truncate text-[10px] text-tv-muted">
+                  {row
+                    ? `点差 ${row.spreadPoints.toFixed(0)} · Bid ${fmtPrice(row.bid, row.digits)}`
+                    : '—'}
+                </div>
+              </div>
+              <span className={clsx('font-mono text-[11px]', signedClass(row?.changePct))}>
+                {row?.changePct != null
+                  ? `${row.changePct >= 0 ? '+' : ''}${row.changePct.toFixed(2)}%`
+                  : '—'}
+              </span>
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  save(watchlist.filter((item) => item !== name));
+                }}
+                title="从自选里移除"
+                className="h-5 w-5 shrink-0 rounded text-[10px] text-tv-muted opacity-0 hover:bg-tv-border hover:text-tv-text group-hover:opacity-100"
+              >
+                ✕
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="px-3 py-2 text-[9px] text-tv-muted">
+        点差单位为「点」，涨跌幅按 D1 开盘价计算；圆点表示该品种有持仓。
+      </div>
+    </section>
+  );
+}

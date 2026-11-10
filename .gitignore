@@ -1,0 +1,23 @@
+node_modules/
+dist/
+src-tauri/target/
+gateway/__pycache__/
+__pycache__/
+*.pyc
+gateway/audit/
+gateway/data/
+public/charting_library/
+*.log
+.DS_Store
+
+# 本地验证截图
+artifacts/
+
+# 本机配置（含终端路径）
+gateway/config.json
+
+# Tauri 更新签名私钥 / 本地构建缓存
+.tauri/
+*.key
+tsconfig.tsbuildinfo
+src-tauri/gen/

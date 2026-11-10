@@ -1,0 +1,18 @@
+{
+  "terminal_path": "C:/Program Files/MetaTrader 5/terminal64.exe",
+  "expected_login": 0,
+  "trade_mode": "readonly",
+  "allow_live": false,
+  "max_lot": 0.5,
+  "max_risk_pct": 1.0,
+  "max_spread_points": 0,
+  "max_positions": 3,
+  "daily_loss_pct": 2.0,
+  "deviation_points": 20,
+  "magic": 260511,
+  "max_trades_per_day": 8,
+  "max_consecutive_losses": 3,
+  "cooldown_minutes": 30,
+  "trailing_step_points": 5,
+  "alert_channels": []
+}
