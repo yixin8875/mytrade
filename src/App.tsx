@@ -227,6 +227,7 @@ export default function App() {
   const watchCount = useApp((s) => s.watchlist.length);
   const theme = useApp((s) => s.theme);
   const activeAccountId = useApp((s) => s.health?.activeAccountId ?? '');
+  const activeLogin = useApp((s) => s.account?.login ?? 0);
   const alertsOpen = useApp((s) => s.alertsOpen);
 
   useEffect(() => {
@@ -265,8 +266,8 @@ export default function App() {
           <TopBar />
           <div className="flex min-h-0 flex-1">
             <main className="relative min-w-0 flex-1">
-              {/* 切换账户后重建图表，避免沿用上一个账户的品种和历史缓存 */}
-              <ChartGrid key={activeAccountId} />
+              {/* 切换账户或原地改登录号后重建图表，避免沿用上一个账户的品种和历史缓存 */}
+              <ChartGrid key={`${activeAccountId}:${activeLogin}`} />
               {/* 价格告警覆盖在图表右侧，不挤压图表也不另开弹窗 */}
               {alertsOpen && <AlertsPanel />}
             </main>

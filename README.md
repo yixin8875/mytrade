@@ -25,7 +25,7 @@ pip install -r gateway/requirements.txt
 
 ### 启动
 
-1. 打开 MT5 并登录账户。
+1. 安装 MT5；可以在「设置 → MT5 账户」里保存登录号、服务器和密码，让网关启动终端并自动登录，也可以先在终端里手动登录。
 2. 启动本地网关：
 
 ```bash
@@ -116,7 +116,7 @@ npm run release -- --notes "这一版改了什么"
 | 快捷键（B/S 市价、Esc 取消）与下单模板（0.5% + 2R + 1R 自动保本） | ✅ |
 | 执行质量：点差、滑点、成交延迟 P50/P90、拒单原因 | ✅ |
 | 审计日志查询、手动对账、同价位小块自动错行 | ✅ |
-| 多账户：顶部切换 MT5 终端，日志/告警/执行统计按账户隔离 | ✅ |
+| 多账户：设置页添加账户并保存密码，启动/切换自动登录；日志/告警/执行统计按账户隔离 | ✅ |
 | 断线自动重连、MT5 重启后按 clientOrderId 对账 | ✅ |
 | TradingView Charting Library 完整界面 | ✅ 本地库（v32，勿提交） |
 | 实盘交易 | ❌ 默认关闭，需改 `gateway/config.json` |
@@ -256,7 +256,7 @@ cp gateway/config.example.json gateway/config.json
 |---|---|---|
 | `terminal_path` | 空 | 固定连接的 `terminal64.exe` 路径；同时开着多个 MT5 时**必须**设置，否则可能连到别的终端/账户 |
 | `expected_login` | `0` | 期望登录的账户号，`0` = 不校验；非 0 时连错账户会报错并断开 |
-| `accounts` | `[]` | 多账户列表，每项对应一个已登录的 MT5 终端：`{"id","label","terminal_path","login","server"}`；为空时退回单终端配置 |
+| `accounts` | `[]` | 多账户列表，可在「设置 → MT5 账户」里增删改：`{"id","label","terminal_path","login","server"}`；密码不在本文件；为空时退回单终端配置 |
 | `active_account` | 空 | 上次选中的账户 `id`；空或找不到时使用 `accounts` 第一项 |
 | `trade_mode` | `readonly` | 启动时的模式，前端可切到 `demo` |
 | `allow_live` | `false` | 是否允许切换到实盘 |
@@ -273,7 +273,9 @@ cp gateway/config.example.json gateway/config.json
 | `magic` | `260511` | 订单魔术号，用于对账 |
 | `alert_channels` | `[]` | 告警外部通道，元素如 `{"type":"webhook","url":"https://example.invalid/hook"}`；也支持 `discord` / `telegram` / `wecom`。含密钥，只写在本文件，前端只显示通道名 |
 
-多账户示例（每个账户先单独打开并登录一个 MT5 终端，再填写对应 `terminal_path`）：
+多账户也可以完全在界面里管理：打开「设置 → MT5 账户」，填写名称、登录号、服务器、`terminal64.exe` 路径和密码即可。密码经 Windows DPAPI 加密后保存在 `gateway/data/credentials.json`，只有当前 Windows 用户能解密，不会写入 `config.json`，也不会回发到前端。
+
+手工配置示例：
 
 ```json
 {
@@ -297,7 +299,9 @@ cp gateway/config.example.json gateway/config.json
 }
 ```
 
-切换时网关会 `shutdown` 后重新 `initialize` 到目标终端，并用 `login` 校验；持仓不会被平掉，但移动止损与自动保本只管理当前账户。截图存到 `gateway/data/shots/<login>/`，旧截图仍可读取。新增或修改 `accounts` 后需重启网关。
+切换时网关会 `shutdown` 后重新 `initialize` 到目标终端；若该账户保存了密码，再调用 `mt5.login(login, password, server)` 登录，并校验最终账户号。持仓不会被平掉，但移动止损与自动保本只管理当前账户。截图存到 `gateway/data/shots/<login>/`，旧截图仍可读取。
+
+同一个 `terminal64.exe` 可以配置多个登录号，切换会改变该终端当前登录的账户；如果希望多个账户同时在线，请给每个账户配置不同的终端路径。界面里新增或修改账户即时生效，无需重启网关。连续 3 次自动登录失败后网关会暂停重试，避免反复试错；修改该账户的密码或连接信息后会重新尝试。
 
 ---
 
@@ -315,6 +319,8 @@ mytrade/
 ├─ gateway/                Python MT5 网关
 │  ├─ app.py               FastAPI + WebSocket
 │  ├─ mt5_worker.py        单线程 MT5 调用、交易、对账
+│  ├─ accounts.py          账户校验、增删改、当前账户切换
+│  ├─ secure_store.py      Windows DPAPI 加密保存 MT5 密码
 │  ├─ journal.py           交易日志：成交配对、MFE/MAE、统计、截图
 │  ├─ notify.py            告警外部通道（webhook/Discord/Telegram/企业微信）
 │  ├─ store.py             SQLite 意图 + 日志 + 告警 + 执行质量 + JSONL 审计
@@ -331,7 +337,10 @@ mytrade/
 ## 常见问题
 
 **界面一直显示「等待 MT5 终端」**
-确认 MT5 已启动并登录，`MetaTrader5` 包版本与终端匹配。查看 `http://127.0.0.1:8765/health`。
+确认 MT5 已启动并登录，`MetaTrader5` 包版本与终端匹配。查看 `http://127.0.0.1:8765/health` 的 `lastError`；如果在设置里保存了密码，先检查登录号、服务器和终端路径。
+
+**设置里保存密码后仍提示自动登录失败**
+确认服务器名与 MT5 登录窗口完全一致、密码正确、`terminal_path` 指向实际使用的 `terminal64.exe`。连续 3 次失败后网关会暂停重试，修改该账户密码或连接信息即可重新尝试。失败记录可在「审计日志」里搜索 `account.login_failed`，不会记录密码。
 
 **提示「MT5 未开启 Algo Trading」**
 在 MT5 顶部工具栏点击「算法交易 / Algo Trading」按钮，图标变绿即可。

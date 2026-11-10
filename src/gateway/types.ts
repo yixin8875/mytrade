@@ -52,6 +52,10 @@ export interface AccountOption {
   terminalPath?: string;
   active: boolean;
   connected: boolean;
+  /** 本机已用 Windows DPAPI 保存密码，可在启动/切换时自动登录 */
+  hasPassword?: boolean;
+  /** 是否来自 config.json 的 accounts；false 表示单终端回退账户 */
+  configured?: boolean;
 }
 
 export interface Account {
@@ -206,6 +210,13 @@ export interface GatewayHealth {
 export interface SwitchAccountResult {
   activeId: string;
   account: Account | null;
+  accounts: AccountOption[];
+  health: GatewayHealth;
+}
+
+/** accounts.create / accounts.update / accounts.delete 的返回值 */
+export interface AccountMutationResult {
+  activeId: string;
   accounts: AccountOption[];
   health: GatewayHealth;
 }

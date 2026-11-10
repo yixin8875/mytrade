@@ -11,9 +11,11 @@ from typing import Any, Awaitable, Callable
 
 import MetaTrader5 as mt5
 
-from config import Config
+from accounts import AccountError, AccountManager
+from config import BASE_DIR, Config
 from journal import TradeJournal
 from notify import Notifier
+from secure_store import CredentialStore
 from store import Store
 
 TIMEFRAMES = {
@@ -144,7 +146,12 @@ class Mt5Worker:
 
         self._account_id = cfg.active_profile()["id"]
         self._connected = False
+        self._connect_blocked = False
+        self._auth_failures = 0
         self._last_error: dict | None = None
+        self._account_mgr = AccountManager(
+            cfg, CredentialStore(BASE_DIR / "data" / "credentials.json")
+        )
         self._account: dict | None = None
         self._positions: list[dict] = []
         self._orders: list[dict] = []
@@ -220,7 +227,7 @@ class Mt5Worker:
 
             now = time.monotonic()
             try:
-                if not self._connected:
+                if not self._connected and not self._connect_blocked:
                     if now - last_init >= 3.0:
                         last_init = now
                         self._try_connect()
@@ -282,11 +289,18 @@ class Mt5Worker:
                     "terminalPath": profile["terminal_path"],
                     "active": is_active,
                     "connected": connected,
+                    "hasPassword": self._account_mgr.has_password(profile["id"]),
+                    "configured": bool(self.cfg.configured_accounts()),
                 }
             )
         return out
 
-    def _try_connect(self) -> None:
+    def _try_connect(self, force_login: bool = False) -> None:
+        if force_login:
+            self._connect_blocked = False
+            self._auth_failures = 0
+        elif self._connect_blocked:
+            return
         try:
             mt5.shutdown()
             profile = self._profile()
@@ -303,10 +317,81 @@ class Mt5Worker:
                     "message": f"账户「{profile['label']}」连接失败：{msg}",
                 }
                 return
-            terminal = mt5.terminal_info()
+
+            try:
+                password = self._account_mgr.password(profile["id"])
+            except AccountError as exc:
+                self._connect_blocked = True
+                self._last_error = {"code": "CREDENTIAL_STORE", "message": str(exc)}
+                mt5.shutdown()
+                self._emit("gateway", self.health())
+                return
+
             account = mt5.account_info()
+            needs_login = (
+                force_login
+                or account is None
+                or bool(expected and int(account.login) != expected)
+            )
+            if needs_login and password:
+                if expected <= 0:
+                    self._connect_blocked = True
+                    self._last_error = {
+                        "code": "AUTH_CONFIG",
+                        "message": f"账户「{profile['label']}」未配置登录号，无法自动登录",
+                    }
+                    mt5.shutdown()
+                    self._emit("gateway", self.health())
+                    return
+                try:
+                    logged_in = mt5.login(
+                        expected,
+                        password=password,
+                        server=str(profile.get("server") or ""),
+                    )
+                    code, msg = (0, "") if logged_in else mt5.last_error()
+                except Exception as exc:  # noqa: BLE001 - 登录异常也按认证失败处理
+                    logged_in = False
+                    code, msg = -1, f"{type(exc).__name__}: {exc}"
+                if not logged_in:
+                    self._auth_failures += 1
+                    # 给终端刚启动/网络抖动留两次重试，连续失败后再停下等用户改密码
+                    if self._auth_failures >= 3:
+                        self._connect_blocked = True
+                    self._last_error = {
+                        "code": "AUTH_FAILED",
+                        "message": (
+                            f"账户「{profile['label']}」自动登录失败：{msg}（错误 {code}）。"
+                            "请检查登录号、服务器和密码。"
+                        ),
+                    }
+                    self._connected = False
+                    mt5.shutdown()
+                    try:
+                        self.store.audit(
+                            "account.login_failed",
+                            {
+                                "accountId": profile["id"],
+                                "login": expected,
+                                "attempt": self._auth_failures,
+                                "error": int(code),
+                            },
+                        )
+                    except Exception:  # noqa: BLE001 - 审计失败不影响重试
+                        pass
+                    self._emit("gateway", self.health())
+                    return
+                account = mt5.account_info()
+
+            terminal = mt5.terminal_info()
             if terminal is None or account is None:
-                self._last_error = {"code": -1, "message": "终端已启动但账户未登录"}
+                self._last_error = {
+                    "code": "NOT_LOGGED_IN",
+                    "message": (
+                        "终端已启动但账户未登录；请在设置里为该账户保存密码，"
+                        "或在 MT5 终端里手动登录"
+                    ),
+                }
                 mt5.shutdown()
                 return
             if expected and int(account.login) != expected:
@@ -314,7 +399,7 @@ class Mt5Worker:
                     "code": "ACCOUNT_MISMATCH",
                     "message": (
                         f"账户「{profile['label']}」期望登录 {expected}，实际是 {account.login}；"
-                        "请检查 gateway/config.json 里该账户的 terminal_path"
+                        "请检查登录号、服务器、密码和终端路径"
                     ),
                 }
                 mt5.shutdown()
@@ -326,6 +411,8 @@ class Mt5Worker:
             except Exception:  # noqa: BLE001 - 迁移失败不影响交易
                 pass
             self._connected = True
+            self._connect_blocked = False
+            self._auth_failures = 0
             self._last_error = None
             self._account = self._account_payload(account)
             self._sync_server_time()
@@ -367,6 +454,8 @@ class Mt5Worker:
         except Exception:  # noqa: BLE001
             pass
         self._connected = False
+        self._connect_blocked = False
+        self._auth_failures = 0
         self._account = None
         self._positions = []
         self._orders = []
@@ -441,6 +530,88 @@ class Mt5Worker:
             "health": self.health(),
         }
 
+    def _account_hint(self) -> dict:
+        return {
+            "login": self._login(),
+            "server": str((self._account or {}).get("server") or ""),
+            "terminalPath": str(self._profile().get("terminal_path") or ""),
+        }
+
+    def _accounts_result(self) -> dict:
+        return {
+            "activeId": self._account_id,
+            "accounts": self._accounts_payload(),
+            "health": self.health(),
+        }
+
+    def _create_account(self, p: dict) -> dict:
+        try:
+            created = self._account_mgr.create(p, self._account_hint())
+        except AccountError as exc:
+            raise GatewayError("BAD_ACCOUNT", str(exc)) from exc
+        except OSError as exc:
+            raise GatewayError("CONFIG_SAVE", f"保存账户失败：{exc}") from exc
+
+        self._account_id = self.cfg.active_profile()["id"]
+        self.store.audit(
+            "account.create",
+            {
+                "id": created["id"],
+                "activeId": self._account_id,
+                "seeded": bool(created.get("seeded")),
+            },
+        )
+        self._emit("gateway", self.health())
+        return self._accounts_result()
+
+    def _update_account(self, p: dict) -> dict:
+        try:
+            updated = self._account_mgr.update(p)
+        except AccountError as exc:
+            raise GatewayError("BAD_ACCOUNT", str(exc)) from exc
+        except OSError as exc:
+            raise GatewayError("CONFIG_SAVE", f"保存账户失败：{exc}") from exc
+
+        self._account_id = self.cfg.active_profile()["id"]
+        reconnected = self._account_id == updated["id"] and (
+            bool(updated.get("connectionChanged")) or bool(updated.get("passwordChanged"))
+        )
+        self.store.audit(
+            "account.update",
+            {
+                "id": updated["id"],
+                "connectionChanged": bool(updated.get("connectionChanged")),
+                "passwordChanged": bool(updated.get("passwordChanged")),
+            },
+        )
+
+        if reconnected:
+            self._reset_for_switch()
+            self._try_connect(force_login=True)
+            message = str((self._last_error or {}).get("message") or "")
+            if not self._connected:
+                raise GatewayError(
+                    "ACCOUNT_RECONNECT_FAILED",
+                    f"账户已保存，但自动登录失败：{message or '未知错误'}",
+                    {"health": self.health()},
+                )
+            self._emit("gateway", self.health())
+        else:
+            self._emit("gateway", self.health())
+        return self._accounts_result()
+
+    def _delete_account(self, p: dict) -> dict:
+        try:
+            deleted = self._account_mgr.delete(str(p.get("id") or ""))
+        except AccountError as exc:
+            raise GatewayError("BAD_ACCOUNT", str(exc)) from exc
+        except OSError as exc:
+            raise GatewayError("CONFIG_SAVE", f"删除账户失败：{exc}") from exc
+
+        self.store.audit("account.delete", {"id": deleted["id"]})
+        self._emit("gateway", self.health())
+        return self._accounts_result()
+
     def _set_config(self, p: dict) -> dict:
         """设置页保存风控字段；立即生效并写回 config.json。"""
         try:
@@ -511,7 +682,11 @@ class Mt5Worker:
             "accounts.list": lambda _: {
                 "activeId": self._account_id,
                 "accounts": self._accounts_payload(),
+                "lastError": self._last_error,
             },
+            "accounts.create": self._create_account,
+            "accounts.update": self._update_account,
+            "accounts.delete": self._delete_account,
             "account.switch": self._switch_account,
             "positions.get": lambda _: self._positions,
             "orders.get": lambda _: self._orders,

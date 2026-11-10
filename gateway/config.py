@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -77,9 +78,25 @@ class Config:
         cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip()).strip("-").lower()
         return cleaned or fallback
 
-    def account_profiles(self) -> list[dict]:
-        """规范化 accounts 配置；没有配置时退化成单终端（terminal_path / expected_login）。"""
-        raw = self.accounts if isinstance(self.accounts, list) else []
+    @staticmethod
+    def _read_raw() -> dict:
+        path = BASE_DIR / "config.json"
+        if not path.exists():
+            return {}
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+
+    @staticmethod
+    def _write_raw(raw: dict) -> None:
+        path = BASE_DIR / "config.json"
+        tmp = path.with_name(f"{path.name}.tmp")
+        tmp.write_text(
+            json.dumps(raw, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(tmp, path)
+
+    def _normalize_accounts(self, raw: list) -> list[dict]:
         profiles: list[dict] = []
         used: set[str] = set()
         for index, item in enumerate(raw):
@@ -116,6 +133,16 @@ class Config:
                     ),
                 }
             )
+        return profiles
+
+    def configured_accounts(self) -> list[dict]:
+        """只返回 config.json 里显式配置的账户，不合成默认终端。"""
+        raw = self.accounts if isinstance(self.accounts, list) else []
+        return self._normalize_accounts(raw)
+
+    def account_profiles(self) -> list[dict]:
+        """规范化 accounts 配置；没有配置时退化成单终端（terminal_path / expected_login）。"""
+        profiles = self.configured_accounts()
         if not profiles:
             profiles.append(
                 {
@@ -135,6 +162,30 @@ class Config:
                 return profile
         return profiles[0]
 
+    def save_accounts(self, accounts: list[dict], active_account: str | None = None) -> list[dict]:
+        """保存账户列表与当前选择；密码由独立的 DPAPI 凭据文件保存。"""
+        profiles = self._normalize_accounts(accounts)
+        if not profiles:
+            raise ValueError("至少保留一个账户")
+        ids = {profile["id"] for profile in profiles}
+        active = active_account if active_account in ids else profiles[0]["id"]
+        raw = self._read_raw()
+        raw["accounts"] = [
+            {
+                "id": profile["id"],
+                "label": profile["label"],
+                "login": profile["login"],
+                "server": profile["server"],
+                "terminal_path": profile["terminal_path"],
+            }
+            for profile in profiles
+        ]
+        raw["active_account"] = active
+        self._write_raw(raw)
+        self.accounts = raw["accounts"]
+        self.active_account = active
+        return profiles
+
     def set_active_account(self, account_id: str) -> dict:
         """校验并持久化当前账户选择，保留 config.json 里的其他字段。"""
         profiles = self.account_profiles()
@@ -142,16 +193,10 @@ class Config:
         if profile is None:
             raise ValueError(f"未知账户: {account_id}")
 
-        self.active_account = profile["id"]
-        path = BASE_DIR / "config.json"
-        raw: dict = {}
-        if path.exists():
-            raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = self._read_raw()
         raw["active_account"] = profile["id"]
-        path.write_text(
-            json.dumps(raw, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        self._write_raw(raw)
+        self.active_account = profile["id"]
         return profile
 
     def update(self, patch: dict) -> dict:
@@ -174,15 +219,9 @@ class Config:
         if not clean:
             raise ValueError("没有需要保存的字段")
 
-        path = BASE_DIR / "config.json"
-        raw: dict = asdict(self)
-        if path.exists():
-            raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = self._read_raw() or asdict(self)
         raw.update(clean)
-        path.write_text(
-            json.dumps(raw, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        self._write_raw(raw)
         for key, value in clean.items():
             setattr(self, key, value)
         return self.public()

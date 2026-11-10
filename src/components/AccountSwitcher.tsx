@@ -149,7 +149,7 @@ export function AccountSwitcher() {
             })}
           </div>
           <div className="border-t border-tv-border px-3 py-2 text-[9.5px] leading-relaxed text-tv-muted">
-            账户在 gateway/config.json 的 accounts 里配置，每个账户对应一个已登录的 MT5 终端；修改后需重启网关。
+            在「设置 → MT5 账户」里添加、修改或删除账户；保存后无需重启网关。
           </div>
         </div>
       )}

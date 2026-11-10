@@ -9,10 +9,12 @@ import {
   RefreshCw,
   Save,
   ShieldCheck,
+  Users,
   X,
 } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
+import { AccountManager } from './AccountManager';
 import { LayoutGallery, SyncToggles } from './LayoutPicker';
 import type { GatewayConfig } from '../gateway/types';
 import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
@@ -21,9 +23,10 @@ const NAV = [
   { id: 'appearance', label: '外观', hint: '主题与界面', icon: Palette },
   { id: 'chart', label: '图表', hint: '布局与周期', icon: ChartCandlestick },
   { id: 'risk', label: '交易与风控', hint: '手数与风险上限', icon: ShieldCheck },
+  { id: 'accounts', label: 'MT5 账户', hint: '自动登录与切换', icon: Users },
   { id: 'alerts', label: '告警', hint: '声音与通知', icon: Bell },
   { id: 'updates', label: '更新', hint: '版本与检查更新', icon: RefreshCw },
-  { id: 'about', label: '数据与账户', hint: '连接与本机路径', icon: Info },
+  { id: 'about', label: '数据与连接', hint: '终端状态与本机路径', icon: Info },
 ] as const;
 
 type SectionId = (typeof NAV)[number]['id'];
@@ -231,6 +234,7 @@ export function SettingsPanel() {
           {section === 'appearance' && <AppearanceSection />}
           {section === 'chart' && <ChartSection />}
           {section === 'risk' && <RiskSection />}
+          {section === 'accounts' && <AccountManager />}
           {section === 'alerts' && <AlertsSection />}
           {section === 'updates' && <UpdatesSection />}
           {section === 'about' && <AboutSection />}
@@ -742,9 +746,6 @@ function AboutSection() {
   const health = useApp((s) => s.health);
   const account = health?.account;
   const terminal = health?.terminal;
-  const accounts = health?.accounts ?? [];
-  const activeId = health?.activeAccountId ?? '';
-  const active = accounts.find((item) => item.id === activeId) ?? accounts[0] ?? null;
 
   return (
     <>
@@ -777,36 +778,14 @@ function AboutSection() {
         </Row>
       </Card>
 
-      <Card
-        title="多账户"
-        description="在 gateway/config.json 的 accounts 里配置，每个账户对应一个已登录的 MT5 终端；切换在顶部账户菜单。新增或修改账户后需重启网关。"
-      >
-        <Row label="当前账户">
-          <span className="text-[11px]">
-            {active
-              ? `${active.label}${account?.login || active.login ? ` · ${account?.login ?? active.login}` : ''}${
-                  account?.server || active.server ? `@${account?.server ?? active.server}` : ''
-                }`
-              : '—'}
-          </span>
-        </Row>
-        <Row label="已配置">
-          <span className="text-[11px] text-tv-muted">{accounts.length} 个</span>
-        </Row>
-        {accounts.slice(0, 8).map((item) => (
-          <Row key={item.id} label={item.label}>
-            <span className={clsx('font-mono text-[10px]', item.id === activeId && 'text-tv-text')}>
-              {item.login || '未指定登录号'}
-              {item.server ? ` · ${item.server}` : ''}
-              {item.id === activeId ? ' · 当前' : ''}
-            </span>
-          </Row>
-        ))}
-      </Card>
-
       <Card title="本机数据" description="以下内容只保存在本机，不会上传。">
         <Row label="交易日志与截图">
           <span className="font-mono text-[10px] text-tv-muted">gateway/data（截图按账户号分目录）</span>
+        </Row>
+        <Row label="账户凭据">
+          <span className="font-mono text-[10px] text-tv-muted">
+            gateway/data/credentials.json（DPAPI）
+          </span>
         </Row>
         <Row label="审计日志">
           <span className="font-mono text-[10px] text-tv-muted">gateway/audit</span>
