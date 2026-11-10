@@ -57,10 +57,30 @@ npm run tauri:build
 
 产物：
 
-- `src-tauri/target/release/bundle/msi/MyTrade_0.1.0_x64_en-US.msi`
-- `src-tauri/target/release/bundle/nsis/MyTrade_0.1.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/MyTrade_0.2.0_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/MyTrade_0.2.0_x64-setup.exe`
+- 同名 `.sig` 文件（Tauri 更新签名，发布到 GitHub 时使用）
 
 安装包未签名，首次运行 Windows 可能弹 SmartScreen，选「更多信息 → 仍要运行」。安装包只包含前端与桌面壳，仍需先启动 Python 网关（`npm run gateway`），否则界面会一直显示等待连接。
+
+### 发布与自动更新（GitHub Releases）
+
+桌面版启动约 6 秒后会自动检查 `https://github.com/yixin8875/mytrade/releases/latest/download/latest.json`；有新版时右下角弹出提示，可以「立即更新」（下载、安装并自动重启）、「稍后」或「忽略此版本」。顶部「更新」按钮可随时手动检查。更新包使用 Tauri 签名校验，签名不匹配不会安装。
+
+发布新版本在本机执行，因为 `public/charting_library/` 没有提交到 Git，GitHub 云端 runner 无法编译完整应用：
+
+1. 同步修改版本号：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`gateway/app.py`、`gateway/mt5_worker.py`（后两处影响状态栏显示的网关版本）。
+2. 确认本机 `public/charting_library/` 存在。
+3. 设置一个有 `contents: write` 权限的 GitHub token 后发布：
+
+```bash
+export GITHUB_TOKEN=github_pat_xxx
+npm run release -- --notes "这一版改了什么"
+```
+
+脚本会构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.2.0` release、上传安装包与清单。只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`。
+
+> 更新签名私钥在 `~/.tauri/mytrade.key`（已被 `.gitignore` 排除，**不要提交**），公钥写在 `tauri.conf.json` 的 `plugins.updater.pubkey`。私钥丢失后，已安装的旧版本将无法再自动更新。第一次需要手动安装一次带 updater 的版本（v0.2.0），之后才能自动更新。
 
 ---
 
@@ -259,7 +279,8 @@ mytrade/
 ├─ src/                    React 前端（Tailwind 4）
 │  ├─ chart/tv/            TradingView 适配：datafeed.ts（行情）、priceLines.ts（下单线/持仓线）、sync.ts（十字线联动）、registry.ts
 │  ├─ gateway/             WebSocket 客户端与类型
-│  ├─ components/          顶栏、图表、下单票、持仓、挂单、自选、日志、告警、执行质量、审计、状态栏
+│  ├─ lib/updater.ts       GitHub Releases 自动更新：检查、下载进度、安装重启
+│  ├─ components/          顶栏、图表、下单票、持仓、挂单、自选、日志、告警、执行质量、审计、更新提示、状态栏
 │  └─ store/               Zustand 状态
 ├─ gateway/                Python MT5 网关
 │  ├─ app.py               FastAPI + WebSocket
@@ -270,6 +291,7 @@ mytrade/
 │  └─ config.py            配置
 ├─ src-tauri/              Tauri 2 桌面壳
 ├─ scripts/verify_trade.py 下单链路冒烟测试（挂单→改价→撤单→市价→SL/TP→平仓）
+├─ scripts/release.mjs     构建签名安装包、生成 latest.json、发布到 GitHub Releases
 ├─ DESIGN.md               完整架构设计
 └─ public/charting_library TradingView 官方库（本地私有副本，已在 .gitignore，绝不提交）
 ```
@@ -302,6 +324,9 @@ mytrade/
 **图表时间和 MT5 不一致**
 图表把「券商服务器时间」整体当成 UTC 显示，网关同时下发 `serverOffset`（服务器时间与 UTC 的差），`getServerTime` 用它对齐，所以图上的时间、日线分组和 MT5 终端一致，底部时钟显示的是服务器时间。
 
+**点「更新」提示检查失败 / 一直显示已是最新版本**
+先确认 <https://github.com/yixin8875/mytrade/releases> 已有 release，并且该 release 里上传了 `latest.json`；没有 release 时更新接口会返回 404。网络需要能访问 `github.com`，公司代理或离线环境会检查失败。
+
 **TradingView 的 `createOrderLine` 报 “only available on Trading Platform”**
 本地这个包是 Charting Library（Advanced Charts），官方下单线/持仓线属于券商版 Trading Platform 的功能。项目改用绘图层 `horizontal_line` 实现同样的可拖动价格线，见 `src/chart/tv/priceLines.ts`。
 
@@ -312,4 +337,4 @@ mytrade/
 - P1：指标模板、布局保存（本地库已就绪）、日志收益曲线图。**TradingView 库不得提交到公开仓库**，授权边界见 [docs/TRADINGVIEW_LIBRARY.md](docs/TRADINGVIEW_LIBRARY.md)
 - P2：若拿到 Trading Platform（Broker API）授权，把 `priceLines.ts` 换成官方 `createOrderLine`/`createPositionLine`，并加成交箭头
 - P3：完善对账、崩溃恢复、日亏基准、EA 执行通道
-- P4：网关 PyInstaller sidecar、自动更新、DOM、更多图表布局、执行质量趋势图
+- P4：网关 PyInstaller sidecar、DOM、更多图表布局、执行质量趋势图

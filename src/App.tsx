@@ -11,6 +11,7 @@ import { PositionsPanel } from './components/PositionsPanel';
 import { StatusBar } from './components/StatusBar';
 import { Toast } from './components/Toast';
 import { TopBar } from './components/TopBar';
+import { UpdatePanel } from './components/UpdatePanel';
 import { WatchlistPanel } from './components/WatchlistPanel';
 import { primaryWidget } from './chart/tv/registry';
 import { gateway } from './gateway/client';
@@ -250,6 +251,7 @@ export default function App() {
       <JournalPanel />
       <ExecutionModal />
       <AuditModal />
+      <UpdatePanel />
       <StatusBar />
       <Toast />
     </div>

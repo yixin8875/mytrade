@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
-import { Moon, Sun } from 'lucide-react';
+import { Moon, RefreshCw, Sun } from 'lucide-react';
 import { gateway } from '../gateway/client';
+import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, spreadPoints } from '../lib/format';
 import type { RiskStatus } from '../gateway/types';
@@ -216,6 +217,16 @@ export function TopBar() {
         >
           审计
         </button>
+        {isUpdateUiAvailable() && (
+          <button
+            onClick={() => void checkForUpdates(true)}
+            title="检查 GitHub 上的新版本"
+            className="flex h-6 items-center gap-1 rounded bg-tv-bg px-1.5 text-[10px] text-tv-text hover:bg-tv-border"
+          >
+            <RefreshCw size={11} />
+            更新
+          </button>
+        )}
       </div>
 
       <div className="h-5 w-px bg-tv-border" />

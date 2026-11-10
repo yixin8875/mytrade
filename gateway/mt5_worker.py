@@ -336,7 +336,7 @@ class Mt5Worker:
             "risk": self._risk,
             "serverTime": int(time.time()),
             "serverOffset": int(self._server_offset),
-            "version": "0.1.0",
+            "version": "0.2.0",
         }
 
     # ---------- dispatch ----------

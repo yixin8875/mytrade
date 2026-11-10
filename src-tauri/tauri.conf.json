@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "MyTrade",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.mytrade.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -26,9 +26,18 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE0OERGMjY4QkM5RTFFOTYKUldTV0hwNjhhUEtOcElWZUNLOGZoT1g4WVV6OFJpUmZlM1hCOU4rdkk0UkJ0dE1rZGZnYSs4Y0kK",
+      "endpoints": [
+        "https://github.com/yixin8875/mytrade/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

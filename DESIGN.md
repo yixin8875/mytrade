@@ -415,6 +415,13 @@ draft → validating → sending → accepted → working → filled
 - `audit.query {date, kind, text, limit}` 读 UTC 日期 JSONL，kind 前缀过滤、text 整行模糊匹配，返回最新 N 条。
 - 图表右侧小块按 y 坐标分组，18px 内的多个小块围绕组中心上下错行，避免同价位持仓/挂单重叠。
 
+### 6.11 桌面自动更新
+
+- Tauri 2 的 `tauri-plugin-updater` + `tauri-plugin-process`；`tauri.conf.json` 的 `plugins.updater` 指向 GitHub Releases 的 `latest.json`，Windows 更新包是签名的 NSIS `-setup.exe`，签名文件同名 `.sig`。
+- 前端 `src/lib/updater.ts` 封装 `check()` / `downloadAndInstall()` / `relaunch()`；`UpdatePanel` 启动 6 秒后静默检查（离线或没有 release 时不打扰），顶部「更新」手动检查。下载显示百分比与已下载大小，安装完成后自动重启。
+- 发布用 `scripts/release.mjs`：本机 `tauri build`（`bundle.createUpdaterArtifacts`）→ 读取 NSIS `.exe` 与 `.sig` → 生成 `latest.json`（`version / notes / pub_date / platforms.windows-x86_64.signature+url`）→ 通过 GitHub API 创建 release 并上传资产。私钥只在 `~/.tauri/mytrade.key`，公钥写在仓库配置里。
+- `public/charting_library/` 不提交到 Git，因此发布只能在装有该库的本机构建；第一次需要手动安装带 updater 的版本，之后才能自动更新。
+
 ---
 
 ## 7. 数据模型（前端）
@@ -548,7 +555,10 @@ mytrade/
 │  │  └─ settings.ts
 │  └─ lib/
 │     ├─ format.ts
-│     └─ time.ts
+│     ├─ time.ts
+│     └─ updater.ts              # GitHub Releases 自动更新
+├─ scripts/
+│  └─ release.mjs                # 构建签名安装包 + latest.json + 发布
 ├─ src-tauri/
 │  ├─ tauri.conf.json
 │  └─ src/main.rs                # sidecar 启动/退出

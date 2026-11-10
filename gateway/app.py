@@ -60,7 +60,7 @@ async def lifespan(_: FastAPI):
     log.info("MT5 worker stopped")
 
 
-app = FastAPI(title="MyTrade Gateway", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="MyTrade Gateway", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
