@@ -20,7 +20,19 @@ export type SidebarTab = 'positions' | 'orders' | 'watchlist';
 export type ChartLayout = 'single' | 'quad';
 export type Theme = 'dark' | 'light';
 
+/** 控制台页面：概览 / 交易台 / 交易日志 / 统计报表 / 设置 */
+export type Page = 'overview' | 'trade' | 'journal' | 'reports' | 'settings';
+
+export const PAGES: Page[] = ['overview', 'trade', 'journal', 'reports', 'settings'];
+
+/** 用 hash 记住当前页，刷新或从图表 iframe 回来都不会丢 */
+export function routeFromHash(): Page {
+  const raw = window.location.hash.replace(/^#\/?/, '');
+  return (PAGES as string[]).includes(raw) ? (raw as Page) : 'overview';
+}
+
 interface AppStore {
+  page: Page;
   conn: ConnState;
   health: GatewayHealth | null;
   latency: number | null;
@@ -41,10 +53,8 @@ interface AppStore {
   /** 价格告警与通知偏好 */
   alerts: PriceAlert[];
   alertsOpen: boolean;
-  journalOpen: boolean;
   executionOpen: boolean;
   auditOpen: boolean;
-  settingsOpen: boolean;
   /** 下单模板：0.5% 风险 + 2R 止盈 + 1R 自动保本 */
   templateArmed: boolean;
   layout: ChartLayout;
@@ -62,6 +72,7 @@ interface AppStore {
   sidebarTab: SidebarTab;
   toast: Toast | null;
 
+  setPage: (page: Page) => void;
   setConn: (conn: ConnState) => void;
   setHealth: (health: GatewayHealth | null) => void;
   setLatency: (latency: number | null) => void;
@@ -79,10 +90,8 @@ interface AppStore {
   setRiskStatus: (riskStatus: RiskStatus | null) => void;
   setAlerts: (alerts: PriceAlert[]) => void;
   setAlertsOpen: (open: boolean) => void;
-  setJournalOpen: (open: boolean) => void;
   setExecutionOpen: (open: boolean) => void;
   setAuditOpen: (open: boolean) => void;
-  setSettingsOpen: (open: boolean) => void;
   setTemplateArmed: (armed: boolean) => void;
   setLayout: (layout: ChartLayout) => void;
   setTheme: (theme: Theme) => void;
@@ -191,6 +200,7 @@ function loadTag(): string {
 let toastSeq = 0;
 
 export const useApp = create<AppStore>((set, get) => ({
+  page: routeFromHash(),
   conn: 'closed',
   health: null,
   latency: null,
@@ -207,10 +217,8 @@ export const useApp = create<AppStore>((set, get) => ({
   riskStatus: null,
   alerts: [],
   alertsOpen: false,
-  journalOpen: false,
   executionOpen: false,
   auditOpen: false,
-  settingsOpen: false,
   templateArmed: false,
   layout: loadLayout(),
   theme: readJson<Theme>(THEME_KEY, 'dark') === 'light' ? 'light' : 'dark',
@@ -223,6 +231,11 @@ export const useApp = create<AppStore>((set, get) => ({
   sidebarTab: 'positions',
   toast: null,
 
+  setPage: (page) => {
+    const hash = `#/${page}`;
+    if (window.location.hash !== hash) window.location.hash = hash;
+    set({ page });
+  },
   setConn: (conn) => set({ conn }),
   setHealth: (health) => set({ health }),
   setLatency: (latency) => set({ latency }),
@@ -261,21 +274,8 @@ export const useApp = create<AppStore>((set, get) => ({
   setRiskStatus: (riskStatus) => set({ riskStatus }),
   setAlerts: (alerts) => set({ alerts }),
   setAlertsOpen: (alertsOpen) => set({ alertsOpen }),
-  setJournalOpen: (journalOpen) => set({ journalOpen }),
   setExecutionOpen: (executionOpen) => set({ executionOpen }),
   setAuditOpen: (auditOpen) => set({ auditOpen }),
-  setSettingsOpen: (settingsOpen) =>
-    set({
-      settingsOpen,
-      ...(settingsOpen
-        ? {
-            alertsOpen: false,
-            journalOpen: false,
-            executionOpen: false,
-            auditOpen: false,
-          }
-        : {}),
-    }),
   setTemplateArmed: (templateArmed) => set({ templateArmed }),
   setLayout: (layout) => {
     writeJson(LAYOUT_KEY, layout);
@@ -335,7 +335,6 @@ export function handleGlobalShortcut(event: KeyboardEvent): void {
 
   if (event.key === 'Escape') {
     state.setAlertsOpen(false);
-    state.setJournalOpen(false);
     state.setExecutionOpen(false);
     state.setAuditOpen(false);
     if (state.draft.active) state.patchDraft({ active: false });
@@ -348,8 +347,9 @@ export function handleGlobalShortcut(event: KeyboardEvent): void {
   } catch {
     root = document;
   }
-  // 确认窗/弹窗开着时不要改草稿
+  // 确认窗/弹窗开着、或不在交易台时不要改草稿
   if (root.querySelector('[data-modal], [data-confirm]')) return;
+  if (state.page !== 'trade') return;
 
   const key = event.key.toLowerCase();
   if (key !== 'b' && key !== 's') return;

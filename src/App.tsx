@@ -1,10 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { AlertsModal } from './components/AlertsModal';
 import { AuditModal } from './components/AuditModal';
 import { ChartGrid } from './components/ChartGrid';
+import { ConsoleShell } from './components/ConsoleShell';
 import { ExecutionModal } from './components/ExecutionModal';
-import { JournalPanel } from './components/JournalPanel';
 import { OrderTicket } from './components/OrderTicket';
 import { OrdersPanel } from './components/OrdersPanel';
 import { PositionsPanel } from './components/PositionsPanel';
@@ -14,10 +14,13 @@ import { Toast } from './components/Toast';
 import { TopBar } from './components/TopBar';
 import { UpdatePanel } from './components/UpdatePanel';
 import { WatchlistPanel } from './components/WatchlistPanel';
+import { Overview } from './views/Overview';
+import { JournalView } from './views/Journal';
+import { ReportsView } from './views/Reports';
 import { primaryWidget } from './chart/tv/registry';
 import { gateway } from './gateway/client';
 import { beep, desktopNotify } from './lib/alert';
-import { handleGlobalShortcut, useApp, type SidebarTab } from './store/useApp';
+import { handleGlobalShortcut, routeFromHash, useApp, type SidebarTab } from './store/useApp';
 import type {
   Account,
   AlertEvent,
@@ -179,6 +182,28 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleGlobalShortcut);
   }, []);
 
+  const page = useApp((s) => s.page);
+  const setPage = useApp((s) => s.setPage);
+  /** 交易台首次进入后才挂载，之后一直保留，切页不丢图表状态 */
+  const [tradeMounted, setTradeMounted] = useState(page === 'trade');
+
+  useEffect(() => {
+    const onHash = () => setPage(routeFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [setPage]);
+
+  useEffect(() => {
+    if (page === 'trade') setTradeMounted(true);
+  }, [page]);
+
+  // 图表在 display:none 期间可能被压成 0 宽，回来时让它重新量一次
+  useEffect(() => {
+    if (page !== 'trade') return;
+    const timer = window.setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+    return () => window.clearTimeout(timer);
+  }, [page]);
+
   const symbol = useApp((s) => s.symbol);
   const conn = useApp((s) => s.conn);
   const sidebarTab = useApp((s) => s.sidebarTab);
@@ -211,51 +236,65 @@ export default function App() {
   }, [symbol]);
 
   return (
-    <div className="flex h-full flex-col bg-tv-bg text-tv-text">
-      <TopBar />
-      <div className="flex min-h-0 flex-1">
-        <main className="relative min-w-0 flex-1">
-          <ChartGrid />
-        </main>
-        <aside className="flex w-[320px] shrink-0 flex-col border-l border-tv-border bg-tv-panel">
-          <OrderTicket />
-          <div className="flex shrink-0 border-y border-tv-border bg-tv-bg/40">
-            {(
-              [
-                ['positions', `持仓 ${positionsCount}`],
-                ['orders', `挂单 ${ordersCount}`],
-                ['watchlist', `自选 ${watchCount}`],
-              ] as [SidebarTab, string][]
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setSidebarTab(value)}
-                className={clsx(
-                  'h-7 flex-1 text-[10px] transition-colors',
-                  sidebarTab === value
-                    ? 'bg-tv-panel text-tv-text'
-                    : 'text-tv-muted hover:text-tv-text',
-                )}
-              >
-                {label}
-              </button>
-            ))}
+    <ConsoleShell>
+      {page === 'overview' && <Overview onNavigate={setPage} />}
+
+      {tradeMounted && (
+        <div
+          className={clsx(
+            'min-h-0 flex-1 flex-col bg-tv-bg text-tv-text',
+            page === 'trade' ? 'flex' : 'hidden',
+          )}
+        >
+          <TopBar />
+          <div className="flex min-h-0 flex-1">
+            <main className="relative min-w-0 flex-1">
+              <ChartGrid />
+            </main>
+            <aside className="flex w-[320px] shrink-0 flex-col border-l border-tv-border bg-tv-panel">
+              <OrderTicket />
+              <div className="flex shrink-0 border-y border-tv-border bg-tv-bg/40">
+                {(
+                  [
+                    ['positions', `持仓 ${positionsCount}`],
+                    ['orders', `挂单 ${ordersCount}`],
+                    ['watchlist', `自选 ${watchCount}`],
+                  ] as [SidebarTab, string][]
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    onClick={() => setSidebarTab(value)}
+                    className={clsx(
+                      'h-7 flex-1 text-[10px] transition-colors',
+                      sidebarTab === value
+                        ? 'bg-tv-panel text-tv-text'
+                        : 'text-tv-muted hover:text-tv-text',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto">
+                {sidebarTab === 'positions' && <PositionsPanel />}
+                {sidebarTab === 'orders' && <OrdersPanel />}
+                {sidebarTab === 'watchlist' && <WatchlistPanel />}
+              </div>
+            </aside>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto">
-            {sidebarTab === 'positions' && <PositionsPanel />}
-            {sidebarTab === 'orders' && <OrdersPanel />}
-            {sidebarTab === 'watchlist' && <WatchlistPanel />}
-          </div>
-        </aside>
-      </div>
+          <StatusBar />
+        </div>
+      )}
+
+      {page === 'journal' && <JournalView />}
+      {page === 'reports' && <ReportsView />}
+      {page === 'settings' && <SettingsPanel />}
+
       <AlertsModal />
-      <JournalPanel />
       <ExecutionModal />
       <AuditModal />
-      <SettingsPanel />
       <UpdatePanel />
-      <StatusBar />
       <Toast />
-    </div>
+    </ConsoleShell>
   );
 }

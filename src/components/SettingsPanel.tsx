@@ -166,40 +166,25 @@ function validateRisk(form: RiskForm): string | null {
   return null;
 }
 
-/** 桌面版设置页：覆盖在交易台之上，图表保持挂载，关闭后回到原状态 */
+/** 设置页：控制台中的一个整页，分区导航在页内左侧 */
 export function SettingsPanel() {
-  const open = useApp((s) => s.settingsOpen);
-  const setOpen = useApp((s) => s.setSettingsOpen);
+  const setPage = useApp((s) => s.setPage);
   const [section, setSection] = useState<SectionId>('appearance');
-
-  useEffect(() => {
-    if (!open) {
-      setSection('appearance');
-      return;
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopPropagation();
-      setOpen(false);
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, setOpen]);
-
-  if (!open) return null;
 
   const active = NAV.find((item) => item.id === section) ?? NAV[0];
 
   return (
-    <div data-page="settings" className="fixed inset-0 z-40 flex bg-tv-bg text-tv-text">
-      <aside className="flex w-[212px] shrink-0 flex-col border-r border-tv-border bg-tv-panel/70 px-3 py-4">
+    <div
+      data-page="settings"
+      className="console-scope flex h-full min-h-0 bg-console-canvas text-tv-text"
+    >
+      <aside className="flex w-[190px] shrink-0 flex-col border-r border-tv-border px-3 py-5">
         <div className="px-2">
-          <div className="text-[15px] font-semibold">设置</div>
+          <div className="text-[13px] font-semibold">设置</div>
           <div className="mt-0.5 text-[10px] text-tv-muted">MyTrade · MT5</div>
         </div>
 
-        <nav className="mt-6 space-y-0.5">
+        <nav className="mt-5 space-y-0.5">
           {NAV.map((item) => {
             const Icon = item.icon;
             return (
@@ -209,8 +194,8 @@ export function SettingsPanel() {
                 className={clsx(
                   'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors',
                   section === item.id
-                    ? 'bg-tv-bg text-tv-text'
-                    : 'text-tv-muted hover:bg-tv-bg/70 hover:text-tv-text',
+                    ? 'bg-tv-panel font-medium text-tv-text shadow-sm'
+                    : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
                 )}
               >
                 <Icon size={14} />
@@ -222,23 +207,23 @@ export function SettingsPanel() {
         </nav>
 
         <div className="mt-auto space-y-2 px-1">
-          <div className="rounded-lg border border-tv-border bg-tv-bg/50 p-2.5 text-[10px] leading-relaxed text-tv-muted">
+          <div className="rounded-lg border border-tv-border bg-tv-panel p-2.5 text-[10px] leading-relaxed text-tv-muted">
             设置保存在本机，不会上传。
           </div>
           <button
-            onClick={() => setOpen(false)}
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg bg-tv-bg text-[11px] text-tv-text hover:bg-tv-border"
+            onClick={() => setPage('overview')}
+            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-tv-border bg-tv-panel text-[11px] text-tv-text hover:bg-tv-hover"
           >
             <X size={12} />
-            返回交易台
+            返回概览
           </button>
         </div>
       </aside>
 
       <main className="min-w-0 flex-1 overflow-auto">
-        <div className="mx-auto max-w-[780px] px-8 py-8">
-          <header className="mb-6">
-            <h1 className="text-[24px] font-semibold tracking-tight">{active.label}</h1>
+        <div className="mx-auto max-w-[780px] px-8 py-7">
+          <header className="mb-5">
+            <h1 className="text-[22px] font-semibold tracking-tight">{active.label}</h1>
             <p className="mt-1 text-[11px] text-tv-muted">{active.hint}</p>
           </header>
 

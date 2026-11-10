@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
-import { RefreshCw, Settings as SettingsIcon } from 'lucide-react';
 import { gateway } from '../gateway/client';
-import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, spreadPoints } from '../lib/format';
 import type { RiskStatus } from '../gateway/types';
@@ -59,12 +57,6 @@ export function TopBar() {
   const notify = useApp((s) => s.notify);
   const layout = useApp((s) => s.layout);
   const setLayout = useApp((s) => s.setLayout);
-  const alerts = useApp((s) => s.alerts);
-  const setAlertsOpen = useApp((s) => s.setAlertsOpen);
-  const setJournalOpen = useApp((s) => s.setJournalOpen);
-  const setExecutionOpen = useApp((s) => s.setExecutionOpen);
-  const setAuditOpen = useApp((s) => s.setAuditOpen);
-  const setSettingsOpen = useApp((s) => s.setSettingsOpen);
   const [confirmKill, setConfirmKill] = useState(false);
 
   const info = symbols.find((item) => item.name === symbol);
@@ -88,7 +80,6 @@ export function TopBar() {
   };
 
   const halted = !!riskStatus?.halted;
-  const activeAlerts = alerts.filter((item) => item.enabled).length;
 
   const killSwitch = async () => {
     if (!terminal) {
@@ -167,66 +158,13 @@ export function TopBar() {
         </div>
       )}
 
-      <div className="flex items-center gap-1">
-        <button
-          onClick={() => setLayout(layout === 'single' ? 'quad' : 'single')}
-          title={layout === 'single' ? '切换 2×2 多周期同屏（十字线联动）' : '回到单图'}
-          className="h-6 rounded bg-tv-bg px-2 text-[10px] text-tv-text hover:bg-tv-border"
-        >
-          {layout === 'single' ? '四图' : '单图'}
-        </button>
-        <button
-          onClick={() => setAlertsOpen(true)}
-          title="价格告警：声音 / 桌面通知 / 第三方推送"
-          className={clsx(
-            'h-6 rounded px-2 text-[10px] transition-colors',
-            activeAlerts > 0
-              ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
-              : 'bg-tv-bg text-tv-text hover:bg-tv-border',
-          )}
-        >
-          告警{activeAlerts > 0 ? ` ${activeAlerts}` : ''}
-        </button>
-        <button
-          onClick={() => setJournalOpen(true)}
-          title="交易日志与统计"
-          className="h-6 rounded bg-tv-bg px-2 text-[10px] text-tv-text hover:bg-tv-border"
-        >
-          日志
-        </button>
-        <button
-          onClick={() => setExecutionOpen(true)}
-          title="执行质量：点差、滑点、成交延迟、拒单原因"
-          className="h-6 rounded bg-tv-bg px-2 text-[10px] text-tv-text hover:bg-tv-border"
-        >
-          执行
-        </button>
-        <button
-          onClick={() => setAuditOpen(true)}
-          title="审计日志查询与手动对账"
-          className="h-6 rounded bg-tv-bg px-2 text-[10px] text-tv-text hover:bg-tv-border"
-        >
-          审计
-        </button>
-        {isUpdateUiAvailable() && (
-          <button
-            onClick={() => void checkForUpdates(true)}
-            title="检查 GitHub 上的新版本"
-            className="flex h-6 items-center gap-1 rounded bg-tv-bg px-1.5 text-[10px] text-tv-text hover:bg-tv-border"
-          >
-            <RefreshCw size={11} />
-            更新
-          </button>
-        )}
-        <button
-          onClick={() => setSettingsOpen(true)}
-          title="设置：外观、图表、风控、告警、更新"
-          className="flex h-6 items-center gap-1 rounded bg-tv-bg px-1.5 text-[10px] text-tv-text hover:bg-tv-border"
-        >
-          <SettingsIcon size={11} />
-          设置
-        </button>
-      </div>
+      <button
+        onClick={() => setLayout(layout === 'single' ? 'quad' : 'single')}
+        title={layout === 'single' ? '切换 2×2 多周期同屏（十字线联动）' : '回到单图'}
+        className="h-6 rounded bg-tv-bg px-2 text-[10px] text-tv-text hover:bg-tv-border"
+      >
+        {layout === 'single' ? '四图' : '单图'}
+      </button>
 
       <div className="h-5 w-px bg-tv-border" />
 
