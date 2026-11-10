@@ -116,6 +116,7 @@ npm run release -- --notes "这一版改了什么"
 | 快捷键（B/S 市价、Esc 取消）与下单模板（0.5% + 2R + 1R 自动保本） | ✅ |
 | 执行质量：点差、滑点、成交延迟 P50/P90、拒单原因 | ✅ |
 | 审计日志查询、手动对账、同价位小块自动错行 | ✅ |
+| 多账户：顶部切换 MT5 终端，日志/告警/执行统计按账户隔离 | ✅ |
 | 断线自动重连、MT5 重启后按 clientOrderId 对账 | ✅ |
 | TradingView Charting Library 完整界面 | ✅ 本地库（v32，勿提交） |
 | 实盘交易 | ❌ 默认关闭，需改 `gateway/config.json` |
@@ -157,7 +158,7 @@ npm run release -- --notes "这一版改了什么"
 
 ### 价格告警
 
-- 顶部「告警」新建：选品种、方向上穿/下穿、触发价、备注，可设置重复提醒与冷却秒数。打开时默认填入当前十字线价格或买价。
+- 顶栏铃铛打开图表右侧的告警面板：选品种、方向上穿/下穿、触发价、备注，可设置重复提醒与冷却秒数。打开时默认填入当前十字线价格或买价；面板覆盖在图表上，不挤压图表，也不再单独弹窗。
 - 网关每 0.5 秒检查一次报价，越线后通过 WebSocket 广播；前端按「声音」「桌面通知」开关播放提示音、弹系统通知（首次会请求浏览器通知权限）。
 - 第三方通道在 `gateway/config.json` 的 `alert_channels` 里配置，支持 `webhook` / `discord` / `telegram` / `wecom`，见[配置](#配置)。密钥只留在网关配置文件里，前端只能看到通道名称。
 - 本期不含经济数据日历。
@@ -198,7 +199,7 @@ npm run release -- --notes "这一版改了什么"
 
 ### 执行质量
 
-- 顶部「执行」打开，统计最近 7 / 30 / 90 天实际发往 MT5 的下单请求：
+- 左侧「记录 → 执行质量」独立页面，统计最近 7 / 30 / 90 天实际发往 MT5 的下单请求：
   - 平均点差、平均滑点（正数 = 对你不利）、滑点为不利方向的占比、最大滑点；
   - 成交延迟 P50 / P90 / 最慢；
   - 按品种的请求数、拒单数、平均点差/滑点/延迟；
@@ -210,7 +211,7 @@ npm run release -- --notes "这一版改了什么"
 
 - 前端 WebSocket 断开后自动重连（最长 5 秒间隔），状态栏显示「自动重连中」；重连成功会重新拉取账户、持仓、挂单、风控与告警。
 - 网关与 MT5 断开后每 3 秒重连；连上时把 `sending/unknown` 的意图按 `clientOrderId` 与挂单、持仓、最近 7 天成交重新对账，并写审计。
-- 顶部「审计」可按 UTC 日期、类型前缀、文本查询 `gateway/audit/YYYY-MM-DD.jsonl`，展开看完整 payload；「立即对账」手动触发一次对账，显示检查/找到/未找到数量。
+- 左侧「记录 → 审计日志」独立页面，可按 UTC 日期、类型前缀、文本查询 `gateway/audit/YYYY-MM-DD.jsonl`，展开看完整 payload；「立即对账」手动触发一次对账，显示检查/找到/未找到数量。
 - 同一价格附近的多笔持仓/挂单，右边缘小块会竖直错行（每行 18px），不会叠在一起。
 
 ---
@@ -255,6 +256,8 @@ cp gateway/config.example.json gateway/config.json
 |---|---|---|
 | `terminal_path` | 空 | 固定连接的 `terminal64.exe` 路径；同时开着多个 MT5 时**必须**设置，否则可能连到别的终端/账户 |
 | `expected_login` | `0` | 期望登录的账户号，`0` = 不校验；非 0 时连错账户会报错并断开 |
+| `accounts` | `[]` | 多账户列表，每项对应一个已登录的 MT5 终端：`{"id","label","terminal_path","login","server"}`；为空时退回单终端配置 |
+| `active_account` | 空 | 上次选中的账户 `id`；空或找不到时使用 `accounts` 第一项 |
 | `trade_mode` | `readonly` | 启动时的模式，前端可切到 `demo` |
 | `allow_live` | `false` | 是否允许切换到实盘 |
 | `max_lot` | `0.5` | 单笔最大手数 |
@@ -270,6 +273,32 @@ cp gateway/config.example.json gateway/config.json
 | `magic` | `260511` | 订单魔术号，用于对账 |
 | `alert_channels` | `[]` | 告警外部通道，元素如 `{"type":"webhook","url":"https://example.invalid/hook"}`；也支持 `discord` / `telegram` / `wecom`。含密钥，只写在本文件，前端只显示通道名 |
 
+多账户示例（每个账户先单独打开并登录一个 MT5 终端，再填写对应 `terminal_path`）：
+
+```json
+{
+  "accounts": [
+    {
+      "id": "demo-a",
+      "label": "模拟 A",
+      "terminal_path": "C:/Program Files/MetaTrader 5 A/terminal64.exe",
+      "login": 10000001,
+      "server": "Broker-Demo"
+    },
+    {
+      "id": "demo-b",
+      "label": "模拟 B",
+      "terminal_path": "C:/Program Files/MetaTrader 5 B/terminal64.exe",
+      "login": 10000002,
+      "server": "Broker-Demo"
+    }
+  ],
+  "active_account": "demo-a"
+}
+```
+
+切换时网关会 `shutdown` 后重新 `initialize` 到目标终端，并用 `login` 校验；持仓不会被平掉，但移动止损与自动保本只管理当前账户。截图存到 `gateway/data/shots/<login>/`，旧截图仍可读取。新增或修改 `accounts` 后需重启网关。
+
 ---
 
 ## 目录
@@ -280,7 +309,8 @@ mytrade/
 │  ├─ chart/tv/            TradingView 适配：datafeed.ts（行情）、priceLines.ts（下单线/持仓线）、sync.ts（十字线联动）、registry.ts
 │  ├─ gateway/             WebSocket 客户端与类型
 │  ├─ lib/updater.ts       GitHub Releases 自动更新：检查、下载进度、安装重启
-│  ├─ components/          顶栏、图表、下单票、持仓、挂单、自选、日志、告警、执行质量、审计、更新提示、状态栏
+│  ├─ views/               概览、交易日志、统计报表、执行质量、审计日志、设置
+│  ├─ components/          顶栏、图表、下单票、持仓、挂单、自选、告警面板、更新提示、状态栏
 │  └─ store/               Zustand 状态
 ├─ gateway/                Python MT5 网关
 │  ├─ app.py               FastAPI + WebSocket

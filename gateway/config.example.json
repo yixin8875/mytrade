@@ -1,6 +1,16 @@
 {
   "terminal_path": "C:/Program Files/MetaTrader 5/terminal64.exe",
   "expected_login": 0,
+  "accounts": [
+    {
+      "id": "demo-a",
+      "label": "模拟 A",
+      "terminal_path": "C:/Program Files/MetaTrader 5 A/terminal64.exe",
+      "login": 10000001,
+      "server": "Broker-Demo"
+    }
+  ],
+  "active_account": "demo-a",
   "trade_mode": "readonly",
   "allow_live": false,
   "max_lot": 0.5,

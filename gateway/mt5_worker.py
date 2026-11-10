@@ -142,6 +142,7 @@ class Mt5Worker:
         self._stop = threading.Event()
         self._ready = threading.Event()
 
+        self._account_id = cfg.active_profile()["id"]
         self._connected = False
         self._last_error: dict | None = None
         self._account: dict | None = None
@@ -245,7 +246,9 @@ class Mt5Worker:
                         self._check_alerts()
                     if now - last_journal >= 2.0:
                         last_journal = now
-                        self._journal.sync()
+                        login = self._login()
+                        if login:
+                            self._journal.sync(login)
             except Exception as exc:  # noqa: BLE001
                 self._last_error = {"code": -1, "message": str(exc)}
 
@@ -253,15 +256,52 @@ class Mt5Worker:
 
     # ---------- connection ----------
 
+    def _profile(self) -> dict:
+        return self.cfg.active_profile()
+
+    def _login(self) -> int:
+        return int((self._account or {}).get("login") or 0)
+
+    def _accounts_payload(self) -> list[dict]:
+        active = self._account_id
+        out: list[dict] = []
+        for profile in self.cfg.account_profiles():
+            is_active = profile["id"] == active
+            connected = is_active and self._connected
+            login = int(profile["login"])
+            server = profile["server"]
+            if is_active and self._account:
+                login = int(self._account.get("login") or login)
+                server = str(self._account.get("server") or server)
+            out.append(
+                {
+                    "id": profile["id"],
+                    "label": profile["label"],
+                    "login": login,
+                    "server": server,
+                    "terminalPath": profile["terminal_path"],
+                    "active": is_active,
+                    "connected": connected,
+                }
+            )
+        return out
+
     def _try_connect(self) -> None:
         try:
             mt5.shutdown()
+            profile = self._profile()
+            self._account_id = profile["id"]
+            path = str(profile.get("terminal_path") or "")
+            expected = int(profile.get("login") or 0)
             kwargs: dict[str, Any] = {}
-            if self.cfg.terminal_path:
-                kwargs["path"] = self.cfg.terminal_path
+            if path:
+                kwargs["path"] = path
             if not mt5.initialize(**kwargs):
                 code, msg = mt5.last_error()
-                self._last_error = {"code": int(code), "message": str(msg)}
+                self._last_error = {
+                    "code": int(code),
+                    "message": f"账户「{profile['label']}」连接失败：{msg}",
+                }
                 return
             terminal = mt5.terminal_info()
             account = mt5.account_info()
@@ -269,29 +309,35 @@ class Mt5Worker:
                 self._last_error = {"code": -1, "message": "终端已启动但账户未登录"}
                 mt5.shutdown()
                 return
-            if self.cfg.expected_login and int(account.login) != int(self.cfg.expected_login):
+            if expected and int(account.login) != expected:
                 self._last_error = {
                     "code": "ACCOUNT_MISMATCH",
                     "message": (
-                        f"连接到了账户 {account.login}，配置期望 {self.cfg.expected_login}；"
-                        "请检查 gateway/config.json 的 terminal_path"
+                        f"账户「{profile['label']}」期望登录 {expected}，实际是 {account.login}；"
+                        "请检查 gateway/config.json 里该账户的 terminal_path"
                     ),
                 }
                 mt5.shutdown()
                 return
+            login = int(account.login)
+            try:
+                # 旧库没有账户维度，第一次连上真实账户时把历史数据归到该账户
+                self.store.migrate_legacy(login)
+            except Exception:  # noqa: BLE001 - 迁移失败不影响交易
+                pass
             self._connected = True
             self._last_error = None
             self._account = self._account_payload(account)
             self._sync_server_time()
             if not self._state_loaded:
                 self._state_loaded = True
-                self._halted = self.store.get_state("halted")
-                stored = self.store.get_state("trailing") or {}
+                self._halted = self.store.get_state("halted", login)
+                stored = self.store.get_state("trailing", login) or {}
                 try:
                     self._trailing = {int(k): v for k, v in stored.items()}
                 except (TypeError, ValueError):
                     self._trailing = {}
-                auto_be = self.store.get_state("autoBreakeven") or {}
+                auto_be = self.store.get_state("autoBreakeven", login) or {}
                 try:
                     self._auto_be = {int(k): v for k, v in auto_be.items()}
                 except (TypeError, ValueError):
@@ -300,17 +346,100 @@ class Mt5Worker:
             self._poll_account()
             self._reconcile()
             self._poll_risk(force=True)
-            self._alerts = self.store.alerts_list()
+            self._alerts = self.store.alerts_list(login)
             self._notifier.start()
             try:
-                self._journal.sync(force=True)
+                self._journal.sync(login, force=True)
             except Exception:  # noqa: BLE001 - 日志同步失败不影响交易
                 pass
             self._emit("gateway", self.health())
-            self.store.audit("gateway.connected", {"login": self._account.get("login")})
+            self.store.audit(
+                "gateway.connected", {"login": login, "accountId": profile["id"]}
+            )
         except Exception as exc:  # noqa: BLE001
             self._connected = False
             self._last_error = {"code": -1, "message": f"{type(exc).__name__}: {exc}"}
+
+    def _reset_for_switch(self) -> None:
+        """断开当前终端并清空账户相关内容，随后由 _try_connect 重新连到目标终端。"""
+        try:
+            mt5.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
+        self._connected = False
+        self._account = None
+        self._positions = []
+        self._orders = []
+        self._risk = None
+        self._last_error = None
+        self._halted = None
+        self._trailing = {}
+        self._trail_next = {}
+        self._auto_be = {}
+        self._alerts = []
+        self._alert_last = {}
+        self._watch_day = {}
+        self._subs.clear()
+        self._bar_subs.clear()
+        self._server_offset = 0
+        # 换账户后默认回到只读，避免把上一个账户的交易模式带过去
+        self._trade_mode = "readonly"
+        self._state_loaded = False
+        self._emit("positions", [])
+        self._emit("orders", [])
+        self._emit("gateway", self.health())
+
+    def _switch_account(self, p: dict) -> dict:
+        target = str(p.get("id") or "").strip()
+        profile = next(
+            (item for item in self.cfg.account_profiles() if item["id"] == target), None
+        )
+        if profile is None:
+            raise GatewayError("BAD_ACCOUNT", f"未知账户: {target}")
+        if self._positions and not bool(p.get("force")):
+            raise GatewayError(
+                "HAS_POSITIONS",
+                f"当前账户还有 {len(self._positions)} 个持仓，切换后移动止损和自动保本将停止管理",
+                {"positions": len(self._positions)},
+            )
+        if profile["id"] == self._account_id and self._connected:
+            return {
+                "activeId": self._account_id,
+                "account": self._account,
+                "accounts": self._accounts_payload(),
+                "health": self.health(),
+            }
+
+        try:
+            self.cfg.set_active_account(profile["id"])
+        except (ValueError, OSError) as exc:
+            raise GatewayError("CONFIG_SAVE", f"保存账户选择失败：{exc}") from exc
+
+        previous = self._account_id
+        self._account_id = profile["id"]
+        self.store.audit(
+            "account.switch",
+            {
+                "from": previous,
+                "to": profile["id"],
+                "label": profile["label"],
+                "login": profile["login"],
+            },
+        )
+        self._reset_for_switch()
+        self._try_connect()
+        if not self._connected:
+            message = str((self._last_error or {}).get("message") or "未知错误")
+            raise GatewayError(
+                "ACCOUNT_SWITCH_FAILED", f"已切换账户配置，但连接失败：{message}"
+            )
+        self._emit("gateway", self.health())
+        return {
+            "activeId": self._account_id,
+            "account": self._account,
+            "accounts": self._accounts_payload(),
+            "health": self.health(),
+        }
 
     def _set_config(self, p: dict) -> dict:
         """设置页保存风控字段；立即生效并写回 config.json。"""
@@ -344,6 +473,8 @@ class Mt5Worker:
             "connected": self._connected,
             "terminal": terminal,
             "account": self._account,
+            "accounts": self._accounts_payload(),
+            "activeAccountId": self._account_id,
             "tradeMode": self._trade_mode,
             "config": self.cfg.public(),
             "lastError": self._last_error,
@@ -377,10 +508,17 @@ class Mt5Worker:
             "bars.subscribe": self._bars_subscribe,
             "bars.unsubscribe": self._bars_unsubscribe,
             "account.get": lambda _: self._require_account(),
+            "accounts.list": lambda _: {
+                "activeId": self._account_id,
+                "accounts": self._accounts_payload(),
+            },
+            "account.switch": self._switch_account,
             "positions.get": lambda _: self._positions,
             "orders.get": lambda _: self._orders,
             "executions.get": self._executions,
-            "executions.stats": lambda p: self.store.execution_stats(int(p.get("days") or 30)),
+            "executions.stats": lambda p: self.store.execution_stats(
+                int(p.get("days") or 30), self._login()
+            ),
             "audit.query": lambda p: self.store.audit_query(
                 str(p.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")),
                 p.get("kind"),
@@ -399,18 +537,24 @@ class Mt5Worker:
             "position.close": self._close_position,
             "position.closeAll": self._close_all,
             "journal.list": self._journal_list,
-            "journal.stats": lambda p: self._journal.stats(int(p.get("days") or 30)),
+            "journal.stats": lambda p: self._journal.stats(
+                int(p.get("days") or 30), self._login()
+            ),
             "journal.tag": self._journal_tag,
-            "journal.sync": lambda _: {"written": self._journal.sync(force=True)},
+            "journal.sync": lambda _: {
+                "written": self._journal.sync(self._login(), force=True)
+            },
             "journal.screenshot.save": self._journal_shot,
-            "alerts.list": lambda _: self.store.alerts_list(),
+            "alerts.list": lambda _: self.store.alerts_list(self._login()),
             "alerts.create": self._alert_create,
             "alerts.update": self._alert_update,
             "alerts.delete": self._alert_delete,
             "alerts.test": self._alert_test,
             "watchlist.get": self._watchlist,
             "watchlist.set": self._watchlist_set,
-            "intents.list": lambda p: self.store.recent_intents(int(p.get("limit") or 50)),
+            "intents.list": lambda p: self.store.recent_intents(
+                int(p.get("limit") or 50), self._login()
+            ),
             "audit.tail": lambda p: self.store.audit_tail(int(p.get("limit") or 50)),
         }
         handler = handlers.get(method)
@@ -594,7 +738,7 @@ class Mt5Worker:
         reason = str(p.get("reason") or "手动停机")
         close_all = bool(p.get("closeAll"))
         self._halted = {"reason": reason, "at": int(time.time())}
-        self.store.set_state("halted", self._halted)
+        self.store.set_state("halted", self._halted, self._login())
         self.store.audit("system.halt", {"reason": reason, "closeAll": close_all})
         closed: list[dict] = []
         if close_all:
@@ -608,7 +752,7 @@ class Mt5Worker:
 
     def _resume(self, p: dict) -> dict:
         self._halted = None
-        self.store.set_state("halted", None)
+        self.store.set_state("halted", None, self._login())
         self.store.audit("system.resume", {})
         self._poll_risk(force=True)
         self._emit("gateway", self.health())
@@ -619,29 +763,38 @@ class Mt5Worker:
     def _journal_list(self, p: dict) -> list[dict]:
         days = int(p.get("days") or 30)
         limit = min(1000, int(p.get("limit") or 200))
-        self._journal.sync()
+        login = self._login()
+        if login:
+            self._journal.sync(login)
         since = int(time.time()) - days * 86400 if days > 0 else 0
-        return self.store.journal_list(limit=limit, since=since)
+        return self.store.journal_list(limit=limit, since=since, login=login)
 
     def _journal_tag(self, p: dict) -> dict:
         position_id = int(p.get("positionId") or 0)
-        if not self.store.journal_get(position_id):
+        login = self._login()
+        if not self.store.journal_get(position_id, login):
             raise GatewayError("NO_TRADE", f"日志里没有这笔交易 {position_id}")
         tag = str(p.get("tag") or "").strip()[:40] or None
-        self.store.journal_set_tag(position_id, tag)
-        self.store.audit("journal.tag", {"positionId": position_id, "tag": tag})
-        return self.store.journal_get(position_id) or {}
+        self.store.journal_set_tag(position_id, tag, login)
+        self.store.audit(
+            "journal.tag", {"positionId": position_id, "tag": tag, "login": login}
+        )
+        return self.store.journal_get(position_id, login) or {}
 
     def _journal_shot(self, p: dict) -> dict:
         position_id = int(p.get("positionId") or 0)
         data = str(p.get("data") or "")
+        login = self._login()
         if position_id <= 0 or not data:
             raise GatewayError("BAD_SHOT", "缺少持仓号或截图数据")
         try:
-            out = self._journal.save_shot(position_id, data, p.get("meta"))
+            out = self._journal.save_shot(login, position_id, data, p.get("meta"))
         except ValueError as exc:
             raise GatewayError("BAD_SHOT", str(exc)) from exc
-        self.store.audit("journal.screenshot", {"positionId": position_id, "bytes": out["bytes"]})
+        self.store.audit(
+            "journal.screenshot",
+            {"positionId": position_id, "bytes": out["bytes"], "login": login},
+        )
         return out
 
     # ---------- 告警 ----------
@@ -659,6 +812,7 @@ class Mt5Worker:
             raise GatewayError("NO_SYMBOL", f"找不到品种 {symbol}")
         note = str(p.get("note") or "").strip()[:80] or None
         cooldown = max(0, int(_num(p.get("cooldownSec"), 60)))
+        login = self._login()
         alert = self.store.alert_create(
             symbol,
             kind,
@@ -666,14 +820,16 @@ class Mt5Worker:
             note,
             bool(p.get("repeat")),
             cooldown if p.get("repeat") else 0,
+            login,
         )
-        self._alerts = self.store.alerts_list()
+        self._alerts = self.store.alerts_list(login)
         self.store.audit("alert.create", alert)
         return alert
 
     def _alert_update(self, p: dict) -> dict:
         alert_id = int(p.get("id") or 0)
-        if not self.store.alert_get(alert_id):
+        login = self._login()
+        if not self.store.alert_get(alert_id, login):
             raise GatewayError("NO_ALERT", f"找不到告警 {alert_id}")
         fields: dict[str, Any] = {}
         for key in ("kind", "note", "price"):
@@ -686,15 +842,16 @@ class Mt5Worker:
                 fields[key] = 1 if p[key] else 0
         if "cooldownSec" in p:
             fields["cooldown_sec"] = max(0, int(_num(p.get("cooldownSec"), 60)))
-        alert = self.store.alert_update(alert_id, fields) or {}
-        self._alerts = self.store.alerts_list()
+        alert = self.store.alert_update(alert_id, fields, login) or {}
+        self._alerts = self.store.alerts_list(login)
         self.store.audit("alert.update", {"id": alert_id, "fields": fields})
         return alert
 
     def _alert_delete(self, p: dict) -> dict:
         alert_id = int(p.get("id") or 0)
-        self.store.alert_delete(alert_id)
-        self._alerts = self.store.alerts_list()
+        login = self._login()
+        self.store.alert_delete(alert_id, login)
+        self._alerts = self.store.alerts_list(login)
         self.store.audit("alert.delete", {"id": alert_id})
         return {"deleted": alert_id}
 
@@ -748,7 +905,9 @@ class Mt5Worker:
                 continue
             if repeat and triggered and now - triggered < float(alert.get("cooldown_sec") or 60):
                 continue
-            self.store.alert_mark_triggered(int(alert["id"]), disable=not repeat)
+            self.store.alert_mark_triggered(
+                int(alert["id"]), disable=not repeat, login=self._login()
+            )
             payload = {
                 "id": int(alert["id"]),
                 "symbol": symbol,
@@ -763,14 +922,17 @@ class Mt5Worker:
             self.store.audit("alert.triggered", payload)
             changed = True
         if changed:
-            self._alerts = self.store.alerts_list()
+            self._alerts = self.store.alerts_list(self._login())
 
     # ---------- 自选表 ----------
 
     def _watchlist(self, p: dict) -> list[dict]:
         names = [str(item).upper() for item in (p.get("symbols") or []) if str(item).strip()]
         if not names:
-            names = [str(item) for item in (self.store.get_state("watchlist") or [])]
+            names = [
+                str(item)
+                for item in (self.store.get_state("watchlist", self._login()) or [])
+            ]
         if not names:
             infos = mt5.symbols_get() or ()
             names = [info.name for info in infos if getattr(info, "visible", False)][:12]
@@ -803,7 +965,7 @@ class Mt5Worker:
     def _watchlist_set(self, p: dict) -> dict:
         names = [str(item).upper().strip() for item in (p.get("symbols") or []) if str(item).strip()]
         names = names[:50]
-        self.store.set_state("watchlist", names)
+        self.store.set_state("watchlist", names, self._login())
         return {"symbols": names}
 
     def _day_open(self, symbol: str) -> float:
@@ -1545,6 +1707,7 @@ class Mt5Worker:
 
     def _place(self, p: dict) -> dict:
         account = self._guard_trade()
+        login = self._login()
         a = self._analyze(p)
         client_id = str(p.get("clientOrderId") or f"mt-{int(time.time() * 1000)}")[:31]
 
@@ -1566,10 +1729,10 @@ class Mt5Worker:
             raise GatewayError("RISK_BLOCK", str(risk["blockReason"]))
         if a["freeMargin"] and a["margin"] > a["freeMargin"] * 0.9:
             raise GatewayError("NO_MARGIN", "保证金占用过高，拒绝下单")
-        if self.store.recent_duplicate(a["symbol"], a["side"], a["price"]):
+        if self.store.recent_duplicate(a["symbol"], a["side"], a["price"], login=login):
             raise GatewayError("DUPLICATE", "3 秒内已提交相同方向/价格的订单")
 
-        existing = self.store.get_intent(client_id)
+        existing = self.store.get_intent(client_id, login)
         if existing and existing["state"] in ("sending", "accepted", "working", "filled"):
             return {
                 "clientOrderId": client_id,
@@ -1580,6 +1743,7 @@ class Mt5Worker:
         self.store.save_intent(
             {
                 "client_id": client_id,
+                "login": login,
                 "symbol": a["symbol"],
                 "side": a["side"],
                 "type": a["type"],
@@ -1632,14 +1796,18 @@ class Mt5Worker:
             result = mt5.order_send(request)
         except Exception as exc:  # noqa: BLE001
             latency = int((time.perf_counter() - started) * 1000)
-            self.store.update_intent(client_id, "unknown", error=f"{type(exc).__name__}: {exc}")
+            self.store.update_intent(
+                client_id, "unknown", error=f"{type(exc).__name__}: {exc}", login=login
+            )
             self.store.audit("order.place.exception", {"clientId": client_id, "error": str(exc)})
             self._record_execution(client_id, 0, a, 0, latency, "unknown", f"{type(exc).__name__}: {exc}")
             raise GatewayError("SEND_FAILED", f"下单异常: {exc}") from exc
 
         latency = int((time.perf_counter() - started) * 1000)
         if result is None:
-            self.store.update_intent(client_id, "unknown", error=str(mt5.last_error()))
+            self.store.update_intent(
+                client_id, "unknown", error=str(mt5.last_error()), login=login
+            )
             self._record_execution(client_id, 0, a, 0, latency, "unknown", str(mt5.last_error()))
             raise GatewayError("SEND_FAILED", f"下单失败: {mt5.last_error()}")
         retcode = int(result.retcode)
@@ -1655,7 +1823,9 @@ class Mt5Worker:
         if retcode not in OK_RETCODES:
             self.store.audit("order.place.result", payload)
             message = RETCODE_TEXT.get(retcode, result.comment or "下单被拒绝")
-            self.store.update_intent(client_id, "rejected", error=f"{retcode}: {message}")
+            self.store.update_intent(
+                client_id, "rejected", error=f"{retcode}: {message}", login=login
+            )
             self._record_execution(
                 client_id, 0, a, payload["price"], latency, "rejected", f"{retcode}: {message}", retcode
             )
@@ -1668,7 +1838,9 @@ class Mt5Worker:
         self.store.audit("order.place.result", payload)
 
         state = "filled" if a["action"] == mt5.TRADE_ACTION_DEAL else "accepted"
-        self.store.update_intent(client_id, state, ticket=payload["order"] or None)
+        self.store.update_intent(
+            client_id, state, ticket=payload["order"] or None, login=login
+        )
         ticket = int(payload["order"] or 0)
         self._record_execution(
             client_id, ticket, a, payload["price"], latency, state, None, retcode
@@ -1715,6 +1887,7 @@ class Mt5Worker:
             self.store.record_execution(
                 {
                     "client_id": client_id,
+                    "login": self._login(),
                     "ticket": ticket or None,
                     "symbol": a["symbol"],
                     "side": a["side"],
@@ -1811,8 +1984,8 @@ class Mt5Worker:
         request = {"action": mt5.TRADE_ACTION_REMOVE, "order": ticket}
         result = mt5.order_send(request)
         out = self._result_or_raise(result, "order.cancel")
-        if comment and self.store.get_intent(comment):
-            self.store.update_intent(comment, "cancelled")
+        if comment and self.store.get_intent(comment, self._login()):
+            self.store.update_intent(comment, "cancelled", login=self._login())
         self._poll_trade_state()
         return out
 
@@ -1925,10 +2098,14 @@ class Mt5Worker:
         return {"ticket": ticket, "cleared": existed}
 
     def _save_trailing(self) -> None:
-        self.store.set_state("trailing", {str(k): v for k, v in self._trailing.items()})
+        self.store.set_state(
+            "trailing", {str(k): v for k, v in self._trailing.items()}, self._login()
+        )
 
     def _save_auto_be(self) -> None:
-        self.store.set_state("autoBreakeven", {str(k): v for k, v in self._auto_be.items()})
+        self.store.set_state(
+            "autoBreakeven", {str(k): v for k, v in self._auto_be.items()}, self._login()
+        )
 
     def _auto_breakeven(self) -> None:
         """模板开仓的自动保本：浮盈到 1R 时把止损移到开仓价。"""
@@ -2088,8 +2265,8 @@ class Mt5Worker:
         partial = volume < float(position.volume) - 1e-9
         comment = str(getattr(position, "comment", "") or "")
         still_open = bool(mt5.positions_get(ticket=ticket))
-        if comment and not still_open and self.store.get_intent(comment):
-            self.store.update_intent(comment, "closed")
+        if comment and not still_open and self.store.get_intent(comment, self._login()):
+            self.store.update_intent(comment, "closed", login=self._login())
         if partial and still_open and bool(p.get("moveToBe")):
             try:
                 out["breakeven"] = self._breakeven(
@@ -2161,7 +2338,8 @@ class Mt5Worker:
             )
         except Exception:  # noqa: BLE001
             deals = []
-        for intent in self.store.recent_intents(50):
+        login = self._login()
+        for intent in self.store.recent_intents(50, login):
             if intent["state"] not in ("sending", "unknown"):
                 continue
             stats["checked"] += 1
@@ -2191,11 +2369,17 @@ class Mt5Worker:
                     "accepted",
                     ticket=int(found.get("ticket") or 0),
                     error=None,
+                    login=login,
                 )
                 stats["found"] += 1
                 self.store.audit("reconcile.found", {"clientId": cid, "ticket": found.get("ticket")})
             else:
-                self.store.update_intent(cid, "not_found", error="重启后未在挂单/持仓/成交中找到")
+                self.store.update_intent(
+                    cid,
+                    "not_found",
+                    error="重启后未在挂单/持仓/成交中找到",
+                    login=login,
+                )
                 stats["notFound"] += 1
                 self.store.audit("reconcile.not_found", {"clientId": cid})
         return stats

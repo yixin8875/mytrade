@@ -742,10 +742,13 @@ function AboutSection() {
   const health = useApp((s) => s.health);
   const account = health?.account;
   const terminal = health?.terminal;
+  const accounts = health?.accounts ?? [];
+  const activeId = health?.activeAccountId ?? '';
+  const active = accounts.find((item) => item.id === activeId) ?? accounts[0] ?? null;
 
   return (
     <>
-      <Card title="连接" description="只显示连接状态与终端信息，不展示账户登录号或服务器。">
+      <Card title="连接" description="显示当前终端与账户连接状态，切换账户在顶部账户菜单。">
         <Row label="网关">
           <StatusPill ok={!!health?.connected} label={health?.connected ? '已连接' : '未连接'} />
         </Row>
@@ -774,9 +777,36 @@ function AboutSection() {
         </Row>
       </Card>
 
+      <Card
+        title="多账户"
+        description="在 gateway/config.json 的 accounts 里配置，每个账户对应一个已登录的 MT5 终端；切换在顶部账户菜单。新增或修改账户后需重启网关。"
+      >
+        <Row label="当前账户">
+          <span className="text-[11px]">
+            {active
+              ? `${active.label}${account?.login || active.login ? ` · ${account?.login ?? active.login}` : ''}${
+                  account?.server || active.server ? `@${account?.server ?? active.server}` : ''
+                }`
+              : '—'}
+          </span>
+        </Row>
+        <Row label="已配置">
+          <span className="text-[11px] text-tv-muted">{accounts.length} 个</span>
+        </Row>
+        {accounts.slice(0, 8).map((item) => (
+          <Row key={item.id} label={item.label}>
+            <span className={clsx('font-mono text-[10px]', item.id === activeId && 'text-tv-text')}>
+              {item.login || '未指定登录号'}
+              {item.server ? ` · ${item.server}` : ''}
+              {item.id === activeId ? ' · 当前' : ''}
+            </span>
+          </Row>
+        ))}
+      </Card>
+
       <Card title="本机数据" description="以下内容只保存在本机，不会上传。">
         <Row label="交易日志与截图">
-          <span className="font-mono text-[10px] text-tv-muted">gateway/data</span>
+          <span className="font-mono text-[10px] text-tv-muted">gateway/data（截图按账户号分目录）</span>
         </Row>
         <Row label="审计日志">
           <span className="font-mono text-[10px] text-tv-muted">gateway/audit</span>

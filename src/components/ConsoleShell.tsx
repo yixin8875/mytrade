@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import {
   Activity,
   BarChart3,
-  Bell,
   BookOpen,
   ChartCandlestick,
   FileClock,
@@ -30,6 +29,8 @@ const NAV: { label: string; items: { page: Page; label: string; icon: typeof Lay
       items: [
         { page: 'journal', label: '交易日志', icon: BookOpen },
         { page: 'reports', label: '统计报表', icon: BarChart3 },
+        { page: 'executions', label: '执行质量', icon: ShieldCheck },
+        { page: 'audit', label: '审计日志', icon: FileClock },
       ],
     },
   ];
@@ -43,29 +44,13 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   const account = useApp((s) => s.account);
   const positions = useApp((s) => s.positions);
   const orders = useApp((s) => s.orders);
-  const alerts = useApp((s) => s.alerts);
   const risk = useApp((s) => s.riskStatus);
-  const setAlertsOpen = useApp((s) => s.setAlertsOpen);
-  const setExecutionOpen = useApp((s) => s.setExecutionOpen);
-  const setAuditOpen = useApp((s) => s.setAuditOpen);
 
-  const activeAlerts = alerts.filter((item) => item.enabled).length;
   const mode = health?.tradeMode ?? 'readonly';
   const modeLabel = mode === 'readonly' ? '只读' : mode === 'demo' ? '模拟' : '实盘';
   const online = conn === 'open';
   const terminal = online && !!health?.connected;
   const updateAvailable = isUpdateUiAvailable();
-
-  const tools = [
-    {
-      label: '价格告警',
-      icon: Bell,
-      count: activeAlerts,
-      onClick: () => setAlertsOpen(true),
-    },
-    { label: '执行质量', icon: ShieldCheck, onClick: () => setExecutionOpen(true) },
-    { label: '审计日志', icon: FileClock, onClick: () => setAuditOpen(true) },
-  ];
 
   return (
     <div className="flex h-full min-h-0 bg-console-canvas text-console-ink">
@@ -137,26 +122,6 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
               </div>
             </div>
           ))}
-
-          <div>
-            <div className="console-label px-2 pb-1.5">工具</div>
-            <div className="space-y-0.5">
-              {tools.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button key={item.label} className="console-nav" onClick={item.onClick}>
-                    <Icon size={15} strokeWidth={1.8} className="shrink-0 text-console-muted" />
-                    <span className="flex-1">{item.label}</span>
-                    {item.count ? (
-                      <span className="rounded-full bg-console-warn-soft px-1.5 text-[9px] font-semibold text-console-warn">
-                        {item.count}
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </nav>
 
         <div className="mt-auto px-2.5 pb-3">

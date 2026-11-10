@@ -23,7 +23,8 @@ function fmtDuration(sec: number): string {
 
 /** 统计报表页：区间汇总、累计盈亏曲线与分品种 / 时段 / 策略表现 */
 export function ReportsView() {
-  const setExecutionOpen = useApp((s) => s.setExecutionOpen);
+  const setPage = useApp((s) => s.setPage);
+  const activeLogin = useApp((s) => s.account?.login ?? 0);
 
   const [days, setDays] = useState(30);
   const [stats, setStats] = useState<JournalStats | null>(null);
@@ -49,7 +50,7 @@ export function ReportsView() {
     return () => {
       alive = false;
     };
-  }, [days]);
+  }, [days, activeLogin]);
 
   const summary = stats?.summary;
   const curve = stats?.curve ?? [];
@@ -78,7 +79,7 @@ export function ReportsView() {
               ))}
             </div>
             <button
-              onClick={() => setExecutionOpen(true)}
+              onClick={() => setPage('executions')}
               className="console-btn console-btn-secondary"
             >
               <ShieldCheck size={13} />
@@ -187,7 +188,7 @@ export function ReportsView() {
               />
             </div>
             <button
-              onClick={() => setExecutionOpen(true)}
+              onClick={() => setPage('executions')}
               className="m-3 flex items-center justify-center gap-1.5 rounded-lg border border-console-line bg-white py-2 text-[11px] text-console-ink-2 hover:bg-console-hover"
             >
               查看执行质量（点差 / 滑点 / 延迟）

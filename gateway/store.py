@@ -25,6 +25,7 @@ class Store:
                 """
                 CREATE TABLE IF NOT EXISTS intents (
                     client_id TEXT PRIMARY KEY,
+                    login INTEGER NOT NULL DEFAULT 0,
                     symbol TEXT NOT NULL,
                     side TEXT NOT NULL,
                     type TEXT NOT NULL,
@@ -52,7 +53,8 @@ class Store:
             self._db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS journal (
-                    position_id INTEGER PRIMARY KEY,
+                    login INTEGER NOT NULL DEFAULT 0,
+                    position_id INTEGER NOT NULL,
                     symbol TEXT NOT NULL,
                     side TEXT NOT NULL,
                     volume REAL NOT NULL,
@@ -69,7 +71,8 @@ class Store:
                     tag TEXT,
                     closed_by TEXT,
                     has_shot INTEGER NOT NULL DEFAULT 0,
-                    recorded_at INTEGER NOT NULL
+                    recorded_at INTEGER NOT NULL,
+                    PRIMARY KEY (login, position_id)
                 )
                 """
             )
@@ -77,6 +80,7 @@ class Store:
                 """
                 CREATE TABLE IF NOT EXISTS alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    login INTEGER NOT NULL DEFAULT 0,
                     symbol TEXT NOT NULL,
                     kind TEXT NOT NULL,
                     price REAL NOT NULL,
@@ -95,6 +99,7 @@ class Store:
                 CREATE TABLE IF NOT EXISTS executions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     client_id TEXT NOT NULL,
+                    login INTEGER NOT NULL DEFAULT 0,
                     ticket INTEGER,
                     symbol TEXT NOT NULL,
                     side TEXT NOT NULL,
@@ -112,17 +117,118 @@ class Store:
                 )
                 """
             )
-            # 老库补一列：下单时填的策略标签
-            cols = {row["name"] for row in self._db.execute("PRAGMA table_info(intents)")}
-            if "tag" not in cols:
-                self._db.execute("ALTER TABLE intents ADD COLUMN tag TEXT")
+            self._migrate()
+
+    def _columns(self, table: str) -> set[str]:
+        return {row["name"] for row in self._db.execute(f"PRAGMA table_info({table})")}
+
+    def _migrate(self) -> None:
+        """补账户维度：旧表没有 login 列时迁移，journal 改成 (login, position_id) 复合主键。"""
+        for table in ("intents", "alerts", "executions"):
+            if "login" not in self._columns(table):
+                self._db.execute(
+                    f"ALTER TABLE {table} ADD COLUMN login INTEGER NOT NULL DEFAULT 0"
+                )
+        # 老库补一列：下单时填的策略标签
+        if "tag" not in self._columns("intents"):
+            self._db.execute("ALTER TABLE intents ADD COLUMN tag TEXT")
+        if "login" not in self._columns("journal"):
+            self._rebuild_journal()
+        self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_journal_login ON journal(login, close_time)"
+        )
+        self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_executions_login ON executions(login, created_at)"
+        )
+        self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_alerts_login ON alerts(login, id)"
+        )
+        self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_intents_login ON intents(login, created_at)"
+        )
+        self._db.commit()
+
+    def _rebuild_journal(self) -> None:
+        # DDL 也放进显式事务，避免迁移中途崩溃留下缺失的 journal 表
+        with self._db:
+            self._db.execute("ALTER TABLE journal RENAME TO journal_legacy")
+            self._db.execute(
+                """
+                CREATE TABLE journal (
+                    login INTEGER NOT NULL DEFAULT 0,
+                    position_id INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    volume REAL NOT NULL,
+                    entry_price REAL NOT NULL,
+                    exit_price REAL NOT NULL,
+                    profit REAL NOT NULL,
+                    swap REAL NOT NULL DEFAULT 0,
+                    commission REAL NOT NULL DEFAULT 0,
+                    open_time INTEGER NOT NULL,
+                    close_time INTEGER NOT NULL,
+                    duration_sec INTEGER NOT NULL,
+                    mfe REAL,
+                    mae REAL,
+                    tag TEXT,
+                    closed_by TEXT,
+                    has_shot INTEGER NOT NULL DEFAULT 0,
+                    recorded_at INTEGER NOT NULL,
+                    PRIMARY KEY (login, position_id)
+                )
+                """
+            )
+            self._db.execute(
+                """
+                INSERT INTO journal
+                    (login, position_id, symbol, side, volume, entry_price, exit_price, profit,
+                     swap, commission, open_time, close_time, duration_sec, mfe, mae, tag,
+                     closed_by, has_shot, recorded_at)
+                SELECT 0, position_id, symbol, side, volume, entry_price, exit_price, profit,
+                       swap, commission, open_time, close_time, duration_sec, mfe, mae, tag,
+                       closed_by, has_shot, recorded_at
+                FROM journal_legacy
+                """
+            )
+            self._db.execute("DROP TABLE journal_legacy")
+
+    @staticmethod
+    def _state_key(key: str, login: int) -> str:
+        return f"{int(login)}:{key}"
+
+    def migrate_legacy(self, login: int) -> None:
+        """把旧版没有账户维度的数据归到第一个连上的真实账户。"""
+        if login <= 0:
+            return
+        with self._lock:
+            for table in ("journal", "executions", "alerts", "intents"):
+                self._db.execute(
+                    f"UPDATE {table} SET login=? WHERE login=0",
+                    (int(login),),
+                )
+            for key in ("halted", "trailing", "autoBreakeven", "watchlist"):
+                scoped = self._state_key(key, login)
+                row = self._db.execute(
+                    "SELECT value FROM state WHERE key=?", (scoped,)
+                ).fetchone()
+                legacy = self._db.execute(
+                    "SELECT value FROM state WHERE key=?", (key,)
+                ).fetchone()
+                if legacy is not None:
+                    if row is None:
+                        self._db.execute(
+                            "UPDATE state SET key=? WHERE key=?", (scoped, key)
+                        )
+                    else:
+                        self._db.execute("DELETE FROM state WHERE key=?", (key,))
             self._db.commit()
 
     # ---------- 持久化的小状态（停机开关 / 移动止损计划） ----------
 
-    def get_state(self, key: str) -> Any:
+    def get_state(self, key: str, login: int = 0) -> Any:
+        scoped = self._state_key(key, login) if login else key
         with self._lock:
-            row = self._db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
+            row = self._db.execute("SELECT value FROM state WHERE key=?", (scoped,)).fetchone()
         if row is None or row["value"] is None:
             return None
         try:
@@ -130,17 +236,18 @@ class Store:
         except json.JSONDecodeError:
             return None
 
-    def set_state(self, key: str, value: Any) -> None:
+    def set_state(self, key: str, value: Any, login: int = 0) -> None:
+        scoped = self._state_key(key, login) if login else key
         with self._lock:
             if value is None:
-                self._db.execute("DELETE FROM state WHERE key=?", (key,))
+                self._db.execute("DELETE FROM state WHERE key=?", (scoped,))
             else:
                 self._db.execute(
                     """
                     INSERT INTO state (key, value, updated_at) VALUES (?, ?, ?)
                     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
                     """,
-                    (key, json.dumps(value, ensure_ascii=False), int(time.time())),
+                    (scoped, json.dumps(value, ensure_ascii=False), int(time.time())),
                 )
             self._db.commit()
 
@@ -152,8 +259,8 @@ class Store:
             self._db.execute(
                 """
                 INSERT INTO intents
-                    (client_id, symbol, side, type, volume, price, sl, tp, state, ticket, created_at, updated_at, error, tag)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (client_id, login, symbol, side, type, volume, price, sl, tp, state, ticket, created_at, updated_at, error, tag)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(client_id) DO UPDATE SET
                     state=excluded.state,
                     ticket=excluded.ticket,
@@ -163,6 +270,7 @@ class Store:
                 """,
                 (
                     intent["client_id"],
+                    int(intent.get("login") or 0),
                     intent["symbol"],
                     intent["side"],
                     intent["type"],
@@ -181,38 +289,51 @@ class Store:
             self._db.commit()
 
     def update_intent(
-        self, client_id: str, state: str, ticket: int | None = None, error: str | None = None
+        self,
+        client_id: str,
+        state: str,
+        ticket: int | None = None,
+        error: str | None = None,
+        login: int = 0,
     ) -> None:
         with self._lock:
             self._db.execute(
-                "UPDATE intents SET state=?, ticket=COALESCE(?, ticket), error=?, updated_at=? WHERE client_id=?",
-                (state, ticket, error, int(time.time()), client_id),
+                """UPDATE intents SET state=?, ticket=COALESCE(?, ticket), error=?, updated_at=?
+                   WHERE client_id=? AND login=?""",
+                (state, ticket, error, int(time.time()), client_id, int(login)),
             )
             self._db.commit()
 
-    def get_intent(self, client_id: str) -> dict[str, Any] | None:
+    def get_intent(self, client_id: str, login: int = 0) -> dict[str, Any] | None:
         with self._lock:
-            row = self._db.execute("SELECT * FROM intents WHERE client_id=?", (client_id,)).fetchone()
+            row = self._db.execute(
+                "SELECT * FROM intents WHERE client_id=? AND login=?",
+                (client_id, int(login)),
+            ).fetchone()
         return dict(row) if row else None
 
-    def recent_intents(self, limit: int = 50) -> list[dict[str, Any]]:
+    def recent_intents(self, limit: int = 50, login: int = 0) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT * FROM intents ORDER BY created_at DESC LIMIT ?", (int(limit),)
+                "SELECT * FROM intents WHERE login=? ORDER BY created_at DESC LIMIT ?",
+                (int(login), int(limit)),
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def recent_duplicate(self, symbol: str, side: str, price: float, within_sec: int = 3) -> bool:
+    def recent_duplicate(
+        self, symbol: str, side: str, price: float, within_sec: int = 3, login: int = 0
+    ) -> bool:
         since = int(time.time()) - within_sec
         with self._lock:
             row = self._db.execute(
                 """
                 SELECT 1 FROM intents
                 WHERE symbol=? AND side=? AND ABS(COALESCE(price, 0) - ?) < 0.0000001
-                  AND created_at >= ? AND state IN ('sending', 'accepted', 'filled', 'working')
+                  AND created_at >= ? AND login=?
+                  AND state IN ('sending', 'accepted', 'filled', 'working')
                 LIMIT 1
                 """,
-                (symbol, side, float(price), since),
+                (symbol, side, float(price), since, int(login)),
             ).fetchone()
         return row is not None
 
@@ -223,11 +344,11 @@ class Store:
             self._db.execute(
                 """
                 INSERT INTO journal
-                    (position_id, symbol, side, volume, entry_price, exit_price, profit,
+                    (login, position_id, symbol, side, volume, entry_price, exit_price, profit,
                      swap, commission, open_time, close_time, duration_sec, mfe, mae,
                      tag, closed_by, recorded_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(position_id) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(login, position_id) DO UPDATE SET
                     exit_price=excluded.exit_price,
                     profit=excluded.profit,
                     swap=excluded.swap,
@@ -241,6 +362,7 @@ class Store:
                     tag=COALESCE(journal.tag, excluded.tag)
                 """,
                 (
+                    int(record.get("login") or 0),
                     int(record["position_id"]),
                     record["symbol"],
                     record["side"],
@@ -262,55 +384,67 @@ class Store:
             )
             self._db.commit()
 
-    def journal_list(self, limit: int = 200, since: int = 0) -> list[dict[str, Any]]:
+    def journal_list(
+        self, limit: int = 200, since: int = 0, login: int = 0
+    ) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT * FROM journal WHERE close_time >= ? ORDER BY close_time DESC LIMIT ?",
-                (int(since), int(limit)),
+                """SELECT * FROM journal
+                   WHERE login=? AND close_time >= ?
+                   ORDER BY close_time DESC LIMIT ?""",
+                (int(login), int(since), int(limit)),
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def journal_get(self, position_id: int) -> dict[str, Any] | None:
+    def journal_get(self, position_id: int, login: int = 0) -> dict[str, Any] | None:
         with self._lock:
             row = self._db.execute(
-                "SELECT * FROM journal WHERE position_id=?", (int(position_id),)
+                "SELECT * FROM journal WHERE login=? AND position_id=?",
+                (int(login), int(position_id)),
             ).fetchone()
         return dict(row) if row else None
 
-    def journal_set_tag(self, position_id: int, tag: str | None) -> None:
+    def journal_set_tag(self, position_id: int, tag: str | None, login: int = 0) -> None:
         with self._lock:
             self._db.execute(
-                "UPDATE journal SET tag=? WHERE position_id=?", (tag, int(position_id))
+                "UPDATE journal SET tag=? WHERE login=? AND position_id=?",
+                (tag, int(login), int(position_id)),
             )
             self._db.commit()
 
-    def journal_set_shot(self, position_id: int) -> None:
+    def journal_set_shot(self, position_id: int, login: int = 0) -> None:
         with self._lock:
             self._db.execute(
-                "UPDATE journal SET has_shot=1 WHERE position_id=?", (int(position_id),)
+                "UPDATE journal SET has_shot=1 WHERE login=? AND position_id=?",
+                (int(login), int(position_id)),
             )
             self._db.commit()
 
-    def journal_tag_for_position(self, position_id: int) -> str | None:
+    def journal_tag_for_position(self, position_id: int, login: int = 0) -> str | None:
         with self._lock:
             row = self._db.execute(
                 """SELECT tag FROM intents
-                   WHERE ticket=? AND tag IS NOT NULL AND tag != ''
+                   WHERE ticket=? AND login=? AND tag IS NOT NULL AND tag != ''
                    ORDER BY created_at DESC LIMIT 1""",
-                (int(position_id),),
+                (int(position_id), int(login)),
             ).fetchone()
         return str(row["tag"]) if row else None
 
     # ---------- alerts ----------
 
-    def alerts_list(self) -> list[dict[str, Any]]:
+    def alerts_list(self, login: int = 0) -> list[dict[str, Any]]:
         with self._lock:
-            rows = self._db.execute("SELECT * FROM alerts ORDER BY id DESC").fetchall()
+            rows = self._db.execute(
+                "SELECT * FROM alerts WHERE login=? ORDER BY id DESC", (int(login),)
+            ).fetchall()
         return [dict(r) for r in rows]
 
-    def alert_get(self, alert_id: int) -> dict[str, Any] | None:
+    def alert_get(self, alert_id: int, login: int = 0) -> dict[str, Any] | None:
         with self._lock:
-            row = self._db.execute("SELECT * FROM alerts WHERE id=?", (int(alert_id),)).fetchone()
+            row = self._db.execute(
+                "SELECT * FROM alerts WHERE id=? AND login=?",
+                (int(alert_id), int(login)),
+            ).fetchone()
         return dict(row) if row else None
 
     def alert_create(
@@ -321,45 +455,61 @@ class Store:
         note: str | None,
         repeat: bool,
         cooldown_sec: int,
+        login: int = 0,
     ) -> dict[str, Any]:
         now = int(time.time())
         with self._lock:
             cur = self._db.execute(
                 """INSERT INTO alerts
-                       (symbol, kind, price, note, enabled, repeat, cooldown_sec, created_at)
-                   VALUES (?, ?, ?, ?, 1, ?, ?, ?)""",
-                (symbol, kind, float(price), note, 1 if repeat else 0, int(cooldown_sec), now),
+                       (login, symbol, kind, price, note, enabled, repeat, cooldown_sec, created_at)
+                   VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)""",
+                (
+                    int(login),
+                    symbol,
+                    kind,
+                    float(price),
+                    note,
+                    1 if repeat else 0,
+                    int(cooldown_sec),
+                    now,
+                ),
             )
             self._db.commit()
             alert_id = int(cur.lastrowid)
-        return self.alert_get(alert_id) or {}
+        return self.alert_get(alert_id, login) or {}
 
-    def alert_update(self, alert_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+    def alert_update(
+        self, alert_id: int, fields: dict[str, Any], login: int = 0
+    ) -> dict[str, Any] | None:
         allowed = {"symbol", "kind", "price", "note", "enabled", "repeat", "cooldown_sec"}
         sets = {key: value for key, value in fields.items() if key in allowed}
         if not sets:
-            return self.alert_get(alert_id)
+            return self.alert_get(alert_id, login)
         columns = ", ".join(f"{key}=?" for key in sets)
         with self._lock:
             self._db.execute(
-                f"UPDATE alerts SET {columns} WHERE id=?", (*sets.values(), int(alert_id))
+                f"UPDATE alerts SET {columns} WHERE id=? AND login=?",
+                (*sets.values(), int(alert_id), int(login)),
             )
             self._db.commit()
-        return self.alert_get(alert_id)
+        return self.alert_get(alert_id, login)
 
-    def alert_delete(self, alert_id: int) -> None:
+    def alert_delete(self, alert_id: int, login: int = 0) -> None:
         with self._lock:
-            self._db.execute("DELETE FROM alerts WHERE id=?", (int(alert_id),))
+            self._db.execute(
+                "DELETE FROM alerts WHERE id=? AND login=?",
+                (int(alert_id), int(login)),
+            )
             self._db.commit()
 
-    def alert_mark_triggered(self, alert_id: int, disable: bool) -> None:
+    def alert_mark_triggered(self, alert_id: int, disable: bool, login: int = 0) -> None:
         now = int(time.time())
         with self._lock:
             self._db.execute(
                 """UPDATE alerts SET triggered_at=?, trigger_count=trigger_count+1,
                        enabled=CASE WHEN ? THEN 0 ELSE enabled END
-                   WHERE id=?""",
-                (now, 1 if disable else 0, int(alert_id)),
+                   WHERE id=? AND login=?""",
+                (now, 1 if disable else 0, int(alert_id), int(login)),
             )
             self._db.commit()
 
@@ -370,13 +520,14 @@ class Store:
             self._db.execute(
                 """
                 INSERT INTO executions
-                    (client_id, ticket, symbol, side, type, volume, requested_price,
+                    (client_id, login, ticket, symbol, side, type, volume, requested_price,
                      fill_price, spread_points, slippage_points, latency_ms, retcode,
                      state, reason, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record["client_id"],
+                    int(record.get("login") or 0),
                     record.get("ticket"),
                     record["symbol"],
                     record["side"],
@@ -395,22 +546,27 @@ class Store:
             )
             self._db.commit()
 
-    def execution_list(self, days: int = 30, limit: int = 200) -> list[dict[str, Any]]:
+    def execution_list(
+        self, days: int = 30, limit: int = 200, login: int = 0
+    ) -> list[dict[str, Any]]:
         since = int(time.time()) - max(1, days) * 86400
         with self._lock:
             rows = self._db.execute(
-                "SELECT * FROM executions WHERE created_at>=? ORDER BY id DESC LIMIT ?",
-                (since, int(limit)),
+                """SELECT * FROM executions WHERE login=? AND created_at>=?
+                   ORDER BY id DESC LIMIT ?""",
+                (int(login), since, int(limit)),
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def execution_stats(self, days: int = 30) -> dict[str, Any]:
+    def execution_stats(self, days: int = 30, login: int = 0) -> dict[str, Any]:
         since = int(time.time()) - max(1, days) * 86400
         with self._lock:
             rows = [
                 dict(r)
                 for r in self._db.execute(
-                    "SELECT * FROM executions WHERE created_at>=? ORDER BY id ASC", (since,)
+                    """SELECT * FROM executions WHERE login=? AND created_at>=?
+                       ORDER BY id ASC""",
+                    (int(login), since),
                 ).fetchall()
             ]
         filled = [r for r in rows if r["state"] in ("filled", "accepted", "working")]

@@ -34,10 +34,25 @@ export interface ChartSync {
 
 export type Theme = 'dark' | 'light';
 
-/** 控制台页面：概览 / 交易台 / 交易日志 / 统计报表 / 设置 */
-export type Page = 'overview' | 'trade' | 'journal' | 'reports' | 'settings';
+/** 控制台页面：概览 / 交易台 / 交易日志 / 统计报表 / 执行质量 / 审计日志 / 设置 */
+export type Page =
+  | 'overview'
+  | 'trade'
+  | 'journal'
+  | 'reports'
+  | 'executions'
+  | 'audit'
+  | 'settings';
 
-export const PAGES: Page[] = ['overview', 'trade', 'journal', 'reports', 'settings'];
+export const PAGES: Page[] = [
+  'overview',
+  'trade',
+  'journal',
+  'reports',
+  'executions',
+  'audit',
+  'settings',
+];
 
 /** 用 hash 记住当前页，刷新或从图表 iframe 回来都不会丢 */
 export function routeFromHash(): Page {
@@ -66,9 +81,8 @@ interface AppStore {
   riskStatus: RiskStatus | null;
   /** 价格告警与通知偏好 */
   alerts: PriceAlert[];
+  /** 交易台右侧的告警面板是否展开 */
   alertsOpen: boolean;
-  executionOpen: boolean;
-  auditOpen: boolean;
   /** 下单模板：0.5% 风险 + 2R 止盈 + 1R 自动保本 */
   templateArmed: boolean;
   layout: ChartLayout;
@@ -105,8 +119,6 @@ interface AppStore {
   setRiskStatus: (riskStatus: RiskStatus | null) => void;
   setAlerts: (alerts: PriceAlert[]) => void;
   setAlertsOpen: (open: boolean) => void;
-  setExecutionOpen: (open: boolean) => void;
-  setAuditOpen: (open: boolean) => void;
   setTemplateArmed: (armed: boolean) => void;
   setLayout: (layout: ChartLayout) => void;
   setLayoutSync: (patch: Partial<ChartSync>) => void;
@@ -119,6 +131,8 @@ interface AppStore {
   setSidebarTab: (tab: SidebarTab) => void;
   notify: (kind: Toast['kind'], text: string) => void;
   clearToast: () => void;
+  /** 切换 MT5 账户后清空上一个账户的运行时状态 */
+  resetForAccountSwitch: () => void;
 }
 
 const emptyDraft: DraftOrder = {
@@ -255,8 +269,6 @@ export const useApp = create<AppStore>((set, get) => ({
   riskStatus: null,
   alerts: [],
   alertsOpen: false,
-  executionOpen: false,
-  auditOpen: false,
   templateArmed: false,
   layout: loadLayout(),
   layoutSync: loadLayoutSync(),
@@ -313,8 +325,6 @@ export const useApp = create<AppStore>((set, get) => ({
   setRiskStatus: (riskStatus) => set({ riskStatus }),
   setAlerts: (alerts) => set({ alerts }),
   setAlertsOpen: (alertsOpen) => set({ alertsOpen }),
-  setExecutionOpen: (executionOpen) => set({ executionOpen }),
-  setAuditOpen: (auditOpen) => set({ auditOpen }),
   setTemplateArmed: (templateArmed) => set({ templateArmed }),
   setLayout: (layout) => {
     const next = normalizeLayoutId(layout);
@@ -364,6 +374,21 @@ export const useApp = create<AppStore>((set, get) => ({
     }, 4500);
   },
   clearToast: () => set({ toast: null }),
+  resetForAccountSwitch: () =>
+    set({
+      account: null,
+      positions: [],
+      orders: [],
+      alerts: [],
+      riskStatus: null,
+      symbols: [],
+      symbol: '',
+      quote: null,
+      preview: null,
+      watchRows: [],
+      crosshairPrice: null,
+      draft: { ...emptyDraft },
+    }),
 }));
 
 export const selectSymbolInfo = (state: AppStore): SymbolInfo | undefined =>
@@ -381,8 +406,6 @@ export function handleGlobalShortcut(event: KeyboardEvent): void {
 
   if (event.key === 'Escape') {
     state.setAlertsOpen(false);
-    state.setExecutionOpen(false);
-    state.setAuditOpen(false);
     if (state.draft.active) state.patchDraft({ active: false });
     return;
   }

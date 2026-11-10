@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -29,6 +30,13 @@ class Config:
     terminal_path: str = ""
     # 期望登录的账户号，0 = 不校验；非 0 时连错账户会报错并断开。
     expected_login: int = 0
+    # 多账户配置：每个账户对应一个已登录的 MT5 终端实例。
+    # [{"id": "a", "label": "主账户", "terminal_path": "C:/.../terminal64.exe",
+    #   "login": 123456, "server": "Broker-Demo"}]
+    # 切换时网关会 shutdown 后重新 initialize 到目标 terminal_path，并用 login 校验。
+    accounts: list[dict] = field(default_factory=list)
+    # 上次选中的账户 id；空 = 使用 accounts 里的第一个。
+    active_account: str = ""
 
     # 交易模式：readonly 只读 / demo 允许模拟账户交易 / live 允许实盘
     trade_mode: str = "readonly"
@@ -63,6 +71,88 @@ class Config:
         raw = json.loads(path.read_text(encoding="utf-8"))
         known = set(cls.__dataclass_fields__)
         return cls(**{k: v for k, v in raw.items() if k in known})
+
+    @staticmethod
+    def _slug(value: str, fallback: str) -> str:
+        cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip()).strip("-").lower()
+        return cleaned or fallback
+
+    def account_profiles(self) -> list[dict]:
+        """规范化 accounts 配置；没有配置时退化成单终端（terminal_path / expected_login）。"""
+        raw = self.accounts if isinstance(self.accounts, list) else []
+        profiles: list[dict] = []
+        used: set[str] = set()
+        for index, item in enumerate(raw):
+            if not isinstance(item, dict):
+                continue
+            try:
+                login = int(item.get("login") or 0)
+            except (TypeError, ValueError):
+                login = 0
+            base = str(item.get("id") or item.get("name") or (login or f"acc{index + 1}"))
+            account_id = self._slug(base, f"acc{index + 1}")
+            if account_id in used:
+                suffix = 2
+                while f"{account_id}-{suffix}" in used:
+                    suffix += 1
+                account_id = f"{account_id}-{suffix}"
+            used.add(account_id)
+            label = str(
+                item.get("label")
+                or item.get("name")
+                or (f"账户 {login}" if login else f"账户 {index + 1}")
+            )
+            profiles.append(
+                {
+                    "id": account_id,
+                    "label": label[:40],
+                    "login": login,
+                    "server": str(item.get("server") or "")[:80],
+                    "terminal_path": str(
+                        item.get("terminal_path")
+                        or item.get("terminalPath")
+                        or self.terminal_path
+                        or ""
+                    ),
+                }
+            )
+        if not profiles:
+            profiles.append(
+                {
+                    "id": "default",
+                    "label": "默认终端",
+                    "login": int(self.expected_login or 0),
+                    "server": "",
+                    "terminal_path": self.terminal_path,
+                }
+            )
+        return profiles
+
+    def active_profile(self) -> dict:
+        profiles = self.account_profiles()
+        for profile in profiles:
+            if profile["id"] == self.active_account:
+                return profile
+        return profiles[0]
+
+    def set_active_account(self, account_id: str) -> dict:
+        """校验并持久化当前账户选择，保留 config.json 里的其他字段。"""
+        profiles = self.account_profiles()
+        profile = next((item for item in profiles if item["id"] == account_id), None)
+        if profile is None:
+            raise ValueError(f"未知账户: {account_id}")
+
+        self.active_account = profile["id"]
+        path = BASE_DIR / "config.json"
+        raw: dict = {}
+        if path.exists():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        raw["active_account"] = profile["id"]
+        path.write_text(
+            json.dumps(raw, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return profile
 
     def update(self, patch: dict) -> dict:
         """校验并保存设置页可改的风控字段，保留 config.json 里的其他字段。"""
@@ -101,6 +191,18 @@ class Config:
         data = asdict(self)
         data.pop("host", None)
         data.pop("port", None)
+        # 账户列表用规范化后的结构，路径和登录号都是本机信息，前端需要展示
+        data["accounts"] = [
+            {
+                "id": profile["id"],
+                "label": profile["label"],
+                "login": profile["login"],
+                "server": profile["server"],
+                "terminal_path": profile["terminal_path"],
+            }
+            for profile in self.account_profiles()
+        ]
+        data["active_account"] = self.active_profile()["id"]
         # 通道配置里有 token/webhook 密钥，只下发通道名称
         channels = data.pop("alert_channels", []) or []
         data["alert_channel_names"] = [

@@ -43,6 +43,17 @@ export interface Bar {
   volume: number;
 }
 
+/** 网关配置文件里配置的一个 MT5 终端账户 */
+export interface AccountOption {
+  id: string;
+  label: string;
+  login: number;
+  server: string;
+  terminalPath?: string;
+  active: boolean;
+  connected: boolean;
+}
+
 export interface Account {
   login: number;
   server: string;
@@ -177,15 +188,26 @@ export interface GatewayHealth {
   connected: boolean;
   terminal: GatewayTerminal | null;
   account: Account | null;
+  /** 配置里的多账户列表 */
+  accounts?: AccountOption[];
+  activeAccountId?: string;
   tradeMode: TradeMode;
   config: GatewayConfig;
   /** 最近一次算出的当日风控状态 */
   risk?: RiskStatus | null;
-  lastError: { code: number; message: string } | null;
+  lastError: { code: number | string; message: string } | null;
   serverTime: number;
   /** 券商服务器时间与 UTC 的差（秒），用于图表时区 */
   serverOffset: number;
   version: string;
+}
+
+/** account.switch 的返回值 */
+export interface SwitchAccountResult {
+  activeId: string;
+  account: Account | null;
+  accounts: AccountOption[];
+  health: GatewayHealth;
 }
 
 export interface TradePreview {
@@ -256,6 +278,8 @@ export interface Toast {
 }
 
 export interface JournalRecord {
+  /** 该交易所属的 MT5 账户号 */
+  login: number;
   position_id: number;
   symbol: string;
   side: Side;
@@ -313,6 +337,7 @@ export interface JournalStats {
 
 export interface PriceAlert {
   id: number;
+  login?: number;
   symbol: string;
   kind: 'above' | 'below';
   price: number;
@@ -363,6 +388,7 @@ export interface TradeEvent {
 
 export interface ExecutionRow {
   id: number;
+  login?: number;
   client_id: string;
   ticket: number | null;
   symbol: string;

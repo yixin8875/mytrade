@@ -45,6 +45,7 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
   const positions = useApp((s) => s.positions);
   const orders = useApp((s) => s.orders);
   const health = useApp((s) => s.health);
+  const activeLogin = useApp((s) => s.account?.login ?? 0);
 
   const [stats, setStats] = useState<JournalStats | null>(null);
   const [recent, setRecent] = useState<JournalRecord[]>([]);
@@ -72,7 +73,7 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
     return () => {
       alive = false;
     };
-  }, [conn]);
+  }, [conn, activeLogin]);
 
   const floating = positions.reduce(
     (sum, item) => sum + item.profit + (item.swap ?? 0) + (item.commission ?? 0),

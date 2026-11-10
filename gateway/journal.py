@@ -76,7 +76,7 @@ class TradeJournal:
 
     # ---------- 同步 ----------
 
-    def sync(self, force: bool = False) -> int:
+    def sync(self, login: int, force: bool = False) -> int:
         now = time.monotonic()
         if not force and now - self._last_sync < 4.0:
             return 0
@@ -99,11 +99,13 @@ class TradeJournal:
 
         written = 0
         for position_id, deals in groups.items():
-            existing = self.store.journal_get(position_id)
+            existing = self.store.journal_get(position_id, login)
             if existing:
                 # 已经完整记录过；如果之后补上了截图，把 has_shot 补回来
-                if not int(existing.get("has_shot") or 0) and self.shot_path(position_id).is_file():
-                    self.store.journal_set_shot(position_id)
+                if not int(existing.get("has_shot") or 0) and self.shot_path(
+                    login, position_id
+                ).is_file():
+                    self.store.journal_set_shot(position_id, login)
                 continue
             entries = [d for d in deals if int(getattr(d, "entry", 0) or 0) == 0]
             exits = [d for d in deals if int(getattr(d, "entry", 0) or 0) in (1, 3)]
@@ -133,6 +135,7 @@ class TradeJournal:
             )
             self.store.upsert_journal(
                 {
+                    "login": int(login),
                     "position_id": position_id,
                     "symbol": symbol,
                     "side": side,
@@ -147,14 +150,14 @@ class TradeJournal:
                     "duration_sec": max(0, close_time - open_time),
                     "mfe": mfe,
                     "mae": mae,
-                    "tag": self.store.journal_tag_for_position(position_id),
+                    "tag": self.store.journal_tag_for_position(position_id, login),
                     "closed_by": _close_kind(str(getattr(last_exit, "comment", "") or "")),
                 }
             )
             # 截图可能在日志记录之前就上传了（成交后立刻截图，收盘后才配对完成），
             # 这里按文件补一次标记，前端才知道有图可看
-            if self.shot_path(position_id).is_file():
-                self.store.journal_set_shot(position_id)
+            if self.shot_path(login, position_id).is_file():
+                self.store.journal_set_shot(position_id, login)
             written += 1
         return written
 
@@ -196,9 +199,9 @@ class TradeJournal:
 
     # ---------- 统计 ----------
 
-    def stats(self, days: int = 30) -> dict:
+    def stats(self, days: int = 30, login: int = 0) -> dict:
         since = int(time.time()) - max(1, days) * 86400
-        rows = self.store.journal_list(limit=5000, since=since)
+        rows = self.store.journal_list(limit=5000, since=since, login=login)
         rows.sort(key=lambda r: int(r["close_time"]))
         if not rows:
             return {
@@ -301,7 +304,9 @@ class TradeJournal:
 
     # ---------- 截图 ----------
 
-    def save_shot(self, position_id: int, data: str, meta: Any = None) -> dict:
+    def save_shot(
+        self, login: int, position_id: int, data: str, meta: Any = None
+    ) -> dict:
         raw = data.split(",", 1)[-1]
         try:
             blob = base64.b64decode(raw, validate=True)
@@ -311,7 +316,9 @@ class TradeJournal:
             raise ValueError("截图超过 3MB")
         if not blob.startswith(b"\xff\xd8"):
             raise ValueError("只接受 JPEG 截图")
-        path = self.shots_dir / f"{int(position_id)}.jpg"
+        folder = self.shots_dir / str(int(login or 0))
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{int(position_id)}.jpg"
         path.write_bytes(blob)
 
         cleaned = _clean_shot_meta(meta)
@@ -325,13 +332,14 @@ class TradeJournal:
         except OSError:
             cleaned = None
 
-        self.store.journal_set_shot(int(position_id))
+        self.store.journal_set_shot(int(position_id), login)
         return {
             "positionId": int(position_id),
+            "login": int(login or 0),
             "bytes": len(blob),
-            "url": f"/shots/{path.name}",
+            "url": f"/shots/{int(login or 0)}/{path.name}",
             "annotated": bool(cleaned),
         }
 
-    def shot_path(self, position_id: int) -> Path:
-        return self.shots_dir / f"{int(position_id)}.jpg"
+    def shot_path(self, login: int, position_id: int) -> Path:
+        return self.shots_dir / str(int(login or 0)) / f"{int(position_id)}.jpg"

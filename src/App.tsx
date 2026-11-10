@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
-import { AlertsModal } from './components/AlertsModal';
-import { AuditModal } from './components/AuditModal';
+import { AlertsPanel } from './components/AlertsPanel';
 import { ChartGrid } from './components/ChartGrid';
 import { ConsoleShell } from './components/ConsoleShell';
-import { ExecutionModal } from './components/ExecutionModal';
 import { OrderTicket } from './components/OrderTicket';
 import { OrdersPanel } from './components/OrdersPanel';
 import { PositionsPanel } from './components/PositionsPanel';
@@ -17,6 +15,8 @@ import { WatchlistPanel } from './components/WatchlistPanel';
 import { Overview } from './views/Overview';
 import { JournalView } from './views/Journal';
 import { ReportsView } from './views/Reports';
+import { ExecutionsView } from './views/Executions';
+import { AuditView } from './views/Audit';
 import { primaryHost, primaryWidget } from './chart/tv/registry';
 import { buildShotMeta } from './chart/tv/shotMeta';
 import { gateway } from './gateway/client';
@@ -112,9 +112,12 @@ export default function App() {
     const offs = [
       gateway.on('gateway', (data) => {
         const health = data as GatewayHealth;
-        useApp.getState().setHealth(health);
-        if (health.account) useApp.getState().setAccount(health.account);
-        if (health.risk) useApp.getState().setRiskStatus(health.risk);
+        const state = useApp.getState();
+        state.setHealth(health);
+        if (health.account) state.setAccount(health.account);
+        if (health.risk) state.setRiskStatus(health.risk);
+        // 切换账户失败后网关会在后台继续重连；连上时补一次品种与持仓
+        if (health.connected && state.symbols.length === 0) void refresh();
       }),
       gateway.on('account', (data) => useApp.getState().setAccount(data as Account)),
       gateway.on('positions', (data) => useApp.getState().setPositions(data as Position[])),
@@ -186,6 +189,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleGlobalShortcut);
   }, []);
 
+  // 账户切换后重新拉账户、品种、持仓与告警；图表按 activeAccountId 重新挂载
+  useEffect(() => {
+    const onSwitch = () => void refresh();
+    window.addEventListener('mytrade:account-switched', onSwitch);
+    return () => window.removeEventListener('mytrade:account-switched', onSwitch);
+  }, []);
+
   const page = useApp((s) => s.page);
   const setPage = useApp((s) => s.setPage);
   /** 交易台首次进入后才挂载，之后一直保留，切页不丢图表状态 */
@@ -216,6 +226,8 @@ export default function App() {
   const ordersCount = useApp((s) => s.orders.length);
   const watchCount = useApp((s) => s.watchlist.length);
   const theme = useApp((s) => s.theme);
+  const activeAccountId = useApp((s) => s.health?.activeAccountId ?? '');
+  const alertsOpen = useApp((s) => s.alertsOpen);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -253,7 +265,10 @@ export default function App() {
           <TopBar />
           <div className="flex min-h-0 flex-1">
             <main className="relative min-w-0 flex-1">
-              <ChartGrid />
+              {/* 切换账户后重建图表，避免沿用上一个账户的品种和历史缓存 */}
+              <ChartGrid key={activeAccountId} />
+              {/* 价格告警覆盖在图表右侧，不挤压图表也不另开弹窗 */}
+              {alertsOpen && <AlertsPanel />}
             </main>
             <aside className="flex w-[320px] shrink-0 flex-col border-l border-tv-border bg-tv-panel">
               <OrderTicket />
@@ -292,11 +307,10 @@ export default function App() {
 
       {page === 'journal' && <JournalView />}
       {page === 'reports' && <ReportsView />}
+      {page === 'executions' && <ExecutionsView />}
+      {page === 'audit' && <AuditView />}
       {page === 'settings' && <SettingsPanel />}
 
-      <AlertsModal />
-      <ExecutionModal />
-      <AuditModal />
       <UpdatePanel />
       <Toast />
     </ConsoleShell>

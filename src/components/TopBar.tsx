@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
+import { Bell } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, spreadPoints } from '../lib/format';
+import { AccountSwitcher } from './AccountSwitcher';
 import { LayoutPickerButton } from './LayoutPicker';
 import type { RiskStatus } from '../gateway/types';
 
@@ -41,6 +43,9 @@ export function TopBar() {
   const quote = useApp((s) => s.quote);
   const account = useApp((s) => s.account);
   const riskStatus = useApp((s) => s.riskStatus);
+  const alerts = useApp((s) => s.alerts);
+  const alertsOpen = useApp((s) => s.alertsOpen);
+  const setAlertsOpen = useApp((s) => s.setAlertsOpen);
   const notify = useApp((s) => s.notify);
   const [confirmKill, setConfirmKill] = useState(false);
 
@@ -50,6 +55,7 @@ export function TopBar() {
   const mode = health?.tradeMode ?? 'readonly';
   const spread = quote && info ? spreadPoints(quote.bid, quote.ask, info.point) : null;
   const realAccount = account?.accountType === 'real';
+  const activeAlerts = alerts.filter((item) => item.enabled).length;
 
   const toggleMode = async () => {
     if (!terminal) {
@@ -123,7 +129,30 @@ export function TopBar() {
         </span>
       </div>
 
+      <button
+        onClick={() => setAlertsOpen(!alertsOpen)}
+        aria-pressed={alertsOpen}
+        data-alerts-toggle
+        title="价格告警面板"
+        className={clsx(
+          'flex h-6 items-center gap-1 rounded px-2 text-[10px] transition-colors',
+          alertsOpen
+            ? 'bg-tv-border text-tv-text'
+            : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+        )}
+      >
+        <Bell size={12} />
+        告警
+        {activeAlerts > 0 && (
+          <span className="num rounded-full bg-tv-accent/20 px-1 text-[9px] font-semibold text-tv-accent">
+            {activeAlerts}
+          </span>
+        )}
+      </button>
+
       <div className="flex-1" />
+
+      <AccountSwitcher />
 
       <div className="text-right leading-tight">
         <div className="font-mono text-[11px] text-tv-text">余额 {fmtMoney(account?.balance)}</div>
