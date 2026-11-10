@@ -5,6 +5,7 @@ import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import type { JournalBreakdown, JournalRecord, JournalStats } from '../gateway/types';
+import { isShotMeta, shotY, type ShotMeta } from '../chart/tv/shotMeta';
 
 const SHOT_BASE = 'http://127.0.0.1:8765/shots';
 const RANGES = [7, 30, 90];
@@ -54,6 +55,7 @@ export function JournalView() {
   const [tab, setTab] = useState<BreakdownTab>('symbol');
   const [editing, setEditing] = useState<{ id: number; value: string } | null>(null);
   const [shot, setShot] = useState<number | null>(null);
+  const [shotMeta, setShotMeta] = useState<ShotMeta | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,6 +83,22 @@ export function JournalView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days]);
 
+  // 截图旁边的坐标元数据；旧截图没有这个文件，按无标注处理
+  useEffect(() => {
+    setShotMeta(null);
+    if (shot == null) return;
+    let alive = true;
+    fetch(`${SHOT_BASE}/${shot}.json`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (alive && isShotMeta(data)) setShotMeta(data);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [shot]);
+
   const summary = stats?.summary;
   const breakdown: JournalBreakdown[] =
     tab === 'symbol'
@@ -89,6 +107,9 @@ export function JournalView() {
         ? (stats?.byHour ?? [])
         : (stats?.byTag ?? []);
   const breakdownMax = breakdown.reduce((max, row) => Math.max(max, Math.abs(row.pnl)), 0);
+  const shotRecord = shot == null ? null : (records.find((item) => item.position_id === shot) ?? null);
+  const shotDigits =
+    shotMeta?.digits ?? (shotRecord && Math.abs(shotRecord.entry_price) >= 100 ? 2 : 5);
 
   const saveTag = async (record: JournalRecord, value: string) => {
     setEditing(null);
@@ -119,7 +140,7 @@ export function JournalView() {
           <div>
             <h1 className="text-[24px] font-semibold tracking-tight">交易日志</h1>
             <p className="mt-1 text-[11.5px] text-console-muted">
-              已平仓交易自动记录 · 点击标签可修改策略 · 截图随成交自动保存
+              已平仓交易自动记录 · 点击标签可修改策略 · 截图随成交自动保存，查看时可标出入场/出场
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -377,12 +398,100 @@ export function JournalView() {
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-6"
           onClick={() => setShot(null)}
         >
-          <img
-            src={`${SHOT_BASE}/${shot}.jpg`}
-            alt={`交易 ${shot} 的图表截图`}
-            className="max-h-full max-w-full rounded-lg border border-console-line object-contain shadow-2xl"
-          />
+          <div className="relative max-h-full max-w-full">
+            <img
+              src={`${SHOT_BASE}/${shot}.jpg`}
+              alt={`交易 ${shot} 的图表截图`}
+              className="block max-h-[calc(100vh-3rem)] max-w-[calc(100vw-3rem)] rounded-lg border border-console-line object-contain shadow-2xl"
+            />
+            {shotMeta && shotRecord && <ShotAnnotations meta={shotMeta} record={shotRecord} />}
+          </div>
+          {!shotMeta && shotRecord && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-lg bg-black/75 px-3 py-1.5 text-[11px] text-white/90">
+              入场 <span className="num">{fmtPrice(shotRecord.entry_price, shotDigits)}</span>
+              <span className="mx-1.5 text-white/40">·</span>
+              出场 <span className="num">{fmtPrice(shotRecord.exit_price, shotDigits)}</span>
+              <span className="ml-2 text-[10px] text-white/50">旧截图无坐标信息，无法在图上定位</span>
+            </div>
+          )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** 在截图上按价格锚点画入场 / 出场水平线；价格在画面外时贴边并加箭头 */
+function ShotAnnotations({ meta, record }: { meta: ShotMeta; record: JournalRecord }) {
+  const entry = shotY(record.entry_price, meta);
+  const exit = shotY(record.exit_price, meta);
+  if (!entry || !exit) return null;
+
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg">
+      <PriceMarker
+        y={entry.y}
+        edge={entry.edge}
+        color="#2962ff"
+        side="left"
+        label={`入场 ${fmtPrice(record.entry_price, meta.digits)}`}
+      />
+      <PriceMarker
+        y={exit.y}
+        edge={exit.edge}
+        color={record.profit >= 0 ? '#26a69a' : '#ef5350'}
+        side="right"
+        label={`出场 ${fmtPrice(record.exit_price, meta.digits)}`}
+      />
+    </div>
+  );
+}
+
+function PriceMarker({
+  y,
+  edge,
+  color,
+  side,
+  label,
+}: {
+  y: number;
+  edge: 'above' | 'below' | null;
+  color: string;
+  side: 'left' | 'right';
+  label: string;
+}) {
+  const arrow = edge === 'above' ? ' ↑' : edge === 'below' ? ' ↓' : '';
+  const tag = (
+    <span
+      className={clsx(
+        'shrink-0 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-md',
+        side === 'left' ? 'rounded-r' : 'rounded-l',
+      )}
+      style={{ backgroundColor: color }}
+      title={edge ? '该价格在截图可视区间之外' : undefined}
+    >
+      {label}
+      {arrow}
+    </span>
+  );
+  const line = (
+    <span className="h-px flex-1" style={{ backgroundColor: color, opacity: 0.85 }} />
+  );
+
+  return (
+    <div
+      className="absolute inset-x-0 flex -translate-y-1/2 items-center gap-1"
+      style={{ top: `${y * 100}%` }}
+    >
+      {side === 'left' ? (
+        <>
+          {tag}
+          {line}
+        </>
+      ) : (
+        <>
+          {line}
+          {tag}
+        </>
       )}
     </div>
   );

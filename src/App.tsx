@@ -17,7 +17,8 @@ import { WatchlistPanel } from './components/WatchlistPanel';
 import { Overview } from './views/Overview';
 import { JournalView } from './views/Journal';
 import { ReportsView } from './views/Reports';
-import { primaryWidget } from './chart/tv/registry';
+import { primaryHost, primaryWidget } from './chart/tv/registry';
+import { buildShotMeta } from './chart/tv/shotMeta';
 import { gateway } from './gateway/client';
 import { beep, desktopNotify } from './lib/alert';
 import { handleGlobalShortcut, routeFromHash, useApp, type SidebarTab } from './store/useApp';
@@ -80,17 +81,20 @@ async function captureTradeShot(ticket: number): Promise<void> {
   const widget = primaryWidget();
   if (!widget) return;
   try {
-    let positionId = 0;
-    for (let attempt = 0; attempt < 12 && positionId === 0; attempt += 1) {
+    let position: Position | null = null;
+    for (let attempt = 0; attempt < 12 && !position; attempt += 1) {
       const positions = await gateway.call<Position[]>('positions.get');
-      const found = positions.find((item) => item.ticket === ticket || item.identifier === ticket);
-      if (found) positionId = found.ticket;
-      else await sleep(350);
+      position = positions.find((item) => item.ticket === ticket || item.identifier === ticket) ?? null;
+      if (!position) await sleep(350);
     }
-    if (positionId === 0) return;
+    if (!position) return;
+    // 先读坐标再截图，保证锚点和画面是同一帧
+    const sameSymbol = widget.activeChart().symbol() === position.symbol;
+    const info = useApp.getState().symbols.find((item) => item.name === position.symbol);
+    const meta = sameSymbol ? buildShotMeta(widget, primaryHost(), info?.digits ?? 5) : null;
     const canvas = await widget.takeClientScreenshot({ hideStudiesFromLegend: true });
     const data = canvas.toDataURL('image/jpeg', 0.5);
-    await gateway.call('journal.screenshot.save', { positionId, data });
+    await gateway.call('journal.screenshot.save', { positionId: position.ticket, data, meta });
   } catch {
     /* 截图只是日志的补充，失败不影响交易 */
   }

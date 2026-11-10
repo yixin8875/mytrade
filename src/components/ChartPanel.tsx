@@ -516,7 +516,7 @@ export function ChartPanel({
             : ['use_localstorage_for_settings', 'save_chart_properties_to_local_storage'],
       });
       widgetRef.current = widget;
-      registerWidget(slot, widget);
+      registerWidget(slot, widget, host);
       // 旧调试脚本和截图仍从 window.__tv 取主图
       if (slot === 'main') {
         (window as unknown as { __tv?: IChartingLibraryWidget }).__tv = widget;

@@ -76,13 +76,15 @@ async def health() -> dict:
 
 @app.get("/shots/{name}")
 async def shot(name: str) -> FileResponse:
-    """交易日志里的图表截图，只允许 <positionId>.jpg。"""
-    if not name.endswith(".jpg") or not name[:-4].isdigit():
+    """交易日志里的图表截图/坐标元数据，只允许 <positionId>.jpg 或 .json。"""
+    stem, _, ext = name.rpartition(".")
+    if ext not in ("jpg", "json") or not stem.isdigit():
         raise HTTPException(status_code=404, detail="not found")
     path = BASE_DIR / "data" / "shots" / name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="not found")
-    return FileResponse(path, media_type="image/jpeg")
+    media = "image/jpeg" if ext == "jpg" else "application/json"
+    return FileResponse(path, media_type=media)
 
 
 @app.websocket("/ws")

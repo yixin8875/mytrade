@@ -638,7 +638,7 @@ class Mt5Worker:
         if position_id <= 0 or not data:
             raise GatewayError("BAD_SHOT", "缺少持仓号或截图数据")
         try:
-            out = self._journal.save_shot(position_id, data)
+            out = self._journal.save_shot(position_id, data, p.get("meta"))
         except ValueError as exc:
             raise GatewayError("BAD_SHOT", str(exc)) from exc
         self.store.audit("journal.screenshot", {"positionId": position_id, "bytes": out["bytes"]})

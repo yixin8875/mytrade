@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import json
+import math
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -25,6 +27,39 @@ def _close_kind(comment: str) -> str:
     if text.startswith("so"):
         return "stop_out"
     return "manual"
+
+
+def _clean_shot_meta(meta: Any) -> dict[str, Any] | None:
+    """只保留前端标注需要的价格锚点，避免把任意 JSON 写进截图目录。"""
+    if not isinstance(meta, dict):
+        return None
+    anchors: list[dict[str, float]] = []
+    for item in meta.get("anchors") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            price = float(item.get("price"))
+            y = float(item.get("y"))
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(price) and math.isfinite(y)):
+            continue
+        anchors.append({"price": round(price, 10), "y": round(max(0.0, min(1.0, y)), 6)})
+        if len(anchors) >= 8:
+            break
+    if len(anchors) < 2:
+        return None
+    try:
+        digits = int(meta.get("digits") or 5)
+    except (TypeError, ValueError):
+        digits = 5
+    return {
+        "version": 1,
+        "digits": max(0, min(8, digits)),
+        "symbol": str(meta.get("symbol") or "")[:40],
+        "interval": str(meta.get("interval") or "")[:12],
+        "anchors": anchors,
+    }
 
 
 class TradeJournal:
@@ -266,7 +301,7 @@ class TradeJournal:
 
     # ---------- 截图 ----------
 
-    def save_shot(self, position_id: int, data: str) -> dict:
+    def save_shot(self, position_id: int, data: str, meta: Any = None) -> dict:
         raw = data.split(",", 1)[-1]
         try:
             blob = base64.b64decode(raw, validate=True)
@@ -278,8 +313,25 @@ class TradeJournal:
             raise ValueError("只接受 JPEG 截图")
         path = self.shots_dir / f"{int(position_id)}.jpg"
         path.write_bytes(blob)
+
+        cleaned = _clean_shot_meta(meta)
+        sidecar = path.with_suffix(".json")
+        try:
+            if cleaned:
+                sidecar.write_text(json.dumps(cleaned, ensure_ascii=False), encoding="utf-8")
+            elif sidecar.is_file():
+                # 新截图没有坐标时别留下上一张的旧锚点
+                sidecar.unlink()
+        except OSError:
+            cleaned = None
+
         self.store.journal_set_shot(int(position_id))
-        return {"positionId": int(position_id), "bytes": len(blob), "url": f"/shots/{path.name}"}
+        return {
+            "positionId": int(position_id),
+            "bytes": len(blob),
+            "url": f"/shots/{path.name}",
+            "annotated": bool(cleaned),
+        }
 
     def shot_path(self, position_id: int) -> Path:
         return self.shots_dir / f"{int(position_id)}.jpg"
