@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { normalizeLayoutId } from '../chart/layouts';
 import type {
   Account,
   ConnState,
@@ -17,7 +18,20 @@ import type {
 } from '../gateway/types';
 
 export type SidebarTab = 'positions' | 'orders' | 'watchlist';
-export type ChartLayout = 'single' | 'quad';
+/** 布局预设 id，见 chart/layouts.ts */
+export type ChartLayout = string;
+
+/** 多图布局里要同步到所有图表的内容 */
+export interface ChartSync {
+  symbol: boolean;
+  interval: boolean;
+  crosshair: boolean;
+  /** 可视时间区间（滚动/缩放） */
+  time: boolean;
+  /** 日期范围选择器 */
+  dateRange: boolean;
+}
+
 export type Theme = 'dark' | 'light';
 
 /** 控制台页面：概览 / 交易台 / 交易日志 / 统计报表 / 设置 */
@@ -58,6 +72,7 @@ interface AppStore {
   /** 下单模板：0.5% 风险 + 2R 止盈 + 1R 自动保本 */
   templateArmed: boolean;
   layout: ChartLayout;
+  layoutSync: ChartSync;
   /** 深色 / 浅色主题，存 localStorage */
   theme: Theme;
   alertSound: boolean;
@@ -94,6 +109,7 @@ interface AppStore {
   setAuditOpen: (open: boolean) => void;
   setTemplateArmed: (armed: boolean) => void;
   setLayout: (layout: ChartLayout) => void;
+  setLayoutSync: (patch: Partial<ChartSync>) => void;
   setTheme: (theme: Theme) => void;
   setAlertPrefs: (patch: Partial<Pick<AppStore, 'alertSound' | 'alertDesktop'>>) => void;
   setCrosshairPrice: (price: number | null) => void;
@@ -143,6 +159,7 @@ function loadRisk(): RiskSettings {
 }
 
 const LAYOUT_KEY = 'mytrade.layout';
+const LAYOUT_SYNC_KEY = 'mytrade.layoutSync';
 const THEME_KEY = 'mytrade.theme';
 const RES_KEY = 'mytrade.resolution';
 const PREFS_KEY = 'mytrade.alertPrefs';
@@ -169,7 +186,28 @@ function writeJson(key: string, value: unknown): void {
 }
 
 function loadLayout(): ChartLayout {
-  return readJson<ChartLayout>(LAYOUT_KEY, 'single') === 'quad' ? 'quad' : 'single';
+  return normalizeLayoutId(readJson<unknown>(LAYOUT_KEY, '1'));
+}
+
+const defaultLayoutSync: ChartSync = {
+  symbol: false,
+  interval: false,
+  crosshair: true,
+  time: false,
+  dateRange: false,
+};
+
+function loadLayoutSync(): ChartSync {
+  const raw = readJson<Partial<ChartSync>>(LAYOUT_SYNC_KEY, {});
+  const flag = (key: keyof ChartSync) =>
+    typeof raw[key] === 'boolean' ? (raw[key] as boolean) : defaultLayoutSync[key];
+  return {
+    symbol: flag('symbol'),
+    interval: flag('interval'),
+    crosshair: flag('crosshair'),
+    time: flag('time'),
+    dateRange: flag('dateRange'),
+  };
 }
 
 function loadResolution(): string {
@@ -221,6 +259,7 @@ export const useApp = create<AppStore>((set, get) => ({
   auditOpen: false,
   templateArmed: false,
   layout: loadLayout(),
+  layoutSync: loadLayoutSync(),
   theme: readJson<Theme>(THEME_KEY, 'dark') === 'light' ? 'light' : 'dark',
   alertSound: loadPrefs().sound,
   alertDesktop: loadPrefs().desktop,
@@ -278,9 +317,16 @@ export const useApp = create<AppStore>((set, get) => ({
   setAuditOpen: (auditOpen) => set({ auditOpen }),
   setTemplateArmed: (templateArmed) => set({ templateArmed }),
   setLayout: (layout) => {
-    writeJson(LAYOUT_KEY, layout);
-    set({ layout });
+    const next = normalizeLayoutId(layout);
+    writeJson(LAYOUT_KEY, next);
+    set({ layout: next });
   },
+  setLayoutSync: (patch) =>
+    set((state) => {
+      const layoutSync = { ...state.layoutSync, ...patch };
+      writeJson(LAYOUT_SYNC_KEY, layoutSync);
+      return { layoutSync };
+    }),
   setTheme: (theme) => {
     writeJson(THEME_KEY, theme);
     set({ theme });

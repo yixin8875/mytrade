@@ -3,6 +3,7 @@ import { clsx } from 'clsx';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, spreadPoints } from '../lib/format';
+import { LayoutPickerButton } from './LayoutPicker';
 import type { RiskStatus } from '../gateway/types';
 
 /** 亏损额度使用比例 → 颜色（绿 → 琥珀 → 红） */
@@ -32,31 +33,15 @@ function riskHint(risk: RiskStatus): string {
   return parts.join('\n');
 }
 
-const TIMEFRAMES: [string, string][] = [
-  ['1', '1m'],
-  ['5', '5m'],
-  ['15', '15m'],
-  ['30', '30m'],
-  ['60', '1h'],
-  ['240', '4h'],
-  ['1D', '1D'],
-  ['1W', '1W'],
-];
-
 export function TopBar() {
   const conn = useApp((s) => s.conn);
   const health = useApp((s) => s.health);
   const symbols = useApp((s) => s.symbols);
   const symbol = useApp((s) => s.symbol);
-  const setSymbol = useApp((s) => s.setSymbol);
-  const resolution = useApp((s) => s.resolution);
-  const setResolution = useApp((s) => s.setResolution);
   const quote = useApp((s) => s.quote);
   const account = useApp((s) => s.account);
   const riskStatus = useApp((s) => s.riskStatus);
   const notify = useApp((s) => s.notify);
-  const layout = useApp((s) => s.layout);
-  const setLayout = useApp((s) => s.setLayout);
   const [confirmKill, setConfirmKill] = useState(false);
 
   const info = symbols.find((item) => item.name === symbol);
@@ -119,52 +104,7 @@ export function TopBar() {
 
   return (
     <header className="flex h-11 shrink-0 items-center gap-3 border-b border-tv-border bg-tv-panel px-3">
-      <div className="flex items-center gap-2">
-        <span className="text-[15px] font-bold tracking-wide text-tv-text">MyTrade</span>
-        <span className="rounded bg-tv-bg px-1 py-0.5 text-[9px] text-tv-muted">MT5</span>
-      </div>
-
-      <div className="h-5 w-px bg-tv-border" />
-
-      <select
-        value={symbol}
-        onChange={(event) => setSymbol(event.target.value)}
-        className="h-7 w-[140px] rounded border border-tv-border bg-tv-bg px-2 text-[11px] text-tv-text outline-none focus:border-tv-accent"
-      >
-        {symbols.length === 0 && <option value="">无品种</option>}
-        {symbols.map((item) => (
-          <option key={item.name} value={item.name}>
-            {item.name} · {item.description}
-          </option>
-        ))}
-      </select>
-
-      {layout === 'single' && (
-        <div className="flex items-center gap-0.5">
-          {TIMEFRAMES.map(([value, label]) => (
-            <button
-              key={value}
-              onClick={() => setResolution(value)}
-              className={clsx(
-                'h-6 rounded px-1.5 text-[10px] transition-colors',
-                resolution === value
-                  ? 'bg-tv-border text-tv-text'
-                  : 'text-tv-muted hover:bg-tv-border/60 hover:text-tv-text',
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <button
-        onClick={() => setLayout(layout === 'single' ? 'quad' : 'single')}
-        title={layout === 'single' ? '切换 2×2 多周期同屏（十字线联动）' : '回到单图'}
-        className="h-6 rounded bg-tv-bg px-2 text-[10px] text-tv-text hover:bg-tv-border"
-      >
-        {layout === 'single' ? '四图' : '单图'}
-      </button>
+      <LayoutPickerButton />
 
       <div className="h-5 w-px bg-tv-border" />
 

@@ -1,60 +1,145 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChartPanel } from './ChartPanel';
+import { DEFAULT_FRAMES, layoutById } from '../chart/layouts';
 import { useApp } from '../store/useApp';
 
-const FRAMES_KEY = 'mytrade.quadFrames';
-const DEFAULT_FRAMES = ['5', '15', '60', '240'];
+/** 最多 16 格；不足的布局只使用前面的格子 */
+const CELLS = DEFAULT_FRAMES.length;
+const FRAMES_KEY = 'mytrade.cellFrames';
+const LEGACY_FRAMES_KEY = 'mytrade.quadFrames';
+const SYMBOLS_KEY = 'mytrade.cellSymbols';
 
-/** 四图周期存本地，刷新后保持上次的搭配 */
-function loadFrames(): string[] {
+function readJson(key: string): unknown {
   try {
-    const raw = window.localStorage.getItem(FRAMES_KEY);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
-    if (
-      Array.isArray(parsed) &&
-      parsed.length === 4 &&
-      parsed.every((item) => typeof item === 'string' && item.length > 0)
-    ) {
-      return parsed as string[];
-    }
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as unknown) : null;
   } catch {
-    /* 坏数据就回默认 */
+    return null;
   }
-  return DEFAULT_FRAMES;
+}
+
+function persist(key: string, value: unknown): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* 写不进去也继续用 */
+  }
+}
+
+/** 每格周期存本地，刷新后保持上次的搭配；旧的四图周期自动迁移 */
+function loadFrames(): string[] {
+  const next = [...DEFAULT_FRAMES];
+  let raw = readJson(FRAMES_KEY);
+  if (!Array.isArray(raw)) raw = readJson(LEGACY_FRAMES_KEY);
+  if (Array.isArray(raw)) {
+    raw.forEach((value, index) => {
+      if (index < CELLS && typeof value === 'string' && value) next[index] = value;
+    });
+  }
+  return next;
+}
+
+/** 每格品种；空串表示跟随全局品种 */
+function loadSymbols(): string[] {
+  const next = Array.from({ length: CELLS }, () => '');
+  const raw = readJson(SYMBOLS_KEY);
+  if (Array.isArray(raw)) {
+    raw.forEach((value, index) => {
+      if (index < CELLS && typeof value === 'string') next[index] = value;
+    });
+  }
+  return next;
 }
 
 export function ChartGrid() {
-  const layout = useApp((s) => s.layout);
+  const layoutId = useApp((s) => s.layout);
   const symbol = useApp((s) => s.symbol);
-  const [frames, setFrames] = useState<string[]>(loadFrames);
+  const resolution = useApp((s) => s.resolution);
+  const sync = useApp((s) => s.layoutSync);
+  const setSymbol = useApp((s) => s.setSymbol);
+  const setResolution = useApp((s) => s.setResolution);
+  const preset = layoutById(layoutId);
 
-  const setFrame = (index: number, frame: string) => {
-    setFrames((prev) => {
-      if (prev[index] === frame) return prev;
-      const next = [...prev];
-      next[index] = frame;
-      try {
-        window.localStorage.setItem(FRAMES_KEY, JSON.stringify(next));
-      } catch {
-        /* 写不进去也继续用 */
-      }
+  const [frames, setFrames] = useState<string[]>(loadFrames);
+  const [symbols, setSymbols] = useState<string[]>(loadSymbols);
+
+  // 全局品种确定后，把还没单独设置过的格子填成当前品种，
+  // 之后某个格子换品种就不会顺带把其他格子一起拖走。
+  // 开着「商品代码同步」时全部对齐全局，关掉同步的瞬间画面保持不变。
+  useEffect(() => {
+    if (!symbol) return;
+    setSymbols((prev) => {
+      const next = prev.map((value) => (sync.symbol ? symbol : value || symbol));
+      if (next.every((value, index) => value === prev[index])) return prev;
+      persist(SYMBOLS_KEY, next);
       return next;
+    });
+  }, [symbol, sync.symbol]);
+
+  // 周期同步同理：同步期间把全局周期记到每一格，关掉同步时不跳回旧周期。
+  useEffect(() => {
+    if (!sync.interval || !resolution) return;
+    setFrames((prev) => {
+      if (prev.every((value) => value === resolution)) return prev;
+      const next = prev.map(() => resolution);
+      persist(FRAMES_KEY, next);
+      return next;
+    });
+  }, [resolution, sync.interval]);
+
+  const changeSymbol = (index: number, next: string) => {
+    if (sync.symbol) {
+      if (useApp.getState().symbol !== next) setSymbol(next);
+      return;
+    }
+    setSymbols((prev) => {
+      if (prev[index] === next) return prev;
+      const values = [...prev];
+      values[index] = next;
+      persist(SYMBOLS_KEY, values);
+      return values;
+    });
+    // 下单 / 持仓列表跟随当前操作的图表
+    if (useApp.getState().symbol !== next) setSymbol(next);
+  };
+
+  const changeInterval = (index: number, next: string) => {
+    if (sync.interval) {
+      if (useApp.getState().resolution !== next) setResolution(next);
+      return;
+    }
+    setFrames((prev) => {
+      if (prev[index] === next) return prev;
+      const values = [...prev];
+      values[index] = next;
+      persist(FRAMES_KEY, values);
+      return values;
     });
   };
 
-  if (layout === 'single') return <ChartPanel slot="main" />;
-
   return (
-    <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-px bg-tv-border">
-      {frames.map((frame, index) => (
-        <div key={index} className="relative min-h-0 min-w-0 overflow-hidden bg-tv-bg">
-          {/* 四格同品种、不同周期；十字线在图表之间联动 */}
+    <div
+      className="grid h-full w-full gap-px bg-tv-border"
+      style={{
+        gridTemplateAreas: preset.areas,
+        gridTemplateColumns: `repeat(${preset.cols}, minmax(0, 1fr))`,
+        gridTemplateRows: `repeat(${preset.rows}, minmax(0, 1fr))`,
+      }}
+    >
+      {Array.from({ length: preset.count }, (_, index) => (
+        <div
+          key={index}
+          style={{ gridArea: `c${index}` }}
+          className="relative min-h-0 min-w-0 overflow-hidden bg-tv-bg"
+        >
           <ChartPanel
-            slot={`q${index}`}
-            symbol={symbol}
-            resolution={frame}
-            chrome
-            onFrame={(value) => setFrame(index, value)}
+            slot={index === 0 ? 'main' : `c${index}`}
+            symbol={sync.symbol ? symbol : symbols[index] || symbol}
+            resolution={sync.interval ? resolution : frames[index]}
+            syncCrosshair={sync.crosshair}
+            syncRange={sync.time || sync.dateRange}
+            onSymbolChange={(next) => changeSymbol(index, next)}
+            onIntervalChange={(next) => changeInterval(index, next)}
           />
         </div>
       ))}

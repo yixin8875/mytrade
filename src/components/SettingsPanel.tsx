@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
+import { LayoutGallery, SyncToggles } from './LayoutPicker';
 import type { GatewayConfig } from '../gateway/types';
 import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
 
@@ -422,7 +423,7 @@ function AppearanceSection() {
         description="这一步先把设置从顶部工具栏和各个弹窗里收拢出来；日志、统计和复盘页会在后续继续拆分。"
       >
         <ul className="space-y-1.5 text-[11px] leading-relaxed text-tv-muted">
-          <li>· 顶部保留品种、周期、布局、告警和急停等高频操作。</li>
+          <li>· 顶部保留布局、账户、连接状态和急停等高频操作。</li>
           <li>· 主题、风控、告警偏好、更新统一放在设置页。</li>
           <li>· 画线模板和收藏仍在图表上操作，位置不变。</li>
         </ul>
@@ -439,17 +440,17 @@ function ChartSection() {
 
   return (
     <>
-      <Card title="图表布局" description="四图是同一品种的 2×2 多周期布局，十字线联动。">
-        <Row label="默认布局">
-          <Segmented
-            value={layout}
-            options={[
-              { value: 'single', label: '单图' },
-              { value: 'quad', label: '四图' },
-            ]}
-            onChange={setLayout}
-          />
-        </Row>
+      <Card
+        title="图表布局"
+        description="单图到 16 图都可选；多图时可让品种、周期、十字线和可视区间在所有图表间同步。"
+      >
+        <div className="rounded-lg border border-tv-border bg-tv-bg/50 p-2">
+          <LayoutGallery value={layout} onChange={setLayout} />
+          <div className="mt-2 border-t border-tv-border pt-2">
+            <div className="mb-1 text-[10px] font-medium text-tv-text">同步到所有图表</div>
+            <SyncToggles />
+          </div>
+        </div>
         <Row label="默认周期" hint="切换后主图立即生效，下次启动沿用。">
           <select
             value={resolution}

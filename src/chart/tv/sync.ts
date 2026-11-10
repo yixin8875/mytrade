@@ -30,3 +30,28 @@ export function subscribeCrosshair(listener: Listener): () => void {
     listeners.delete(listener);
   };
 }
+
+export interface RangeState {
+  /** 可视区间起点（UNIX 秒） */
+  from: number;
+  /** 可视区间终点（UNIX 秒） */
+  to: number;
+  /** 来源图表 id，来源图不再应用自己的广播 */
+  fromSlot: string;
+}
+
+type RangeListener = (state: RangeState | null) => void;
+
+const rangeListeners = new Set<RangeListener>();
+
+/** 广播可视时间区间；只在用户开启「时间/日期范围」同步时调用 */
+export function publishRange(state: RangeState | null): void {
+  for (const listener of rangeListeners) listener(state);
+}
+
+export function subscribeRange(listener: RangeListener): () => void {
+  rangeListeners.add(listener);
+  return () => {
+    rangeListeners.delete(listener);
+  };
+}

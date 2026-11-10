@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { clsx } from 'clsx';
 import { gateway } from '../gateway/client';
 import { handleGlobalShortcut, useApp, type Theme } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, snapToLevel } from '../lib/format';
@@ -7,7 +6,7 @@ import { GatewayDatafeed } from '../chart/tv/datafeed';
 import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
 import { registerWidget } from '../chart/tv/registry';
 import { customIndicators } from '../chart/tv/studies';
-import { publishCrosshair } from '../chart/tv/sync';
+import { publishCrosshair, publishRange, subscribeRange, type RangeState } from '../chart/tv/sync';
 import { ChartChips, type ChartBand, type ChartChip } from './ChartChips';
 import { DrawingTemplates } from './DrawingTemplates';
 import type {
@@ -26,6 +25,44 @@ const ENTRY_COLOR = '#2962ff';
 const STOP_OUT_COLOR = '#f59e0b';
 const RISK_FILL = 'rgba(239, 83, 80, 0.10)';
 const REWARD_FILL = 'rgba(38, 166, 154, 0.10)';
+
+/**
+ * 背景、网格、坐标文字由应用主题决定。库恢复的旧图表属性优先级高于 overrides，
+ * 所以创建图表前先把这几个主题相关键清掉；倒计时、指标、时区等设置照常保留。
+ */
+function dropSavedThemeColors(theme: Theme): void {
+  try {
+    // 主题没变就保留用户自己调过的背景/网格颜色；变了才清掉旧主题的值
+    if (window.localStorage.getItem('tradingview.current_theme.name') === theme) return;
+    const raw = window.localStorage.getItem('tradingview.chartproperties');
+    if (raw) {
+      const saved = JSON.parse(raw) as {
+        paneProperties?: {
+          background?: unknown;
+          backgroundType?: unknown;
+          vertGridProperties?: { color?: unknown };
+          horzGridProperties?: { color?: unknown };
+        };
+        scalesProperties?: { textColor?: unknown; lineColor?: unknown };
+      };
+      const pane = saved.paneProperties;
+      if (pane) {
+        delete pane.background;
+        delete pane.backgroundType;
+        if (pane.vertGridProperties) delete pane.vertGridProperties.color;
+        if (pane.horzGridProperties) delete pane.horzGridProperties.color;
+      }
+      if (saved.scalesProperties) {
+        delete saved.scalesProperties.textColor;
+        delete saved.scalesProperties.lineColor;
+      }
+      window.localStorage.setItem('tradingview.chartproperties', JSON.stringify(saved));
+    }
+    window.localStorage.setItem('tradingview.current_theme.name', theme);
+  } catch {
+    /* 存储坏了就交给 overrides 兜底 */
+  }
+}
 
 function chartOverrides(theme: Theme): Partial<ChartPropertiesOverrides> {
   const light = theme === 'light';
@@ -116,32 +153,29 @@ function signedMoney(amount: number | null | undefined, currency: string): strin
   return `  ${fmtSigned(amount)}${currency ? ` ${currency}` : ''}`;
 }
 
-/** 四图模式下每格可选的周期 */
-const FRAMES: [string, string][] = [
-  ['1', '1m'],
-  ['5', '5m'],
-  ['15', '15m'],
-  ['60', '1h'],
-  ['240', '4h'],
-  ['1D', '1D'],
-];
-
 export function ChartPanel({
   slot = 'main',
   symbol: symbolProp,
   resolution: resolutionProp,
-  chrome = false,
-  onFrame,
+  onSymbolChange,
+  onIntervalChange,
+  syncCrosshair = true,
+  syncRange = false,
 }: {
-  /** 图表 id：main 或 q0~q3，用于十字线联动与主图识别 */
+  /** 图表 id：main 或 c1~c15，用于十字线联动与主图识别 */
   slot?: string;
   /** 不传则跟随全局品种 */
   symbol?: string;
   /** 不传则跟随全局周期 */
   resolution?: string;
-  /** 四图模式下显示左上角的周期切换 */
-  chrome?: boolean;
-  onFrame?: (resolution: string) => void;
+  /** 图表自带品种栏切换后回写；不传则写全局 */
+  onSymbolChange?: (symbol: string) => void;
+  /** 图表自带周期栏切换后回写；不传则写全局 */
+  onIntervalChange?: (resolution: string) => void;
+  /** 跟随其他图表的十字线 */
+  syncCrosshair?: boolean;
+  /** 跟随其他图表的可视时间区间（时间 / 日期范围同步） */
+  syncRange?: boolean;
 } = {}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<IChartingLibraryWidget | null>(null);
@@ -154,12 +188,24 @@ export function ChartPanel({
   const [chart, setChart] = useState<IChartWidgetApi | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // 图表事件订阅只建立一次，回调通过 ref 拿最新值
+  const onSymbolChangeRef = useRef(onSymbolChange);
+  onSymbolChangeRef.current = onSymbolChange;
+  const onIntervalChangeRef = useRef(onIntervalChange);
+  onIntervalChangeRef.current = onIntervalChange;
+  const symbolRef = useRef<string | undefined>(undefined);
+  const resolutionRef = useRef<string | undefined>(undefined);
+  const syncCrosshairRef = useRef(syncCrosshair);
+  syncCrosshairRef.current = syncCrosshair;
+
   const conn = useApp((s) => s.conn);
   const health = useApp((s) => s.health);
   const storeSymbol = useApp((s) => s.symbol);
   const storeResolution = useApp((s) => s.resolution);
   const symbol = symbolProp ?? storeSymbol;
   const resolution = resolutionProp ?? storeResolution;
+  symbolRef.current = symbol;
+  resolutionRef.current = resolution;
   const info = useApp((s) => s.symbols.find((item) => item.name === s.symbol));
   const quote = useApp((s) => s.quote);
   const draft = useApp((s) => s.draft);
@@ -422,6 +468,7 @@ export function ChartPanel({
     startedRef.current = true;
     if (!datafeedRef.current) datafeedRef.current = new GatewayDatafeed();
     const initialTheme = useApp.getState().theme;
+    if (slot === 'main') dropSavedThemeColors(initialTheme);
 
     try {
       const widget = new tv.widget({
@@ -461,8 +508,12 @@ export function ChartPanel({
         custom_indicators_getter: customIndicators,
         // 画线模板由应用自己的「画线模板」面板负责（见 DrawingTemplates.tsx），
         // 不用库里那个只显示「应用默认」的内置模板菜单。
-        // 只关图表属性持久化，保留收藏与自选所需的 localStorage
-        disabled_features: ['save_chart_properties_to_local_storage'],
+        // 主图把图表属性（倒计时、坐标、指标等）存进 localStorage，重启后保留；
+        // 四图是四个 widget 共用一份存储，读写会互相覆盖，所以整格关掉本地存储。
+        disabled_features:
+          slot === 'main'
+            ? []
+            : ['use_localstorage_for_settings', 'save_chart_properties_to_local_storage'],
       });
       widgetRef.current = widget;
       registerWidget(slot, widget);
@@ -473,23 +524,32 @@ export function ChartPanel({
 
       widget.chartReady().then(() => {
         const active = widget.activeChart();
-        // 四图里每格有独立周期，只有单图（跟随全局）才把图表操作写回 store
+        // 品种 / 周期切换回写：单图直接写全局，多图交给 ChartGrid 决定
+        // 是否同步到所有图表。用 ref 比较，避免 setSymbol/setResolution 自己触发的事件回环。
         active.onSymbolChanged().subscribe(null, (next: LibrarySymbolInfo) => {
-          if (!symbolProp && next?.name && next.name !== useApp.getState().symbol) {
-            setSymbol(next.name);
-          }
+          if (!next?.name || next.name === symbolRef.current) return;
+          symbolRef.current = next.name;
+          if (onSymbolChangeRef.current) onSymbolChangeRef.current(next.name);
+          else setSymbol(next.name);
         });
         active.onIntervalChanged().subscribe(null, (interval: ResolutionString) => {
-          if (!resolutionProp && interval !== useApp.getState().resolution) setResolution(interval);
+          if (interval === resolutionRef.current) return;
+          resolutionRef.current = interval;
+          if (onIntervalChangeRef.current) onIntervalChangeRef.current(interval);
+          else setResolution(interval);
         });
+        // 图表属性从 localStorage 恢复后，再用应用主题覆盖一次背景/文字色
+        widget.applyOverrides(chartOverrides(useApp.getState().theme));
         active.crossHairMoved().subscribe(null, (params) => {
           if (!params || typeof params.price !== 'number') return;
           crosshairPrice.current = params.price;
-          publishCrosshair({
-            price: params.price,
-            time: typeof params.time === 'number' ? params.time : null,
-            from: slot,
-          });
+          if (syncCrosshairRef.current) {
+            publishCrosshair({
+              price: params.price,
+              time: typeof params.time === 'number' ? params.time : null,
+              from: slot,
+            });
+          }
           const now = performance.now();
           if (now - lastCrosshairStore.current > 100) {
             lastCrosshairStore.current = now;
@@ -513,20 +573,25 @@ export function ChartPanel({
   }, [conn, symbol, quote, resolution, setResolution, setSymbol]);
 
   // ---- 主题切换：不重建图表，换主题后重新套一遍颜色 ----
+  // 必须等 chartReady（chart 非空）再调用，四图同时创建时内部窗口可能还没就绪
   useEffect(() => {
     const widget = widgetRef.current;
-    if (!widget) return;
+    if (!widget || !chart) return;
     let cancelled = false;
-    widget
-      .changeTheme(theme)
-      .then(() => {
-        if (!cancelled) widget.applyOverrides(chartOverrides(theme));
-      })
-      .catch(() => {});
+    try {
+      widget
+        .changeTheme(theme)
+        .then(() => {
+          if (!cancelled) widget.applyOverrides(chartOverrides(theme));
+        })
+        .catch(() => {});
+    } catch {
+      /* 图表还在初始化就先交给构造参数里的 theme/overrides */
+    }
     return () => {
       cancelled = true;
     };
-  }, [theme]);
+  }, [theme, chart]);
 
   // ---- 卸载 ----
   useEffect(
@@ -565,6 +630,35 @@ export function ChartPanel({
       chart.setResolution(resolution as ResolutionString).catch(() => {});
     }
   }, [chart, resolution]);
+
+  // ---- 可视时间区间同步（时间 / 日期范围开关）----
+  useEffect(() => {
+    if (!chart || !syncRange) return;
+    let lastRange = '';
+
+    const apply = (state: RangeState | null) => {
+      if (!state || state.fromSlot === slot) return;
+      lastRange = `${state.from}:${state.to}`;
+      chart.setVisibleRange({ from: state.from, to: state.to }).catch(() => {});
+    };
+
+    const off = subscribeRange(apply);
+    const subscription = chart.onVisibleRangeChanged();
+    const handler = (range: { from: number; to: number } | null) => {
+      if (!range) return;
+      const key = `${range.from}:${range.to}`;
+      // 刚应用过来的区间不再广播，避免两张图来回互相设置
+      if (key === lastRange) return;
+      lastRange = key;
+      publishRange({ from: range.from, to: range.to, fromSlot: slot });
+    };
+    subscription.subscribe(null, handler);
+
+    return () => {
+      off();
+      subscription.unsubscribe(null, handler);
+    };
+  }, [chart, syncRange, slot]);
 
   // ---- 点击图表设置委托价 ----
   const handleChartClick = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -678,32 +772,20 @@ export function ChartPanel({
     <div
       className="relative h-full w-full overflow-hidden"
       onClick={handleChartClick}
-      onMouseLeave={() => publishCrosshair(null)}
+      onMouseLeave={() => {
+        if (syncCrosshairRef.current) publishCrosshair(null);
+      }}
     >
       <div ref={hostRef} className="absolute inset-0" />
-      <ChartChips chips={chips} bands={bands} host={hostRef} chart={chart} slot={slot} />
+      <ChartChips
+        chips={chips}
+        bands={bands}
+        host={hostRef}
+        chart={chart}
+        slot={slot}
+        syncCrosshair={syncCrosshair}
+      />
       {chart && <DrawingTemplates chart={chart} slot={slot} />}
-      {chrome && (
-        <div className="absolute left-[58px] top-[42px] z-30 flex items-center gap-0.5 rounded border border-tv-border/60 bg-tv-panel/85 px-1 py-0.5 shadow">
-          {FRAMES.map(([value, label]) => (
-            <button
-              key={value}
-              onClick={(event) => {
-                event.stopPropagation();
-                onFrame?.(value);
-              }}
-              className={clsx(
-                'h-5 rounded px-1.5 text-[10px] transition-colors',
-                resolution === value
-                  ? 'bg-tv-accent text-white'
-                  : 'text-tv-muted hover:bg-tv-border/60 hover:text-tv-text',
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
       {error && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-tv-bg/90 px-6 text-center text-sm text-tv-down">
           {error}

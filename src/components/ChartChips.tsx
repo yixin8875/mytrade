@@ -205,6 +205,7 @@ export function ChartChips({
   host,
   chart = null,
   slot = 'main',
+  syncCrosshair = true,
 }: {
   chips: ChartChip[];
   bands?: ChartBand[];
@@ -212,6 +213,8 @@ export function ChartChips({
   chart?: IChartWidgetApi | null;
   /** 用于过滤自己发出的十字线联动 */
   slot?: string;
+  /** 关闭时不再显示其他图表的十字线 */
+  syncCrosshair?: boolean;
 }) {
   const [layout, setLayout] = useState<Layout>({ chips: {}, bands: {}, ghost: null });
   const chipsRef = useRef(chips);
@@ -308,13 +311,15 @@ export function ChartChips({
   };
 
   // 其他图表的十字线：订阅后写进 ref，由下面的动画帧循环读取
-  useEffect(
-    () =>
-      subscribeCrosshair((state) => {
-        ghostRef.current = !state || state.from === slot ? null : state;
-      }),
-    [slot],
-  );
+  useEffect(() => {
+    if (!syncCrosshair) {
+      ghostRef.current = null;
+      return;
+    }
+    return subscribeCrosshair((state) => {
+      ghostRef.current = !state || state.from === slot ? null : state;
+    });
+  }, [slot, syncCrosshair]);
 
   useEffect(() => {
     let raf = 0;
