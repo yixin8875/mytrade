@@ -8,6 +8,7 @@ import { JournalPanel } from './components/JournalPanel';
 import { OrderTicket } from './components/OrderTicket';
 import { OrdersPanel } from './components/OrdersPanel';
 import { PositionsPanel } from './components/PositionsPanel';
+import { SettingsPanel } from './components/SettingsPanel';
 import { StatusBar } from './components/StatusBar';
 import { Toast } from './components/Toast';
 import { TopBar } from './components/TopBar';
@@ -251,6 +252,7 @@ export default function App() {
       <JournalPanel />
       <ExecutionModal />
       <AuditModal />
+      <SettingsPanel />
       <UpdatePanel />
       <StatusBar />
       <Toast />

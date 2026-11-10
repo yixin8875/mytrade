@@ -44,6 +44,7 @@ interface AppStore {
   journalOpen: boolean;
   executionOpen: boolean;
   auditOpen: boolean;
+  settingsOpen: boolean;
   /** 下单模板：0.5% 风险 + 2R 止盈 + 1R 自动保本 */
   templateArmed: boolean;
   layout: ChartLayout;
@@ -81,6 +82,7 @@ interface AppStore {
   setJournalOpen: (open: boolean) => void;
   setExecutionOpen: (open: boolean) => void;
   setAuditOpen: (open: boolean) => void;
+  setSettingsOpen: (open: boolean) => void;
   setTemplateArmed: (armed: boolean) => void;
   setLayout: (layout: ChartLayout) => void;
   setTheme: (theme: Theme) => void;
@@ -133,6 +135,7 @@ function loadRisk(): RiskSettings {
 
 const LAYOUT_KEY = 'mytrade.layout';
 const THEME_KEY = 'mytrade.theme';
+const RES_KEY = 'mytrade.resolution';
 const PREFS_KEY = 'mytrade.alertPrefs';
 const WATCH_KEY = 'mytrade.watchlist';
 const TAG_KEY = 'mytrade.orderTag';
@@ -158,6 +161,11 @@ function writeJson(key: string, value: unknown): void {
 
 function loadLayout(): ChartLayout {
   return readJson<ChartLayout>(LAYOUT_KEY, 'single') === 'quad' ? 'quad' : 'single';
+}
+
+function loadResolution(): string {
+  const raw = readJson<unknown>(RES_KEY, '5');
+  return typeof raw === 'string' && raw ? raw : '5';
 }
 
 interface AlertPrefs {
@@ -188,7 +196,7 @@ export const useApp = create<AppStore>((set, get) => ({
   latency: null,
   symbols: [],
   symbol: '',
-  resolution: '5',
+  resolution: loadResolution(),
   quote: null,
   account: null,
   positions: [],
@@ -202,6 +210,7 @@ export const useApp = create<AppStore>((set, get) => ({
   journalOpen: false,
   executionOpen: false,
   auditOpen: false,
+  settingsOpen: false,
   templateArmed: false,
   layout: loadLayout(),
   theme: readJson<Theme>(THEME_KEY, 'dark') === 'light' ? 'light' : 'dark',
@@ -227,7 +236,10 @@ export const useApp = create<AppStore>((set, get) => ({
         ? { ...state.draft, active: false, sl: null, tp: null, price: 0 }
         : state.draft,
     })),
-  setResolution: (resolution) => set({ resolution }),
+  setResolution: (resolution) => {
+    writeJson(RES_KEY, resolution);
+    set({ resolution });
+  },
   setQuote: (quote) => set({ quote }),
   setAccount: (account) => set({ account }),
   setPositions: (positions) => set({ positions }),
@@ -252,6 +264,18 @@ export const useApp = create<AppStore>((set, get) => ({
   setJournalOpen: (journalOpen) => set({ journalOpen }),
   setExecutionOpen: (executionOpen) => set({ executionOpen }),
   setAuditOpen: (auditOpen) => set({ auditOpen }),
+  setSettingsOpen: (settingsOpen) =>
+    set({
+      settingsOpen,
+      ...(settingsOpen
+        ? {
+            alertsOpen: false,
+            journalOpen: false,
+            executionOpen: false,
+            auditOpen: false,
+          }
+        : {}),
+    }),
   setTemplateArmed: (templateArmed) => set({ templateArmed }),
   setLayout: (layout) => {
     writeJson(LAYOUT_KEY, layout);

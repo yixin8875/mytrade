@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
-import { Moon, RefreshCw, Sun } from 'lucide-react';
+import { RefreshCw, Settings as SettingsIcon } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
 import { useApp } from '../store/useApp';
@@ -59,13 +59,12 @@ export function TopBar() {
   const notify = useApp((s) => s.notify);
   const layout = useApp((s) => s.layout);
   const setLayout = useApp((s) => s.setLayout);
-  const theme = useApp((s) => s.theme);
-  const setTheme = useApp((s) => s.setTheme);
   const alerts = useApp((s) => s.alerts);
   const setAlertsOpen = useApp((s) => s.setAlertsOpen);
   const setJournalOpen = useApp((s) => s.setJournalOpen);
   const setExecutionOpen = useApp((s) => s.setExecutionOpen);
   const setAuditOpen = useApp((s) => s.setAuditOpen);
+  const setSettingsOpen = useApp((s) => s.setSettingsOpen);
   const [confirmKill, setConfirmKill] = useState(false);
 
   const info = symbols.find((item) => item.name === symbol);
@@ -177,14 +176,6 @@ export function TopBar() {
           {layout === 'single' ? '四图' : '单图'}
         </button>
         <button
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          title={theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
-          className="flex h-6 items-center gap-1 rounded bg-tv-bg px-1.5 text-[10px] text-tv-text hover:bg-tv-border"
-        >
-          {theme === 'dark' ? <Sun size={12} /> : <Moon size={12} />}
-          {theme === 'dark' ? '浅色' : '深色'}
-        </button>
-        <button
           onClick={() => setAlertsOpen(true)}
           title="价格告警：声音 / 桌面通知 / 第三方推送"
           className={clsx(
@@ -227,6 +218,14 @@ export function TopBar() {
             更新
           </button>
         )}
+        <button
+          onClick={() => setSettingsOpen(true)}
+          title="设置：外观、图表、风控、告警、更新"
+          className="flex h-6 items-center gap-1 rounded bg-tv-bg px-1.5 text-[10px] text-tv-text hover:bg-tv-border"
+        >
+          <SettingsIcon size={11} />
+          设置
+        </button>
       </div>
 
       <div className="h-5 w-px bg-tv-border" />

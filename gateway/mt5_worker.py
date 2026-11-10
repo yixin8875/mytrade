@@ -312,6 +312,20 @@ class Mt5Worker:
             self._connected = False
             self._last_error = {"code": -1, "message": f"{type(exc).__name__}: {exc}"}
 
+    def _set_config(self, p: dict) -> dict:
+        """设置页保存风控字段；立即生效并写回 config.json。"""
+        try:
+            updated = self.cfg.update(p)
+        except ValueError as exc:
+            raise GatewayError("BAD_CONFIG", str(exc)) from exc
+        except OSError as exc:
+            raise GatewayError("CONFIG_SAVE", f"保存配置失败：{exc}") from exc
+
+        self.store.audit("config.update", {"changes": p})
+        self._poll_risk(force=True)
+        self._emit("gateway", self.health())
+        return updated
+
     def health(self) -> dict:
         terminal = None
         if self._connected:
@@ -349,6 +363,7 @@ class Mt5Worker:
                 "config": self.cfg.public(),
                 "tradeMode": self._trade_mode,
             },
+            "system.setConfig": self._set_config,
             "system.setTradeMode": self._set_trade_mode,
             "system.halt": self._halt,
             "system.resume": self._resume,

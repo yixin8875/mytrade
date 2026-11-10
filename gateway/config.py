@@ -9,6 +9,18 @@ BASE_DIR = Path(__file__).resolve().parent
 
 @dataclass
 class Config:
+    # 设置页允许修改的风控字段：字段 -> (类型, 最小值, 最大值)
+    EDITABLE_FIELDS = {
+        "max_lot": (float, 0.01, 1000.0),
+        "max_risk_pct": (float, 0.01, 100.0),
+        "max_positions": (int, 1, 100),
+        "daily_loss_pct": (float, 0.0, 100.0),
+        "max_trades_per_day": (int, 0, 10_000),
+        "max_consecutive_losses": (int, 0, 1_000),
+        "cooldown_minutes": (int, 0, 10_080),
+        "max_spread_points": (int, 0, 1_000_000),
+    }
+
     host: str = "127.0.0.1"
     port: int = 8765
 
@@ -51,6 +63,39 @@ class Config:
         raw = json.loads(path.read_text(encoding="utf-8"))
         known = set(cls.__dataclass_fields__)
         return cls(**{k: v for k, v in raw.items() if k in known})
+
+    def update(self, patch: dict) -> dict:
+        """校验并保存设置页可改的风控字段，保留 config.json 里的其他字段。"""
+        clean: dict[str, float | int] = {}
+        for key, value in patch.items():
+            spec = self.EDITABLE_FIELDS.get(key)
+            if spec is None:
+                raise ValueError(f"字段 {key} 不允许在设置页修改")
+            kind, low, high = spec
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{key} 必须是数字")
+            if kind is int and not isinstance(value, int):
+                raise ValueError(f"{key} 必须是整数")
+            number = kind(value)
+            if not low <= number <= high:
+                raise ValueError(f"{key} 必须在 {low} 到 {high} 之间")
+            clean[key] = number
+
+        if not clean:
+            raise ValueError("没有需要保存的字段")
+
+        path = BASE_DIR / "config.json"
+        raw: dict = asdict(self)
+        if path.exists():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        raw.update(clean)
+        path.write_text(
+            json.dumps(raw, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        for key, value in clean.items():
+            setattr(self, key, value)
+        return self.public()
 
     def public(self) -> dict:
         data = asdict(self)
