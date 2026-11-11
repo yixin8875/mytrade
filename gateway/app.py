@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from config import BASE_DIR, Config
+from lifecycle import parent_pid, watch_parent
 from mt5_worker import GatewayError, Mt5Worker
 from store import Store
 
@@ -60,7 +61,7 @@ async def lifespan(_: FastAPI):
     log.info("MT5 worker stopped")
 
 
-app = FastAPI(title="MyTrade Gateway", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="MyTrade Gateway", version="0.4.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -155,5 +156,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
 
 if __name__ == "__main__":
-    log.info("starting MyTrade gateway on %s:%s (mode=%s)", cfg.host, cfg.port, cfg.trade_mode)
-    uvicorn.run(app, host=cfg.host, port=cfg.port, log_level="warning")
+    log.info(
+        "starting MyTrade gateway on %s:%s (mode=%s, data=%s)",
+        cfg.host,
+        cfg.port,
+        cfg.trade_mode,
+        BASE_DIR,
+    )
+    server = uvicorn.Server(
+        uvicorn.Config(app, host=cfg.host, port=cfg.port, log_level="warning")
+    )
+    owner = parent_pid()
+    if owner:
+        log.info("watching parent process %s", owner)
+        watch_parent(owner, lambda: setattr(server, "should_exit", True))
+    server.run()

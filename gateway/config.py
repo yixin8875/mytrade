@@ -4,9 +4,8 @@ import json
 import os
 import re
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+from paths import BASE_DIR
 
 
 @dataclass

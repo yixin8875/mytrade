@@ -32,6 +32,8 @@ pip install -r gateway/requirements.txt
 npm run gateway
 ```
 
+首次运行会把旧的 `gateway/config.json`、`gateway/data/`、`gateway/audit/` 迁移到 `%LOCALAPPDATA%\MyTrade\gateway\`，之后源码启动和桌面版共用这份数据。
+
 3. 启动界面：
 
 ```bash
@@ -47,9 +49,17 @@ npm run tauri:dev
 ```
 
 > Tauri 会自行执行 `npm run dev`，如果 5173 已被占用，请先停掉单独的 Vite。
-> 当前桌面版仍需你在另一个终端手动运行 `npm run gateway`；P4 会把网关打成 sidecar 自动启动。
+> 桌面版会自动启动打包好的网关 sidecar，并在应用退出时一并关闭。开发时如果已经手动运行了 `npm run gateway`，应用检测到 8765 端口已监听就不会重复启动。
 
 ### 打包桌面版
+
+首次打包前准备独立的网关构建环境（只需一次）：
+
+```bash
+npm run gateway:setup
+```
+
+之后直接打包；`tauri:build` 会先运行 `npm run gateway:build`，用 PyInstaller 生成 sidecar，再把它和安装包一起打进去。
 
 ```bash
 npm run tauri:build
@@ -57,11 +67,13 @@ npm run tauri:build
 
 产物：
 
-- `src-tauri/target/release/bundle/msi/MyTrade_0.3.0_x64_en-US.msi`
-- `src-tauri/target/release/bundle/nsis/MyTrade_0.3.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/MyTrade_0.4.0_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/MyTrade_0.4.0_x64-setup.exe`
 - 同名 `.sig` 文件（Tauri 更新签名，发布到 GitHub 时使用）
 
-安装包未签名，首次运行 Windows 可能弹 SmartScreen，选「更多信息 → 仍要运行」。安装包只包含前端与桌面壳，仍需先启动 Python 网关（`npm run gateway`），否则界面会一直显示等待连接。
+安装包未签名，首次运行 Windows 可能弹 SmartScreen，选「更多信息 → 仍要运行」。安装包已包含网关 sidecar，启动应用时会在后台自动拉起，退出应用时自动关闭，不需要另开终端运行 Python。
+
+网关数据统一保存在 `%LOCALAPPDATA%\MyTrade\gateway\`：`config.json`（账户与风控）、`data\`（交易库、凭据、截图）、`audit\`（审计日志）和 `gateway.log`。从源码目录第一次运行新版网关时，会把旧的 `gateway/config.json`、`gateway/data/`、`gateway/audit/` 复制到这个目录一次；之后桌面版和手动启动共用同一份数据。
 
 ### 发布与自动更新（GitHub Releases）
 
@@ -78,7 +90,7 @@ export GITHUB_TOKEN=github_pat_xxx
 npm run release -- --notes "这一版改了什么"
 ```
 
-脚本会构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.3.0` release、上传安装包与清单。只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`。
+脚本会先构建网关 sidecar，再构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.4.0` release、上传安装包与清单。只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`（此时 sidecar 也必须已经构建好）。
 
 > 更新签名私钥在 `~/.tauri/mytrade.key`（已被 `.gitignore` 排除，**不要提交**），公钥写在 `tauri.conf.json` 的 `plugins.updater.pubkey`。私钥丢失后，已安装的旧版本将无法再自动更新。第一次需要手动安装一次带 updater 的版本（v0.2.0），之后才能自动更新。
 
@@ -376,4 +388,4 @@ mytrade/
 - P1：指标模板、布局保存（本地库已就绪）、日志收益曲线图。**TradingView 库不得提交到公开仓库**，授权边界见 [docs/TRADINGVIEW_LIBRARY.md](docs/TRADINGVIEW_LIBRARY.md)
 - P2：若拿到 Trading Platform（Broker API）授权，把 `priceLines.ts` 换成官方 `createOrderLine`/`createPositionLine`，并加成交箭头
 - P3：完善对账、崩溃恢复、日亏基准、EA 执行通道
-- P4：网关 PyInstaller sidecar、DOM、更多图表布局、执行质量趋势图
+- P4：DOM、更多图表布局、执行质量趋势图

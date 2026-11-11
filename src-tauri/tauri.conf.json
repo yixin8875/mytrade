@@ -1,13 +1,13 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "MyTrade",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "identifier": "com.mytrade.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeDevCommand": "npm run gateway:build && npm run dev",
+    "beforeBuildCommand": "npm run gateway:build && npm run build"
   },
   "app": {
     "windows": [
@@ -38,6 +38,9 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "externalBin": [
+      "binaries/mytrade-gateway"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

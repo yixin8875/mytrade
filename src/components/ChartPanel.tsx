@@ -802,7 +802,7 @@ export function ChartPanel({
           </div>
           <div className="max-w-md text-[11px] text-tv-muted">
             {conn !== 'open'
-              ? '请先运行 npm run gateway'
+              ? '正在自动启动网关；若持续失败，请查看 %LOCALAPPDATA%\\MyTrade\\gateway\\gateway.log'
               : (health?.lastError?.message ?? '请打开并登录 MetaTrader 5')}
           </div>
         </div>
