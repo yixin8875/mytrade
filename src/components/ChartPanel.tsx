@@ -557,6 +557,13 @@ export function ChartPanel({
         // StrictMode 二次挂载或切换账户时，旧 widget 可能已经被替换，别再给它挂事件
         if (widgetRef.current !== widget) return;
         const active = widget.activeChart();
+        // 图表在 same-origin iframe 里，父容器的 pointerdown 收不到图内点击，
+        // 所以用库的 mouse_down 事件把「当前操作的图」和下单品种对齐。
+        widget.subscribe('mouse_down', () => {
+          setActiveSlot(slot);
+          const store = useApp.getState();
+          if (symbolRef.current && store.symbol !== symbolRef.current) store.setSymbol(symbolRef.current);
+        });
         // 品种 / 周期切换回写：单图直接写全局，多图交给 ChartGrid 决定
         // 是否同步到所有图表。用 ref 比较，避免 setSymbol/setResolution 自己触发的事件回环。
         active.onSymbolChanged().subscribe(null, (next: LibrarySymbolInfo) => {
@@ -848,7 +855,12 @@ export function ChartPanel({
   return (
     <div
       className="relative h-full w-full overflow-hidden"
-      onPointerDown={() => setActiveSlot(slot)}
+      onPointerDown={() => {
+        setActiveSlot(slot);
+        // 多图时下单区跟随刚点的这张图，避免在 A 图上看价、却给 B 品种下单
+        const store = useApp.getState();
+        if (symbol && store.symbol !== symbol) store.setSymbol(symbol);
+      }}
       onClick={handleChartClick}
       onMouseLeave={() => {
         if (syncCrosshairRef.current) publishCrosshair(null);

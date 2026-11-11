@@ -67,6 +67,7 @@ export function ChartGrid() {
   const layoutId = useApp((s) => s.layout);
   const symbol = useApp((s) => s.symbol);
   const resolution = useApp((s) => s.resolution);
+  const available = useApp((s) => s.symbols);
   const sync = useApp((s) => s.layoutSync);
   const setSymbol = useApp((s) => s.setSymbol);
   const setResolution = useApp((s) => s.setResolution);
@@ -87,6 +88,18 @@ export function ChartGrid() {
       return next;
     });
   }, [symbol, sync.symbol]);
+
+  // 启动时格子会恢复上次的品种，全局品种却会被重置成默认值（通常按字母序第一个）。
+  // 两者不一致时，下单区按 A 品种算价、图表画的却是 B 品种，画线下单的线会落在
+  // 可视区间外，看起来像“点了没反应”。这里让下单品种跟随当前操作的格子。
+  useEffect(() => {
+    if (sync.symbol || !symbol || available.length === 0) return;
+    const index = indexForSlot(currentSlot(), preset.count);
+    const cell = symbols[index];
+    if (!cell || cell === symbol) return;
+    if (!available.some((item) => item.name === cell)) return;
+    setSymbol(cell);
+  }, [symbol, symbols, available, sync.symbol, preset.count, setSymbol]);
 
   // 周期同步同理：同步期间把全局周期记到每一格，关掉同步时不跳回旧周期。
   useEffect(() => {
