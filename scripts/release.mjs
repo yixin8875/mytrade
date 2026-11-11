@@ -123,10 +123,9 @@ function collectArtifacts(version) {
   const signatureFile = `${updaterPackage}.sig`;
   if (!existsSync(signatureFile)) fail(`缺少签名文件：${signatureFile}`);
 
+  // 只发布本次版本的安装包；bundle 目录会保留历史版本，不能一并上传
   const installers = files.filter(
-    (file) =>
-      (file.endsWith('.msi') || file.endsWith('-setup.exe')) &&
-      (file.includes(version) || !file.includes('_x64_')),
+    (file) => (file.endsWith('.msi') || file.endsWith('-setup.exe')) && file.includes(version),
   );
   const signatures = installers.map((file) => `${file}.sig`).filter(existsSync);
 
