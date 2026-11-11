@@ -158,6 +158,8 @@ class Mt5Worker:
         self._subs: dict[str, int] = {}
         self._bar_subs: dict[tuple[str, str], dict] = {}
         self._trade_mode = cfg.trade_mode
+        # 当前账户真正生效的风控（全局默认 + 账户覆盖），切换账户/改配置时刷新
+        self._limits: dict[str, float | int] = cfg.risk_limits(self._account_id)
         # 券商服务器时间与 UTC 的差（秒），供前端换算图表时区
         self._server_offset = 0
         # 风控状态（当日盈亏、开仓次数、连亏、冷却、停机），由 _poll_risk 刷新
@@ -447,8 +449,13 @@ class Mt5Worker:
             self._connected = False
             self._last_error = {"code": -1, "message": f"{type(exc).__name__}: {exc}"}
 
+    def _refresh_limits(self) -> None:
+        """重新计算当前账户的生效风控（全局默认被账户覆盖改写）。"""
+        self._limits = self.cfg.risk_limits(self._account_id)
+
     def _reset_for_switch(self) -> None:
         """断开当前终端并清空账户相关内容，随后由 _try_connect 重新连到目标终端。"""
+        self._refresh_limits()
         try:
             mt5.shutdown()
         except Exception:  # noqa: BLE001
@@ -553,6 +560,7 @@ class Mt5Worker:
             raise GatewayError("CONFIG_SAVE", f"保存账户失败：{exc}") from exc
 
         self._account_id = self.cfg.active_profile()["id"]
+        self._refresh_limits()
         self.store.audit(
             "account.create",
             {
@@ -573,6 +581,7 @@ class Mt5Worker:
             raise GatewayError("CONFIG_SAVE", f"保存账户失败：{exc}") from exc
 
         self._account_id = self.cfg.active_profile()["id"]
+        self._refresh_limits()
         reconnected = self._account_id == updated["id"] and (
             bool(updated.get("connectionChanged")) or bool(updated.get("passwordChanged"))
         )
@@ -622,9 +631,51 @@ class Mt5Worker:
             raise GatewayError("CONFIG_SAVE", f"保存配置失败：{exc}") from exc
 
         self.store.audit("config.update", {"changes": p})
+        self._refresh_limits()
         self._poll_risk(force=True)
         self._emit("gateway", self.health())
         return updated
+
+    def _set_account_risk(self, p: dict) -> dict:
+        """设置页保存账户级风控覆盖；risk 里值为 None 表示恢复跟随全局。"""
+        account_id = str(p.get("id") or self._account_id).strip()
+        patch = p.get("risk")
+        if not isinstance(patch, dict) or not patch:
+            raise GatewayError("BAD_CONFIG", "risk 必须是非空对象，值为 null 表示恢复全局")
+        try:
+            updated = self.cfg.set_account_risk(account_id, patch)
+        except ValueError as exc:
+            raise GatewayError("BAD_CONFIG", str(exc)) from exc
+        except OSError as exc:
+            raise GatewayError("CONFIG_SAVE", f"保存配置失败：{exc}") from exc
+
+        if account_id == self._account_id:
+            self._refresh_limits()
+            self._poll_risk(force=True)
+        self.store.audit("config.account_risk", {"id": account_id, "changes": patch})
+        self._emit("gateway", self.health())
+        return {
+            "config": updated,
+            "limits": self._limits,
+            "accountRisk": self.cfg.account_risk(self._account_id),
+        }
+
+    def _set_allow_live(self, p: dict) -> dict:
+        """设置页的实盘开关：写回 config.json，立即生效。"""
+        allow = p.get("allow")
+        if not isinstance(allow, bool):
+            raise GatewayError("BAD_CONFIG", "allow 必须是布尔值")
+        try:
+            updated = self.cfg.set_allow_live(allow)
+        except OSError as exc:
+            raise GatewayError("CONFIG_SAVE", f"保存配置失败：{exc}") from exc
+
+        # 关闭实盘时如果正处在实盘模式，立即回到只读
+        if not allow and self._trade_mode == "live":
+            self._trade_mode = "readonly"
+        self.store.audit("config.allow_live", {"allow": allow})
+        self._emit("gateway", self.health())
+        return {"config": updated, "tradeMode": self._trade_mode}
 
     def health(self) -> dict:
         terminal = None
@@ -646,6 +697,8 @@ class Mt5Worker:
             "account": self._account,
             "accounts": self._accounts_payload(),
             "activeAccountId": self._account_id,
+            "limits": self._limits,
+            "accountRisk": self.cfg.account_risk(self._account_id),
             "tradeMode": self._trade_mode,
             "config": self.cfg.public(),
             "lastError": self._last_error,
@@ -666,6 +719,8 @@ class Mt5Worker:
                 "tradeMode": self._trade_mode,
             },
             "system.setConfig": self._set_config,
+            "system.setAccountRisk": self._set_account_risk,
+            "system.setAllowLive": self._set_allow_live,
             "system.setTradeMode": self._set_trade_mode,
             "system.halt": self._halt,
             "system.resume": self._resume,
@@ -795,7 +850,7 @@ class Mt5Worker:
     def _compute_risk(self) -> dict:
         """当日盈亏、开仓次数、连亏、冷却和停机状态，全部按券商服务器时间算。"""
         account = self._account or {}
-        cfg = self.cfg
+        limits = self._limits
         day_start = self._day_start()
 
         deals: list[Any] = []
@@ -825,8 +880,8 @@ class Mt5Worker:
         balance = float(account.get("balance") or 0)
         day_start_balance = balance - realized
         limit = (
-            max(0.0, day_start_balance * cfg.daily_loss_pct / 100.0)
-            if cfg.daily_loss_pct > 0
+            max(0.0, day_start_balance * limits["daily_loss_pct"] / 100.0)
+            if limits["daily_loss_pct"] > 0
             else 0.0
         )
         daily_loss = max(0.0, -day_pnl)
@@ -852,11 +907,13 @@ class Mt5Worker:
 
         cooldown_until = 0
         if (
-            cfg.max_consecutive_losses
-            and consecutive >= cfg.max_consecutive_losses
+            limits["max_consecutive_losses"]
+            and consecutive >= limits["max_consecutive_losses"]
             and closed
         ):
-            cooldown_until = int(getattr(closed[-1], "time", 0)) + int(cfg.cooldown_minutes * 60)
+            cooldown_until = int(getattr(closed[-1], "time", 0)) + int(
+                limits["cooldown_minutes"] * 60
+            )
         now = self._server_now()
         cooldown_remaining = max(0, cooldown_until - now) if cooldown_until else 0
 
@@ -870,8 +927,8 @@ class Mt5Worker:
             block_reason = (
                 f"连续亏损 {consecutive} 次，冷却 {max(1, cooldown_remaining // 60)} 分钟"
             )
-        elif cfg.max_trades_per_day and len(entries) >= cfg.max_trades_per_day:
-            block_reason = f"今日开仓 {len(entries)} 次已达上限 {cfg.max_trades_per_day}"
+        elif limits["max_trades_per_day"] and len(entries) >= limits["max_trades_per_day"]:
+            block_reason = f"今日开仓 {len(entries)} 次已达上限 {limits['max_trades_per_day']}"
 
         return {
             "dayStartBalance": round(day_start_balance, 2),
@@ -880,9 +937,9 @@ class Mt5Worker:
             "dailyLossLimit": round(limit, 2),
             "remaining": round(remaining, 2),
             "tradesToday": len(entries),
-            "maxTrades": int(cfg.max_trades_per_day or 0),
+            "maxTrades": int(limits["max_trades_per_day"] or 0),
             "consecutiveLosses": consecutive,
-            "maxConsecutiveLosses": int(cfg.max_consecutive_losses or 0),
+            "maxConsecutiveLosses": int(limits["max_consecutive_losses"] or 0),
             "cooldownUntil": cooldown_until,
             "cooldownRemainingSec": cooldown_remaining,
             "halted": halted,
@@ -1761,10 +1818,13 @@ class Mt5Worker:
             warnings.append("未设置止损")
         if a["riskAmount"] is not None and a["equity"] > 0:
             risk_pct = a["riskAmount"] / a["equity"] * 100
-            if risk_pct > self.cfg.max_risk_pct:
-                warnings.append(f"风险 {risk_pct:.2f}% 超过上限 {self.cfg.max_risk_pct}%")
-        if self.cfg.max_spread_points and a["spreadPoints"] > self.cfg.max_spread_points:
-            warnings.append(f"点差 {a['spreadPoints']:.0f} 点超过上限 {self.cfg.max_spread_points}")
+            if risk_pct > self._limits["max_risk_pct"]:
+                warnings.append(f"风险 {risk_pct:.2f}% 超过上限 {self._limits['max_risk_pct']}%")
+        if (
+            self._limits["max_spread_points"]
+            and a["spreadPoints"] > self._limits["max_spread_points"]
+        ):
+            warnings.append(f"点差 {a['spreadPoints']:.0f} 点超过上限 {self._limits['max_spread_points']}")
         if a["freeMargin"] and a["margin"] > a["freeMargin"] * 0.9:
             warnings.append("保证金占用接近可用保证金的 90%")
         return {
@@ -1826,7 +1886,7 @@ class Mt5Worker:
 
         step = float(info.volume_step or 0.01)
         vmin = float(info.volume_min)
-        vmax = min(float(info.volume_max), float(self.cfg.max_lot))
+        vmax = min(float(info.volume_max), float(self._limits["max_lot"]))
         volume = round_volume(target / risk_per_lot, step)
         capped: list[str] = []
         if volume < vmin:
@@ -1851,9 +1911,9 @@ class Mt5Worker:
             warnings.append(f"按最小手数 {vmin} 计算，实际风险 {risk:.2f}" if risk else "已按最小手数")
         if "max" in capped:
             warnings.append(f"手数已到上限 {vmax}，未达到目标风险")
-        if risk is not None and equity > 0 and risk / equity * 100 > self.cfg.max_risk_pct:
+        if risk is not None and equity > 0 and risk / equity * 100 > self._limits["max_risk_pct"]:
             warnings.append(
-                f"风险 {risk / equity * 100:.2f}% 超过上限 {self.cfg.max_risk_pct}%"
+                f"风险 {risk / equity * 100:.2f}% 超过上限 {self._limits['max_risk_pct']}%"
             )
 
         return {
@@ -1886,17 +1946,23 @@ class Mt5Worker:
         a = self._analyze(p)
         client_id = str(p.get("clientOrderId") or f"mt-{int(time.time() * 1000)}")[:31]
 
-        if a["volume"] > self.cfg.max_lot:
-            raise GatewayError("MAX_LOT", f"单笔手数 {a['volume']} 超过上限 {self.cfg.max_lot}")
-        if self.cfg.max_spread_points and a["spreadPoints"] > self.cfg.max_spread_points:
+        if a["volume"] > self._limits["max_lot"]:
+            raise GatewayError(
+                "MAX_LOT", f"单笔手数 {a['volume']} 超过上限 {self._limits['max_lot']}"
+            )
+        if (
+            self._limits["max_spread_points"]
+            and a["spreadPoints"] > self._limits["max_spread_points"]
+        ):
             raise GatewayError("SPREAD_LIMIT", f"点差 {a['spreadPoints']:.0f} 点超过上限")
-        if len(self._positions) >= self.cfg.max_positions:
-            raise GatewayError("MAX_POSITIONS", f"持仓数已达上限 {self.cfg.max_positions}")
+        if len(self._positions) >= self._limits["max_positions"]:
+            raise GatewayError("MAX_POSITIONS", f"持仓数已达上限 {self._limits['max_positions']}")
         if a["riskAmount"] is not None and a["equity"] > 0:
             risk_pct = a["riskAmount"] / a["equity"] * 100
-            if risk_pct > self.cfg.max_risk_pct:
+            if risk_pct > self._limits["max_risk_pct"]:
                 raise GatewayError(
-                    "RISK_LIMIT", f"本单风险 {risk_pct:.2f}% 超过上限 {self.cfg.max_risk_pct}%"
+                    "RISK_LIMIT",
+                    f"本单风险 {risk_pct:.2f}% 超过上限 {self._limits['max_risk_pct']}%",
                 )
         risk = self._risk or self._compute_risk()
         self._risk = risk

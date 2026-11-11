@@ -16,7 +16,7 @@ import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { AccountManager } from './AccountManager';
 import { LayoutGallery, SyncToggles } from './LayoutPicker';
-import type { GatewayConfig } from '../gateway/types';
+import type { GatewayConfig, RiskLimits, TradeMode } from '../gateway/types';
 import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
 
 const NAV = [
@@ -137,7 +137,7 @@ const RISK_FIELDS: {
   },
 ];
 
-function pickRisk(config: GatewayConfig): RiskForm {
+function pickRisk(config: RiskLimits): RiskForm {
   return {
     max_lot: config.max_lot,
     max_risk_pct: config.max_risk_pct,
@@ -482,18 +482,39 @@ function ChartSection() {
   );
 }
 
+type RiskScope = 'account' | 'global';
+
+const SCOPE_OPTIONS: { value: RiskScope; label: string }[] = [
+  { value: 'account', label: '当前账户' },
+  { value: 'global', label: '全局默认' },
+];
+
 function RiskSection() {
   const health = useApp((s) => s.health);
   const notify = useApp((s) => s.notify);
   const config = health?.config;
+  const limits = health?.limits;
+  const overrides = health?.accountRisk ?? {};
+  const activeId = health?.activeAccountId ?? '';
+  const activeAccount = health?.accounts?.find((item) => item.id === activeId);
+  const accountLabel = activeAccount?.label ?? '当前账户';
+
+  const [scope, setScope] = useState<RiskScope>('account');
   const [form, setForm] = useState<RiskForm | null>(null);
+  const [cleared, setCleared] = useState<RiskKey[]>([]);
   const [confirm, setConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [liveConfirm, setLiveConfirm] = useState(false);
+  const [liveSaving, setLiveSaving] = useState(false);
 
+  const ready = !!config;
+  // 只在切换编辑范围或账户时重置表单，避免 health 轮询把正在编辑的值冲掉
   useEffect(() => {
     if (!config) return;
-    setForm((prev) => prev ?? pickRisk(config));
-  }, [config]);
+    setForm(pickRisk(scope === 'account' && limits ? limits : config));
+    setCleared([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, activeId, ready]);
 
   if (!config || !form) {
     return (
@@ -503,21 +524,43 @@ function RiskSection() {
     );
   }
 
-  const dirty = RISK_FIELDS.some(
-    (field) => Number(form[field.key]) !== Number(config[field.key]),
+  const base = pickRisk(scope === 'account' && limits ? limits : config);
+  const overrideKeys = Object.keys(overrides).filter((key): key is RiskKey =>
+    RISK_FIELDS.some((field) => field.key === key),
   );
+  const canEditAccount = !!limits;
+  const dirty =
+    scope === 'account'
+      ? canEditAccount &&
+        (cleared.length > 0 ||
+          RISK_FIELDS.some((field) => Number(form[field.key]) !== Number(base[field.key])))
+      : RISK_FIELDS.some((field) => Number(form[field.key]) !== Number(config[field.key]));
   const error = validateRisk(form);
-  const changes = RISK_FIELDS.filter(
-    (field) => Number(form[field.key]) !== Number(config[field.key]),
-  ).map(
-    (field) =>
-      `${field.label}：${config[field.key]}${field.suffix ?? ''} → ${form[field.key]}${
-        field.suffix ?? ''
-      }`,
-  );
+  const changes = RISK_FIELDS.flatMap((field) => {
+    if (scope === 'account' && cleared.includes(field.key)) {
+      return [`${field.label}：恢复跟随全局（${config[field.key]}${field.suffix ?? ''}）`];
+    }
+    const before = scope === 'account' ? base[field.key] : config[field.key];
+    if (Number(form[field.key]) === Number(before)) return [];
+    return [
+      `${field.label}：${before}${field.suffix ?? ''} → ${form[field.key]}${field.suffix ?? ''}`,
+    ];
+  });
 
-  const setValue = (key: RiskKey, value: number) =>
+  const setValue = (key: RiskKey, value: number) => {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
+    setCleared((prev) => prev.filter((item) => item !== key));
+  };
+
+  const useGlobal = (key: RiskKey) => {
+    setForm((prev) => (prev ? { ...prev, [key]: config[key] } : prev));
+    setCleared((prev) => (prev.includes(key) ? prev : [...prev, key]));
+  };
+
+  const resetAllToGlobal = () => {
+    setForm(pickRisk(config));
+    setCleared(overrideKeys);
+  };
 
   const save = async () => {
     const problem = validateRisk(form);
@@ -527,12 +570,50 @@ function RiskSection() {
     }
     setSaving(true);
     try {
-      const next = await gateway.call<GatewayConfig>('system.setConfig', { ...form });
-      const latest = useApp.getState().health;
-      if (latest) useApp.getState().setHealth({ ...latest, config: next });
-      setForm(pickRisk(next));
-      setConfirm(false);
-      notify('success', '风控参数已更新，立即生效');
+      if (scope === 'account') {
+        if (!limits) {
+          notify('error', '当前网关版本不支持账户级风控，请更新应用');
+          return;
+        }
+        const patch: Partial<Record<RiskKey, number | null>> = {};
+        for (const field of RISK_FIELDS) {
+          if (cleared.includes(field.key)) patch[field.key] = null;
+          else if (Number(form[field.key]) !== Number(limits[field.key])) {
+            patch[field.key] = Number(form[field.key]);
+          }
+        }
+        if (Object.keys(patch).length === 0) {
+          setConfirm(false);
+          notify('info', '没有需要保存的修改');
+          return;
+        }
+        const res = await gateway.call<{
+          config: GatewayConfig;
+          limits: RiskLimits;
+          accountRisk: Partial<RiskLimits>;
+        }>('system.setAccountRisk', { id: activeId, risk: patch });
+        const latest = useApp.getState().health;
+        if (latest) {
+          useApp.getState().setHealth({
+            ...latest,
+            config: res.config,
+            limits: res.limits,
+            accountRisk: res.accountRisk,
+          });
+        }
+        setForm(pickRisk(res.limits));
+        setCleared([]);
+        setConfirm(false);
+        notify('success', `「${accountLabel}」的风控参数已更新，立即生效`);
+      } else {
+        const next = await gateway.call<GatewayConfig>('system.setConfig', { ...form });
+        const latest = useApp.getState().health;
+        if (latest) useApp.getState().setHealth({ ...latest, config: next });
+        setForm(pickRisk(next));
+        setCleared([]);
+        setConfirm(false);
+        notify('success', '全局风控默认值已更新，立即生效');
+      }
     } catch (err) {
       notify('error', (err as Error).message);
     } finally {
@@ -540,26 +621,64 @@ function RiskSection() {
     }
   };
 
+  const setAllowLive = async (allow: boolean) => {
+    setLiveSaving(true);
+    try {
+      const res = await gateway.call<{ config: GatewayConfig; tradeMode: TradeMode }>(
+        'system.setAllowLive',
+        { allow },
+      );
+      const latest = useApp.getState().health;
+      if (latest) {
+        useApp.getState().setHealth({ ...latest, config: res.config, tradeMode: res.tradeMode });
+      }
+      notify('success', allow ? '实盘开关已打开，可在顶部切换到实盘交易' : '实盘开关已关闭');
+    } catch (err) {
+      notify('error', (err as Error).message);
+    } finally {
+      setLiveSaving(false);
+    }
+  };
+
   return (
     <>
       <Card
         title="风控上限"
-        description="修改会立即生效，并写入 gateway/config.json。放大手数或风险上限会增加单笔亏损，请谨慎操作。"
+        description={
+          scope === 'account'
+            ? `修改只对「${accountLabel}」生效，未单独设置的项跟随全局默认；保存后立即生效。`
+            : '修改全局默认值，没有单独覆盖的账户都会跟着变；保存后立即生效。'
+        }
         footer={
           <div className="flex items-center justify-between gap-3">
             <div className="text-[10px] text-tv-muted">
               {error ? (
                 <span className="text-tv-down">{error}</span>
+              ) : scope === 'account' && !canEditAccount ? (
+                <span className="text-tv-down">当前网关版本不支持账户级风控</span>
               ) : dirty ? (
                 '有未保存的修改'
+              ) : scope === 'account' && overrideKeys.length > 0 ? (
+                `本账户覆盖 ${overrideKeys.length} 项`
               ) : (
                 '当前配置已生效'
               )}
             </div>
             <div className="flex items-center gap-2">
+              {scope === 'account' && overrideKeys.length > 0 && (
+                <button
+                  onClick={resetAllToGlobal}
+                  className="h-7 rounded-md bg-tv-bg px-2.5 text-[10px] text-tv-muted hover:text-tv-text"
+                >
+                  全部跟随全局
+                </button>
+              )}
               {dirty && (
                 <button
-                  onClick={() => setForm(pickRisk(config))}
+                  onClick={() => {
+                    setForm(base);
+                    setCleared([]);
+                  }}
                   className="h-7 rounded-md bg-tv-bg px-2.5 text-[10px] text-tv-muted hover:text-tv-text"
                 >
                   撤销
@@ -567,10 +686,10 @@ function RiskSection() {
               )}
               <button
                 onClick={() => setConfirm(true)}
-                disabled={!dirty || !!error || saving}
+                disabled={!dirty || !!error || saving || (scope === 'account' && !canEditAccount)}
                 className={clsx(
                   'flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[10px] font-semibold transition-colors',
-                  dirty && !error
+                  dirty && !error && (scope !== 'account' || canEditAccount)
                     ? 'bg-tv-accent text-white hover:opacity-90'
                     : 'cursor-not-allowed bg-tv-bg text-tv-muted',
                 )}
@@ -582,6 +701,17 @@ function RiskSection() {
           </div>
         }
       >
+        <Row
+          label="编辑范围"
+          hint={
+            scope === 'account'
+              ? '账户覆盖优先于全局默认；可以逐项恢复跟随全局'
+              : '全局默认值；账户自己的覆盖仍会盖在它上面'
+          }
+        >
+          <Segmented value={scope} options={SCOPE_OPTIONS} onChange={setScope} />
+        </Row>
+
         {RISK_FIELDS.map((field) => (
           <Row key={field.key} label={field.label} hint={field.hint}>
             <div className="flex items-center gap-1.5">
@@ -591,10 +721,26 @@ function RiskSection() {
                 max={field.max}
                 step={field.step}
                 value={form[field.key]}
+                disabled={scope === 'account' && !canEditAccount}
                 onChange={(event) => setValue(field.key, Number(event.target.value))}
-                className="h-7 w-24 rounded-md border border-tv-border bg-tv-bg px-2 text-right font-mono text-[11px] text-tv-text outline-none focus:border-tv-accent"
+                className="h-7 w-24 rounded-md border border-tv-border bg-tv-bg px-2 text-right font-mono text-[11px] text-tv-text outline-none focus:border-tv-accent disabled:opacity-50"
               />
               {field.suffix && <span className="text-[10px] text-tv-muted">{field.suffix}</span>}
+              {scope === 'account' &&
+                canEditAccount &&
+                (overrideKeys.includes(field.key) && !cleared.includes(field.key) ? (
+                  <button
+                    onClick={() => useGlobal(field.key)}
+                    title={`恢复跟随全局：${config[field.key]}${field.suffix ?? ''}`}
+                    className="h-7 rounded-md bg-tv-bg px-2 text-[10px] text-tv-muted hover:text-tv-text"
+                  >
+                    用全局
+                  </button>
+                ) : (
+                  <span className="text-[9px] text-tv-muted">
+                    {cleared.includes(field.key) ? '恢复全局' : '跟随全局'}
+                  </span>
+                ))}
             </div>
           </Row>
         ))}
@@ -602,13 +748,16 @@ function RiskSection() {
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] leading-relaxed text-tv-text">
           <Info size={12} className="mt-0.5 shrink-0 text-amber-500" />
           <span>
-            0.5 手是 MyTrade 的风控上限，不是券商限制。自动手数会被截到该值，手动超过会被网关拒绝；
-            即使放大手数，单笔风险超过 {config.max_risk_pct}% 仍会被拒绝。
+            当前生效：单笔上限 {base.max_lot} 手、单笔风险 {base.max_risk_pct}%。这些是 MyTrade
+            的风控值，不是券商限制；自动手数会被截到上限，手动超过会被网关拒绝。
           </span>
         </div>
       </Card>
 
-      <Card title="运行模式" description="交易模式由顶部按钮切换；实盘开关只在配置文件里修改。">
+      <Card
+        title="运行模式"
+        description="交易模式由顶部按钮切换；实盘开关打开后，实盘/美分账户才能从只读切到实盘交易。"
+      >
         <Row label="当前模式">
           <span className="text-[11px]">
             {health?.tradeMode === 'readonly'
@@ -618,10 +767,27 @@ function RiskSection() {
                 : '实盘交易'}
           </span>
         </Row>
-        <Row label="实盘开关">
-          <span className={clsx('text-[11px]', config.allow_live ? 'text-tv-down' : 'text-tv-muted')}>
-            {config.allow_live ? '已允许' : '关闭'}
-          </span>
+        <Row label="实盘开关" hint="只影响实盘账户，模拟账户仍走「模拟可交易」；打开后下单使用真实资金。">
+          <div className="flex items-center gap-2">
+            <span
+              className={clsx('text-[11px]', config.allow_live ? 'text-tv-down' : 'text-tv-muted')}
+            >
+              {config.allow_live ? '已允许' : '关闭'}
+            </span>
+            <button
+              onClick={() => (config.allow_live ? void setAllowLive(false) : setLiveConfirm(true))}
+              disabled={liveSaving}
+              className={clsx(
+                'h-7 rounded-md px-2.5 text-[10px] font-semibold transition-colors',
+                config.allow_live
+                  ? 'bg-tv-bg text-tv-text hover:bg-tv-border'
+                  : 'bg-tv-down/15 text-tv-down hover:bg-tv-down hover:text-white',
+                liveSaving && 'cursor-wait opacity-50',
+              )}
+            >
+              {liveSaving ? '保存中…' : config.allow_live ? '关闭实盘' : '开启实盘'}
+            </button>
+          </div>
         </Row>
         <Row label="告警通道">
           <span className="text-[11px] text-tv-muted">
@@ -635,9 +801,13 @@ function RiskSection() {
       {confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-[420px] max-w-full rounded-xl border border-tv-border bg-tv-panel p-5 shadow-2xl">
-            <div className="text-[13px] font-semibold">确认修改风控参数？</div>
+            <div className="text-[13px] font-semibold">
+              {scope === 'account' ? `确认修改「${accountLabel}」的风控？` : '确认修改全局风控默认值？'}
+            </div>
             <div className="mt-1.5 text-[11px] leading-relaxed text-tv-muted">
-              保存后立即生效，并写入 gateway/config.json。放大手数或风险上限会增加单笔亏损。
+              {scope === 'account'
+                ? '保存后只对当前账户立即生效；标为「恢复跟随全局」的项会删除账户覆盖。'
+                : '保存后立即生效，所有未单独覆盖的账户都会使用新的默认值。'}
             </div>
             <div className="mt-3 max-h-40 space-y-1 overflow-auto rounded-lg bg-tv-bg p-3 text-[10px]">
               {changes.map((line) => (
@@ -657,6 +827,35 @@ function RiskSection() {
                 className="h-7 rounded-md bg-tv-accent px-3 text-[10px] font-semibold text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
               >
                 {saving ? '保存中…' : '确认保存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {liveConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-[420px] max-w-full rounded-xl border border-tv-border bg-tv-panel p-5 shadow-2xl">
+            <div className="text-[13px] font-semibold">打开实盘交易开关？</div>
+            <div className="mt-1.5 text-[11px] leading-relaxed text-tv-muted">
+              打开后，顶部可以把实盘（含美分）账户从「只读」切到「实盘交易」，下单将使用真实资金。
+              风控上限、日亏限制和急停仍然生效。
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setLiveConfirm(false)}
+                className="h-7 rounded-md bg-tv-bg px-3 text-[10px] text-tv-muted hover:text-tv-text"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  setLiveConfirm(false);
+                  void setAllowLive(true);
+                }}
+                className="h-7 rounded-md bg-tv-down px-3 text-[10px] font-semibold text-white hover:opacity-90"
+              >
+                确认打开
               </button>
             </div>
           </div>

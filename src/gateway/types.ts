@@ -56,6 +56,8 @@ export interface AccountOption {
   hasPassword?: boolean;
   /** 是否来自 config.json 的 accounts；false 表示单终端回退账户 */
   configured?: boolean;
+  /** 账户级风控覆盖；未出现的字段跟随全局默认 */
+  risk?: Partial<RiskLimits>;
 }
 
 export interface Account {
@@ -129,9 +131,8 @@ export interface Order {
   expiration: number | null;
 }
 
-export interface GatewayConfig {
-  trade_mode: TradeMode;
-  allow_live: boolean;
+/** 可按账户覆盖的风控字段；账户覆盖会盖在全局默认之上 */
+export interface RiskLimits {
   max_lot: number;
   max_risk_pct: number;
   max_spread_points: number;
@@ -143,6 +144,11 @@ export interface GatewayConfig {
   /** 连续亏损达到该次数后进入冷却；0 = 不启用 */
   max_consecutive_losses: number;
   cooldown_minutes: number;
+}
+
+export interface GatewayConfig extends RiskLimits {
+  trade_mode: TradeMode;
+  allow_live: boolean;
   deviation_points: number;
   trailing_step_points: number;
   magic: number;
@@ -195,6 +201,10 @@ export interface GatewayHealth {
   /** 配置里的多账户列表 */
   accounts?: AccountOption[];
   activeAccountId?: string;
+  /** 当前账户真正生效的风控（全局默认 + 账户覆盖） */
+  limits?: RiskLimits;
+  /** 当前账户自己保存的覆盖项 */
+  accountRisk?: Partial<RiskLimits>;
   tradeMode: TradeMode;
   config: GatewayConfig;
   /** 最近一次算出的当日风控状态 */

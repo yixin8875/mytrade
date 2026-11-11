@@ -7,7 +7,8 @@
       "label": "模拟 A",
       "terminal_path": "C:/Program Files/MetaTrader 5 A/terminal64.exe",
       "login": 10000001,
-      "server": "Broker-Demo"
+      "server": "Broker-Demo",
+      "risk": { "max_lot": 0.2, "max_risk_pct": 0.5 }
     }
   ],
   "active_account": "demo-a",

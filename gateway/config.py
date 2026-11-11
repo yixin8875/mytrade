@@ -77,6 +77,24 @@ class Config:
         cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip()).strip("-").lower()
         return cleaned or fallback
 
+    @classmethod
+    def _clean_risk(cls, value: object) -> dict:
+        """账户级风控覆盖：只保留已知字段，并做与全局一致的取值范围校验。"""
+        if not isinstance(value, dict):
+            return {}
+        clean: dict[str, float | int] = {}
+        for key, number in value.items():
+            spec = cls.EDITABLE_FIELDS.get(key)
+            if spec is None or isinstance(number, bool) or not isinstance(number, (int, float)):
+                continue
+            kind, low, high = spec
+            if kind is int and not isinstance(number, int):
+                continue
+            parsed = kind(number)
+            if low <= parsed <= high:
+                clean[key] = parsed
+        return clean
+
     @staticmethod
     def _read_raw() -> dict:
         path = BASE_DIR / "config.json"
@@ -130,6 +148,7 @@ class Config:
                         or self.terminal_path
                         or ""
                     ),
+                    "risk": self._clean_risk(item.get("risk")),
                 }
             )
         return profiles
@@ -150,6 +169,7 @@ class Config:
                     "login": int(self.expected_login or 0),
                     "server": "",
                     "terminal_path": self.terminal_path,
+                    "risk": {},
                 }
             )
         return profiles
@@ -169,16 +189,19 @@ class Config:
         ids = {profile["id"] for profile in profiles}
         active = active_account if active_account in ids else profiles[0]["id"]
         raw = self._read_raw()
-        raw["accounts"] = [
-            {
+        serialized = []
+        for profile in profiles:
+            entry = {
                 "id": profile["id"],
                 "label": profile["label"],
                 "login": profile["login"],
                 "server": profile["server"],
                 "terminal_path": profile["terminal_path"],
             }
-            for profile in profiles
-        ]
+            if profile.get("risk"):
+                entry["risk"] = dict(profile["risk"])
+            serialized.append(entry)
+        raw["accounts"] = serialized
         raw["active_account"] = active
         self._write_raw(raw)
         self.accounts = raw["accounts"]
@@ -225,6 +248,73 @@ class Config:
             setattr(self, key, value)
         return self.public()
 
+    def account_risk(self, account_id: str) -> dict:
+        """账户自己的风控覆盖；没有配置时返回空 dict（全部继承全局）。"""
+        profile = next(
+            (item for item in self.account_profiles() if item["id"] == account_id), None
+        )
+        return dict(profile.get("risk") or {}) if profile else {}
+
+    def risk_limits(self, account_id: str | None = None) -> dict:
+        """当前账户真正生效的风控：全局默认被账户覆盖改写。"""
+        limits: dict[str, float | int] = {
+            key: getattr(self, key) for key in self.EDITABLE_FIELDS
+        }
+        limits.update(self.account_risk(account_id or self.active_profile()["id"]))
+        return limits
+
+    def set_account_risk(self, account_id: str, patch: dict) -> dict:
+        """保存账户级风控覆盖；值为 None 表示删掉该覆盖、恢复跟随全局。"""
+        profiles = self.account_profiles()
+        if not any(item["id"] == account_id for item in profiles):
+            raise ValueError(f"未知账户: {account_id}")
+
+        current = self.account_risk(account_id)
+        for key, value in patch.items():
+            if key not in self.EDITABLE_FIELDS:
+                raise ValueError(f"字段 {key} 不支持按账户设置")
+            if value is None:
+                current.pop(key, None)
+                continue
+            kind, low, high = self.EDITABLE_FIELDS[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{key} 必须是数字")
+            if kind is int and not isinstance(value, int):
+                raise ValueError(f"{key} 必须是整数")
+            number = kind(value)
+            if not low <= number <= high:
+                raise ValueError(f"{key} 必须在 {low} 到 {high} 之间")
+            current[key] = number
+
+        accounts = []
+        for profile in profiles:
+            entry = {
+                "id": profile["id"],
+                "label": profile["label"],
+                "login": profile["login"],
+                "server": profile["server"],
+                "terminal_path": profile["terminal_path"],
+            }
+            risk = current if profile["id"] == account_id else profile.get("risk") or {}
+            if risk:
+                entry["risk"] = dict(risk)
+            accounts.append(entry)
+
+        raw = self._read_raw()
+        raw["accounts"] = accounts
+        raw.setdefault("active_account", self.active_profile()["id"])
+        self._write_raw(raw)
+        self.accounts = accounts
+        return self.public()
+
+    def set_allow_live(self, allow: bool) -> dict:
+        """运行时打开/关闭实盘开关：写回 config.json，立即生效。"""
+        raw = self._read_raw() or asdict(self)
+        raw["allow_live"] = bool(allow)
+        self._write_raw(raw)
+        self.allow_live = bool(allow)
+        return self.public()
+
     def public(self) -> dict:
         data = asdict(self)
         data.pop("host", None)
@@ -237,6 +327,7 @@ class Config:
                 "login": profile["login"],
                 "server": profile["server"],
                 "terminal_path": profile["terminal_path"],
+                "risk": profile.get("risk") or {},
             }
             for profile in self.account_profiles()
         ]

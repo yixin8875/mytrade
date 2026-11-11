@@ -6,7 +6,7 @@ import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, spreadPoints } from '../lib/format';
 import { AccountSwitcher } from './AccountSwitcher';
 import { LayoutPickerButton } from './LayoutPicker';
-import type { RiskStatus } from '../gateway/types';
+import type { RiskStatus, TradeMode } from '../gateway/types';
 
 /** 亏损额度使用比例 → 颜色（绿 → 琥珀 → 红） */
 function riskTone(risk: RiskStatus): string {
@@ -48,6 +48,7 @@ export function TopBar() {
   const setAlertsOpen = useApp((s) => s.setAlertsOpen);
   const notify = useApp((s) => s.notify);
   const [confirmKill, setConfirmKill] = useState(false);
+  const [confirmLive, setConfirmLive] = useState(false);
 
   const info = symbols.find((item) => item.name === symbol);
   const online = conn === 'open';
@@ -55,6 +56,9 @@ export function TopBar() {
   const mode = health?.tradeMode ?? 'readonly';
   const spread = quote && info ? spreadPoints(quote.bid, quote.ask, info.point) : null;
   const realAccount = account?.accountType === 'real';
+  const allowLive = health?.config?.allow_live ?? false;
+  // 实盘账户默认锁在只读，只有配置文件显式开启 allow_live 才允许切换
+  const modeLocked = realAccount && !allowLive;
   const activeAlerts = alerts.filter((item) => item.enabled).length;
 
   const toggleMode = async () => {
@@ -62,7 +66,22 @@ export function TopBar() {
       notify('error', 'MT5 终端未连接');
       return;
     }
-    const next = mode === 'readonly' ? 'demo' : 'readonly';
+    if (modeLocked) {
+      notify('error', '实盘账户：请先在「设置 → 交易与风控」打开实盘开关');
+      return;
+    }
+    if (health?.terminal && !health.terminal.tradeAllowed) {
+      notify('error', '请在 MT5 工具栏打开 Algo Trading（自动交易）');
+      return;
+    }
+    // 实盘账户切到 live，其它账户切到 demo
+    const next: TradeMode = mode === 'readonly' ? (realAccount ? 'live' : 'demo') : 'readonly';
+    if (next === 'live' && !confirmLive) {
+      setConfirmLive(true);
+      window.setTimeout(() => setConfirmLive(false), 4000);
+      return;
+    }
+    setConfirmLive(false);
     try {
       await gateway.call('system.setTradeMode', { mode: next });
     } catch (error) {
@@ -208,17 +227,30 @@ export function TopBar() {
 
       <button
         onClick={toggleMode}
-        disabled={!terminal || realAccount}
-        title={realAccount ? '实盘账户需修改 gateway/config.json 开启实盘' : '切换只读 / 模拟可交易'}
+        disabled={!terminal || modeLocked}
+        title={
+          modeLocked
+            ? '实盘账户：请先在「设置 → 交易与风控」打开实盘开关'
+            : realAccount
+              ? '切换只读 / 实盘交易（真实资金）'
+              : '切换只读 / 模拟可交易'
+        }
         className={clsx(
           'h-6 rounded px-2 text-[10px] font-medium transition-colors',
           mode === 'readonly' && 'bg-tv-border text-tv-text',
           mode === 'demo' && 'bg-emerald-600 text-white',
           mode === 'live' && 'bg-red-600 text-white',
-          (!terminal || realAccount) && 'cursor-not-allowed opacity-40',
+          confirmLive && 'bg-red-600 text-white',
+          (!terminal || modeLocked) && 'cursor-not-allowed opacity-40',
         )}
       >
-        {mode === 'readonly' ? '只读' : mode === 'demo' ? '模拟可交易' : '实盘交易'}
+        {confirmLive
+          ? '确认实盘？'
+          : mode === 'readonly'
+            ? '只读'
+            : mode === 'demo'
+              ? '模拟可交易'
+              : '实盘交易'}
       </button>
 
       <div className="flex items-center gap-1.5 text-[10px] text-tv-muted">

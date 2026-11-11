@@ -241,6 +241,7 @@ npm run release -- --notes "这一版改了什么"
 - 当日亏损上限 `daily_loss_pct`（已实现 + 浮动，默认 2%）
 - 连亏冷却 `max_consecutive_losses` / `cooldown_minutes`（默认 3 次 / 30 分钟）
 - 当日开仓次数上限 `max_trades_per_day`（默认 8）
+- 账户级风控覆盖：每个账户可在设置页单独收紧手数/风险等上限，未覆盖的项继承全局
 - 手动停机（急停）后，所有开仓请求拒绝
 - 3 秒内同方向同价格重复请求拦截
 - `clientOrderId` 幂等 + SQLite 意图记录 + 重启对账
@@ -248,9 +249,10 @@ npm run release -- --notes "这一版改了什么"
 
 实盘需要同时满足：
 
-1. `gateway/config.json` 中 `allow_live: true`
-2. 账户本身是实盘
-3. 前端手动切到实盘模式
+1. 在「设置 → 交易与风控 → 实盘开关」里打开（等价于 `gateway/config.json` 的 `allow_live: true`，立即生效）
+2. MT5 终端工具栏的 Algo Trading（自动交易）已打开
+3. 账户本身是实盘（美分账户也属于实盘）
+4. 前端手动切到实盘模式
 
 即使如此，仍建议先在模拟账户用小手数完整走一遍：开仓 → 拖止损 → 平仓 → 重启应用恢复状态。
 
@@ -268,10 +270,10 @@ cp gateway/config.example.json gateway/config.json
 |---|---|---|
 | `terminal_path` | 空 | 固定连接的 `terminal64.exe` 路径；同时开着多个 MT5 时**必须**设置，否则可能连到别的终端/账户 |
 | `expected_login` | `0` | 期望登录的账户号，`0` = 不校验；非 0 时连错账户会报错并断开 |
-| `accounts` | `[]` | 多账户列表，可在「设置 → MT5 账户」里增删改：`{"id","label","terminal_path","login","server"}`；密码不在本文件；为空时退回单终端配置 |
+| `accounts` | `[]` | 多账户列表，可在「设置 → MT5 账户」里增删改：`{"id","label","terminal_path","login","server"}`；可带 `risk` 覆盖风控字段；密码不在本文件；为空时退回单终端配置 |
 | `active_account` | 空 | 上次选中的账户 `id`；空或找不到时使用 `accounts` 第一项 |
 | `trade_mode` | `readonly` | 启动时的模式，前端可切到 `demo` |
-| `allow_live` | `false` | 是否允许切换到实盘 |
+| `allow_live` | `false` | 是否允许切换到实盘；可在「设置 → 交易与风控」里开关 |
 | `max_lot` | `0.5` | 单笔最大手数 |
 | `max_risk_pct` | `1.0` | 单笔最大风险（净值 %） |
 | `max_spread_points` | `0` | 最大点差，0 = 不限制 |
@@ -310,6 +312,14 @@ cp gateway/config.example.json gateway/config.json
   "active_account": "demo-a"
 }
 ```
+
+每个账户还可以带一个可选的 `risk` 对象，只写要偏离全局默认的字段，其余自动继承：
+
+```json
+"risk": { "max_lot": 0.2, "max_risk_pct": 0.5, "daily_loss_pct": 3.0 }
+```
+
+「设置 → 交易与风控」可以把编辑范围切到「当前账户」，逐项改成本账户专用值；被覆盖的项会显示「用全局」，可单项恢复或一键「全部跟随全局」。切换账户后生效限额自动跟着切换。`allow_live`、交易模式、`magic` / 滑点等执行参数不按账户区分。
 
 切换时网关会 `shutdown` 后重新 `initialize` 到目标终端；若该账户保存了密码，再调用 `mt5.login(login, password, server)` 登录，并校验最终账户号。持仓不会被平掉，但移动止损与自动保本只管理当前账户。截图存到 `gateway/data/shots/<login>/`，旧截图仍可读取。
 

@@ -121,8 +121,9 @@ class AccountManager:
             except CredentialError as exc:
                 raise AccountError(f"保存密码失败：{exc}") from exc
 
+        # 保留账户级风控覆盖（risk），只更新连接相关字段
         profiles = [
-            {"id": account_id, **data} if item["id"] == account_id else item for item in raw
+            {**item, **data} if item["id"] == account_id else item for item in raw
         ]
         try:
             saved = self.cfg.save_accounts(profiles, self.cfg.active_profile()["id"])
