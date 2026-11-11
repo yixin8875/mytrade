@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { invoke } from '@tauri-apps/api/core';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 
@@ -143,8 +144,10 @@ export async function installUpdate(): Promise<void> {
   let total: number | null = null;
 
   emit({ phase: 'downloading', manual: true, version, received, total, percent: null });
+
+  // 先下载，下载期间网关保持运行；安装前再停网关，缩短不可用时间
   try {
-    await update.downloadAndInstall(
+    await update.download(
       (event) => {
         if (event.event === 'Started') {
           total = event.data.contentLength ?? null;
@@ -166,15 +169,51 @@ export async function installUpdate(): Promise<void> {
             total,
             percent: total ? Math.min(100, (received / total) * 100) : null,
           });
-        } else {
-          emit({ phase: 'installing', manual: true, version });
         }
       },
-      { timeout: 300_000, restartAfterInstall: true },
+      { timeout: 300_000 },
     );
+  } catch (error) {
+    emit({
+      phase: 'error',
+      manual: true,
+      message: (error as Error)?.message || '更新下载失败',
+    });
+    return;
+  }
+
+  emit({ phase: 'installing', manual: true, version });
+
+  // 安装器要覆盖 mytrade-gateway.exe。先把网关整棵进程树停掉并等到文件解锁，
+  // 否则 Windows 会因文件被占用卡在安装阶段；失败时不要把安装器拉起来。
+  try {
+    const ready = await invoke<boolean>('gateway_prepare_update');
+    if (!ready) {
+      await invoke('gateway_start').catch(() => {});
+      emit({
+        phase: 'error',
+        manual: true,
+        message: '网关进程未能完全退出，安装包无法覆盖文件。请完全退出 MyTrade 后重试。',
+      });
+      return;
+    }
+  } catch (error) {
+    await invoke('gateway_start').catch(() => {});
+    emit({
+      phase: 'error',
+      manual: true,
+      message: (error as Error)?.message || '停止网关失败，已取消安装',
+    });
+    return;
+  }
+
+  try {
+    await update.install({ restartAfterInstall: true });
     // Windows 上安装器会先退出应用；macOS / Linux 需要手动重启
     await relaunch();
   } catch (error) {
+    // 安装没有成功：把网关拉回来，当前应用还能继续用
+    await invoke('gateway_start').catch(() => {});
     emit({
       phase: 'error',
       manual: true,

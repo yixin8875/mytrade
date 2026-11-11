@@ -146,7 +146,7 @@ export function UpdatePanel() {
         {state.phase === 'installing' && (
           <div className="flex items-center gap-2 text-[11px]">
             <RefreshCw size={13} className="animate-spin text-tv-accent" />
-            正在安装 v{state.version}，应用即将重启…
+            正在停止网关并安装 v{state.version}，应用即将重启…
           </div>
         )}
 

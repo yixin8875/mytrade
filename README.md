@@ -67,8 +67,8 @@ npm run tauri:build
 
 产物：
 
-- `src-tauri/target/release/bundle/msi/MyTrade_0.5.1_x64_en-US.msi`
-- `src-tauri/target/release/bundle/nsis/MyTrade_0.5.1_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/MyTrade_0.5.2_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/MyTrade_0.5.2_x64-setup.exe`
 - 同名 `.sig` 文件（Tauri 更新签名，发布到 GitHub 时使用）
 
 安装包未签名，首次运行 Windows 可能弹 SmartScreen，选「更多信息 → 仍要运行」。安装包已包含网关 sidecar，启动应用时会在后台自动拉起，退出应用时自动关闭，不需要另开终端运行 Python。
@@ -78,6 +78,8 @@ npm run tauri:build
 ### 发布与自动更新（GitHub Releases）
 
 桌面版启动约 6 秒后会自动检查 `https://github.com/yixin8875/mytrade/releases/latest/download/latest.json`；有新版时右下角弹出提示，可以「立即更新」（下载、安装并自动重启）、「稍后」或「忽略此版本」。顶部「更新」按钮可随时手动检查。更新包使用 Tauri 签名校验，签名不匹配不会安装。
+
+安装前应用会先结束网关整棵进程树（含 PyInstaller 子进程和残留的孤儿进程），并等到 `mytrade-gateway.exe` 可覆盖后才启动安装器，避免 Windows 因文件被占用卡住；如果网关未能完全退出会取消安装并保留当前版本，安装失败会自动把网关重新拉起来。
 
 发布新版本在本机执行，因为 `public/charting_library/` 没有提交到 Git，GitHub 云端 runner 无法编译完整应用：
 
@@ -90,7 +92,7 @@ export GITHUB_TOKEN=github_pat_xxx
 npm run release -- --notes "这一版改了什么"
 ```
 
-脚本会先构建网关 sidecar，再构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.5.1` release、上传安装包与清单。只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`（此时 sidecar 也必须已经构建好）。
+脚本会先构建网关 sidecar，再构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.5.2` release、上传安装包与清单。只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`（此时 sidecar 也必须已经构建好）。
 
 > 更新签名私钥在 `~/.tauri/mytrade.key`（已被 `.gitignore` 排除，**不要提交**），公钥写在 `tauri.conf.json` 的 `plugins.updater.pubkey`。私钥丢失后，已安装的旧版本将无法再自动更新。第一次需要手动安装一次带 updater 的版本（v0.2.0），之后才能自动更新。
 
