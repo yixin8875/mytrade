@@ -101,6 +101,31 @@ async function captureTradeShot(ticket: number): Promise<void> {
 }
 
 export default function App() {
+  // 首屏绘制完成后淡出 index.html 里的启动动画，避免白屏
+  useEffect(() => {
+    const boot = document.getElementById('boot');
+    if (!boot) return;
+    let raf = 0;
+    let timer = 0;
+    let done = false;
+    const hide = () => {
+      if (done) return;
+      done = true;
+      boot.classList.add('boot-hide');
+      timer = window.setTimeout(() => boot.remove(), 520);
+    };
+    raf = window.requestAnimationFrame(() => {
+      raf = window.requestAnimationFrame(hide);
+    });
+    // 窗口被遮挡时 rAF 可能不触发，用定时器兜底
+    const fallback = window.setTimeout(hide, 500);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+      window.clearTimeout(fallback);
+    };
+  }, []);
+
   useEffect(() => {
     gateway.start();
 

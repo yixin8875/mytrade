@@ -1,14 +1,286 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#131722" />
     <title>MyTrade</title>
-    <!-- TradingView Advanced Charts（本地私有库，勿提交） -->
-    <script src="/charting_library/charting_library.standalone.js"></script>
+    <script>
+      // 在首屏绘制前恢复主题，避免深色应用先闪一下浅色
+      (function () {
+        try {
+          var stored = JSON.parse(localStorage.getItem('mytrade.theme') || '"dark"');
+          document.documentElement.dataset.theme = stored === 'light' ? 'light' : 'dark';
+        } catch (_) {
+          document.documentElement.dataset.theme = 'dark';
+        }
+      })();
+    </script>
+    <style>
+      :root {
+        --boot-bg: #131722;
+        --boot-panel: #1e222d;
+        --boot-text: #d1d4dc;
+        --boot-muted: #787b86;
+        --boot-accent: #2962ff;
+        --boot-up: #26a69a;
+        --boot-down: #ef5350;
+        --boot-line: rgba(42, 46, 57, 0.9);
+        --boot-grid: rgba(209, 212, 220, 0.045);
+        --boot-shadow: rgba(0, 0, 0, 0.32);
+      }
+      html[data-theme='light'] {
+        --boot-bg: #f3f5f8;
+        --boot-panel: #ffffff;
+        --boot-text: #1f2937;
+        --boot-muted: #6e6e73;
+        --boot-accent: #0b6cf0;
+        --boot-up: #12805c;
+        --boot-down: #c7443e;
+        --boot-line: rgba(215, 221, 229, 0.95);
+        --boot-grid: rgba(31, 41, 55, 0.05);
+        --boot-shadow: rgba(31, 41, 55, 0.12);
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--boot-bg);
+        color: var(--boot-text);
+      }
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 50% 42%, rgba(41, 98, 255, 0.12), transparent 46%),
+          var(--boot-bg);
+        opacity: 1;
+        transition: opacity 0.45s ease;
+      }
+      #boot.boot-hide {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .boot-grid {
+        position: absolute;
+        inset: -20%;
+        background-image:
+          linear-gradient(var(--boot-grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--boot-grid) 1px, transparent 1px);
+        background-size: 48px 48px;
+        -webkit-mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 68%);
+        mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 68%);
+        animation: boot-drift 22s linear infinite;
+      }
+      .boot-aura {
+        position: absolute;
+        width: 520px;
+        height: 520px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(41, 98, 255, 0.16), transparent 66%);
+        filter: blur(18px);
+        animation: boot-breathe 4.2s ease-in-out infinite;
+      }
+      .boot-card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 34px 42px 30px;
+        border: 1px solid var(--boot-line);
+        border-radius: 20px;
+        background: var(--boot-panel);
+        box-shadow: 0 24px 80px var(--boot-shadow);
+        opacity: 0.96;
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+      }
+      .boot-logo {
+        display: grid;
+        place-items: center;
+        width: 62px;
+        height: 62px;
+        border: 1px solid rgba(41, 98, 255, 0.28);
+        border-radius: 16px;
+        background: linear-gradient(145deg, rgba(41, 98, 255, 0.16), rgba(38, 166, 154, 0.07));
+        box-shadow:
+          inset 0 0 22px rgba(41, 98, 255, 0.08),
+          0 8px 24px rgba(0, 0, 0, 0.16);
+        animation: boot-lift 2.8s ease-in-out infinite;
+      }
+      .boot-logo svg {
+        width: 36px;
+        height: 36px;
+      }
+      .boot-candles {
+        display: flex;
+        align-items: flex-end;
+        gap: 5px;
+        height: 26px;
+        margin-top: 18px;
+      }
+      .boot-candles span {
+        width: 5px;
+        height: var(--h);
+        border-radius: 2px;
+        background: var(--boot-up);
+        transform-origin: bottom;
+        animation: boot-candle 1.15s ease-in-out infinite;
+        animation-delay: var(--d);
+      }
+      .boot-candles span:nth-child(2n) {
+        background: var(--boot-down);
+      }
+      .boot-title {
+        margin-top: 14px;
+        font: 600 20px/1.2 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+        letter-spacing: 0.16em;
+        color: var(--boot-text);
+      }
+      .boot-sub {
+        min-height: 16px;
+        margin-top: 7px;
+        font-size: 11.5px;
+        letter-spacing: 0.08em;
+        color: var(--boot-muted);
+      }
+      .boot-bar {
+        width: 190px;
+        height: 2px;
+        margin-top: 22px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--boot-line);
+      }
+      .boot-bar i {
+        display: block;
+        width: 45%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, transparent, var(--boot-accent), transparent);
+        animation: boot-sweep 1.4s ease-in-out infinite;
+      }
+      @keyframes boot-lift {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-3px);
+        }
+      }
+      @keyframes boot-candle {
+        0%,
+        100% {
+          transform: scaleY(0.45);
+          opacity: 0.35;
+        }
+        50% {
+          transform: scaleY(1);
+          opacity: 1;
+        }
+      }
+      @keyframes boot-sweep {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(250%);
+        }
+      }
+      @keyframes boot-breathe {
+        0%,
+        100% {
+          opacity: 0.55;
+          transform: scale(0.96);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.04);
+        }
+      }
+      @keyframes boot-drift {
+        0% {
+          background-position:
+            0 0,
+            0 0;
+        }
+        100% {
+          background-position:
+            48px 48px,
+            48px 48px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot *,
+        #boot *::before,
+        #boot *::after {
+          animation: none !important;
+        }
+      }
+    </style>
+    <!-- TradingView Advanced Charts（本地私有库，勿提交）；defer 避免阻塞首屏 -->
+    <script defer src="/charting_library/charting_library.standalone.js"></script>
   </head>
   <body>
+    <div id="boot" role="status" aria-live="polite">
+      <div class="boot-grid" aria-hidden="true"></div>
+      <div class="boot-aura" aria-hidden="true"></div>
+      <div class="boot-card">
+        <div class="boot-logo" aria-hidden="true">
+          <svg viewBox="0 0 40 40" fill="none">
+            <path
+              d="M5 29.5 14.5 19l7 6.5L35 10"
+              stroke="url(#bootGrad)"
+              stroke-width="3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M5 35h30"
+              stroke="currentColor"
+              stroke-opacity=".18"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            />
+            <defs>
+              <linearGradient
+                id="bootGrad"
+                x1="5"
+                y1="30"
+                x2="35"
+                y2="10"
+                gradientUnits="userSpaceOnUse"
+              >
+                <stop stop-color="#26a69a" />
+                <stop offset="1" stop-color="#2962ff" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="boot-candles" aria-hidden="true">
+          <span style="--h: 14px; --d: 0ms"></span>
+          <span style="--h: 22px; --d: 120ms"></span>
+          <span style="--h: 17px; --d: 240ms"></span>
+          <span style="--h: 26px; --d: 360ms"></span>
+          <span style="--h: 20px; --d: 480ms"></span>
+        </div>
+        <div class="boot-title">MyTrade</div>
+        <div class="boot-sub" id="boot-sub">正在加载交易终端…</div>
+        <div class="boot-bar" aria-hidden="true"><i></i></div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      setTimeout(function () {
+        var sub = document.getElementById('boot-sub');
+        if (sub) sub.textContent = '首次启动可能需要几秒，请稍候…';
+      }, 6000);
+    </script>
   </body>
 </html>
