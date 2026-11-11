@@ -67,8 +67,8 @@ npm run tauri:build
 
 产物：
 
-- `src-tauri/target/release/bundle/msi/MyTrade_0.5.0_x64_en-US.msi`
-- `src-tauri/target/release/bundle/nsis/MyTrade_0.5.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/MyTrade_0.5.1_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/MyTrade_0.5.1_x64-setup.exe`
 - 同名 `.sig` 文件（Tauri 更新签名，发布到 GitHub 时使用）
 
 安装包未签名，首次运行 Windows 可能弹 SmartScreen，选「更多信息 → 仍要运行」。安装包已包含网关 sidecar，启动应用时会在后台自动拉起，退出应用时自动关闭，不需要另开终端运行 Python。
@@ -90,7 +90,7 @@ export GITHUB_TOKEN=github_pat_xxx
 npm run release -- --notes "这一版改了什么"
 ```
 
-脚本会先构建网关 sidecar，再构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.5.0` release、上传安装包与清单。只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`（此时 sidecar 也必须已经构建好）。
+脚本会先构建网关 sidecar，再构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.5.1` release、上传安装包与清单。只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`（此时 sidecar 也必须已经构建好）。
 
 > 更新签名私钥在 `~/.tauri/mytrade.key`（已被 `.gitignore` 排除，**不要提交**），公钥写在 `tauri.conf.json` 的 `plugins.updater.pubkey`。私钥丢失后，已安装的旧版本将无法再自动更新。第一次需要手动安装一次带 updater 的版本（v0.2.0），之后才能自动更新。
 
@@ -110,6 +110,7 @@ npm run release -- --notes "这一版改了什么"
 | 画线工具收藏，收藏项浮在图上快捷调用 | ✅ |
 | 往左滚动按区间加载更早的历史 K 线（跨周末也能继续） | ✅ |
 | 自定义指标（JS + PineJS.Std，内置 MT 双 EMA 示例） | ✅ 不支持 Pine 源码 |
+| 指标组合自动保存 + 命名指标模板：重启/换品种后保持，可一键套用 | ✅ |
 | 市价 / 限价 / 停损，手数按 tick 对齐 | ✅ |
 | 下单前预览：保证金、风险金额、风险 %、R:R、点差 | ✅ |
 | 按固定亏损金额 / 余额百分比自动算手数（拖动止损实时重算） | ✅ |
@@ -166,7 +167,7 @@ npm run release -- --notes "这一版改了什么"
 
 - 顶部「四图 / 单图」切换。四图是同一品种的 2×2 布局，每格左上角可单独切换周期，默认 5m / 15m / 1h / 4h，选择记在 localStorage。
 - 鼠标在任一图的十字线上移动，其余图会用虚线同步价格线与时间线，方便多周期对照。
-- 左栏「自选」标签最多放 10 个品种，每 3 秒刷新点差、买价与当日涨跌幅；有持仓的品种带圆点，点一行即可切到主图。
+- 左栏「自选」标签最多放 10 个品种，每 3 秒刷新点差、买价与当日涨跌幅；有持仓的品种带圆点，点一行即可切到当前操作的图表（多图时先点一下目标格子）。
 
 ### 价格告警
 
@@ -191,6 +192,13 @@ npm run release -- --notes "这一版改了什么"
   3. 选中其他同类画线，点模板名即可套用。勾选「应用时也设为该类型画线的默认样式」后，之后新画的同类线也直接使用这套样式。
 - 模板按画线类型分组存放（趋势线、水平线、矩形……），存在本机 `mytrade.drawTemplates`，不上传。画线自带的文字不会存进模板，套用时不会覆盖目标画线的文字。
 - 面板左下角有拖动手柄：按住「画线模板」按钮拖动即可换位置，位置记在 `mytrade.drawTemplatesPos`；靠近底部往上展开，靠近顶部往下展开。
+
+### 指标自动保存与指标模板
+
+- 每张图表加的指标会自动保存（约 1.5 秒内落盘），重启应用、切换品种或账户后自动恢复；按图表格子分别保存，单图和四图互不覆盖。
+- 自动保存存在本机 `mytrade.chartStates`，只保存指标和图表样式，不保存品种/周期，避免恢复时把当前选中的品种改掉。
+- 图表左下角「指标模板」可以把当前指标组合存成命名模板，例如「趋势组合」「震荡组合」；点模板名即可套用到当前图表，换品种也能继续用。
+- 命名模板存在本机 `mytrade.studyTemplates`，不上传；删除模板只影响模板本身，不影响图表当前指标。
 
 ### 画线收藏快捷栏
 
@@ -395,7 +403,7 @@ mytrade/
 
 ## 下一步
 
-- P1：指标模板、布局保存（本地库已就绪）、日志收益曲线图。**TradingView 库不得提交到公开仓库**，授权边界见 [docs/TRADINGVIEW_LIBRARY.md](docs/TRADINGVIEW_LIBRARY.md)
+- P1：布局保存、日志收益曲线图。**TradingView 库不得提交到公开仓库**，授权边界见 [docs/TRADINGVIEW_LIBRARY.md](docs/TRADINGVIEW_LIBRARY.md)
 - P2：若拿到 Trading Platform（Broker API）授权，把 `priceLines.ts` 换成官方 `createOrderLine`/`createPositionLine`，并加成交箭头
 - P3：完善对账、崩溃恢复、日亏基准、EA 执行通道
 - P4：DOM、更多图表布局、执行质量趋势图

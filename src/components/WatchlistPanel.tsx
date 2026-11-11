@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
+import { requestSymbol } from '../chart/tv/registry';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { fmtPrice, signedClass } from '../lib/format';
@@ -112,7 +113,10 @@ export function WatchlistPanel() {
           return (
             <div
               key={name}
-              onClick={() => setSymbol(name)}
+              onClick={() => {
+                // 优先切到最近操作的图表；交易台没挂载时退回全局品种
+                if (!requestSymbol(name)) setSymbol(name);
+              }}
               className={clsx(
                 'group flex cursor-pointer items-center gap-2 border-t border-tv-border/60 px-3 py-1.5 text-[11px]',
                 active ? 'bg-tv-accent/10' : 'hover:bg-tv-hover/40',

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChartPanel } from './ChartPanel';
 import { DEFAULT_FRAMES, layoutById } from '../chart/layouts';
+import { currentSlot, setActiveSlot, subscribeSymbolRequest } from '../chart/tv/registry';
 import { useApp } from '../store/useApp';
 
 /** 最多 16 格；不足的布局只使用前面的格子 */
@@ -51,6 +52,17 @@ function loadSymbols(): string[] {
   return next;
 }
 
+/** ChartPanel 的 slot 与格子下标：main 是 0，cN 是 N */
+function slotFor(index: number): string {
+  return index === 0 ? 'main' : `c${index}`;
+}
+
+function indexForSlot(slot: string, count: number): number {
+  if (slot === 'main') return 0;
+  const index = Number(slot.replace(/^c/, ''));
+  return Number.isInteger(index) && index >= 0 && index < count ? index : 0;
+}
+
 export function ChartGrid() {
   const layoutId = useApp((s) => s.layout);
   const symbol = useApp((s) => s.symbol);
@@ -88,6 +100,7 @@ export function ChartGrid() {
   }, [resolution, sync.interval]);
 
   const changeSymbol = (index: number, next: string) => {
+    setActiveSlot(slotFor(index));
     if (sync.symbol) {
       if (useApp.getState().symbol !== next) setSymbol(next);
       return;
@@ -104,6 +117,7 @@ export function ChartGrid() {
   };
 
   const changeInterval = (index: number, next: string) => {
+    setActiveSlot(slotFor(index));
     if (sync.interval) {
       if (useApp.getState().resolution !== next) setResolution(next);
       return;
@@ -116,6 +130,21 @@ export function ChartGrid() {
       return values;
     });
   };
+
+  // 自选列表等图表外部入口：把品种送到最近操作的那一格。
+  // 直接改全局品种是不够的——每格都有自己的品种，全局值变化不会自动落到格子里。
+  const changeSymbolRef = useRef(changeSymbol);
+  changeSymbolRef.current = changeSymbol;
+  const cellCountRef = useRef(preset.count);
+  cellCountRef.current = preset.count;
+
+  useEffect(
+    () =>
+      subscribeSymbolRequest((next) => {
+        changeSymbolRef.current(indexForSlot(currentSlot(), cellCountRef.current), next);
+      }),
+    [],
+  );
 
   return (
     <div

@@ -40,3 +40,39 @@ export function primaryWidget(): IChartingLibraryWidget | null {
   const first = widgets.values().next();
   return first.done ? null : first.value;
 }
+
+/**
+ * 最近操作的图表。图表 iframe 里的点击不会冒泡到外层，
+ * 由 ChartPanel 在 iframe 内监听 pointerdown 后写入这里；
+ * 自选列表等图表外部入口据此决定把品种送到哪一格。
+ */
+let activeSlot = 'main';
+
+export function setActiveSlot(slot: string): void {
+  activeSlot = slot;
+}
+
+export function currentSlot(): string {
+  return activeSlot;
+}
+
+type SymbolRequestListener = (symbol: string) => void;
+const symbolRequests = new Set<SymbolRequestListener>();
+
+/** 订阅「切换当前图表品种」请求，返回取消函数 */
+export function subscribeSymbolRequest(listener: SymbolRequestListener): () => void {
+  symbolRequests.add(listener);
+  return () => {
+    symbolRequests.delete(listener);
+  };
+}
+
+/**
+ * 请当前图表切换品种。
+ * 返回 false 表示当前没有图表接收（例如交易台还没挂载），调用方应回退到全局 setSymbol。
+ */
+export function requestSymbol(symbol: string): boolean {
+  if (symbolRequests.size === 0) return false;
+  for (const listener of symbolRequests) listener(symbol);
+  return true;
+}

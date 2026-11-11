@@ -4,11 +4,12 @@ import { handleGlobalShortcut, useApp, type Theme } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, snapToLevel } from '../lib/format';
 import { GatewayDatafeed } from '../chart/tv/datafeed';
 import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
-import { registerWidget } from '../chart/tv/registry';
+import { registerWidget, setActiveSlot } from '../chart/tv/registry';
 import { customIndicators } from '../chart/tv/studies';
 import { publishCrosshair, publishRange, subscribeRange, type RangeState } from '../chart/tv/sync';
 import { ChartChips, type ChartBand, type ChartChip } from './ChartChips';
 import { DrawingTemplates } from './DrawingTemplates';
+import { StudyTemplates } from './StudyTemplates';
 import type {
   ChartPropertiesOverrides,
   ChartingLibraryWidgetOptions,
@@ -87,6 +88,34 @@ type TvGlobal = {
     widget: new (options: ChartingLibraryWidgetOptions) => IChartingLibraryWidget;
   };
 };
+
+/** 每张图自动保存的指标组合（key 是 slot：main / c1…） */
+const CHART_STATE_KEY = 'mytrade.chartStates';
+
+interface SavedChartState {
+  state: object;
+  savedAt: number;
+}
+
+function readChartStates(): Record<string, SavedChartState> {
+  try {
+    const raw = window.localStorage.getItem(CHART_STATE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, SavedChartState>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeChartState(slot: string, state: object): void {
+  try {
+    const all = readChartStates();
+    all[slot] = { state, savedAt: Date.now() };
+    window.localStorage.setItem(CHART_STATE_KEY, JSON.stringify(all));
+  } catch {
+    /* 存储满/被禁用时不影响图表本身 */
+  }
+}
 
 function roundToTick(value: number, info?: SymbolInfo): number {
   if (!info) return value;
@@ -184,6 +213,8 @@ export function ChartPanel({
   const startedRef = useRef(false);
   const crosshairPrice = useRef<number | null>(null);
   const lastCrosshairStore = useRef(0);
+  /** 指标自动保存轮询的定时器 */
+  const saveTimerRef = useRef(0);
 
   const [chart, setChart] = useState<IChartWidgetApi | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -523,6 +554,8 @@ export function ChartPanel({
       }
 
       widget.chartReady().then(() => {
+        // StrictMode 二次挂载或切换账户时，旧 widget 可能已经被替换，别再给它挂事件
+        if (widgetRef.current !== widget) return;
         const active = widget.activeChart();
         // 品种 / 周期切换回写：单图直接写全局，多图交给 ChartGrid 决定
         // 是否同步到所有图表。用 ref 比较，避免 setSymbol/setResolution 自己触发的事件回环。
@@ -540,6 +573,42 @@ export function ChartPanel({
         });
         // 图表属性从 localStorage 恢复后，再用应用主题覆盖一次背景/文字色
         widget.applyOverrides(chartOverrides(useApp.getState().theme));
+
+        // ---- 指标组合持久化：每张图各自保存，换品种/重启后自动恢复 ----
+        const readState = (): { json: string; state: object } | null => {
+          try {
+            const state = active.createStudyTemplate({ saveSymbol: false, saveInterval: false });
+            return { json: JSON.stringify(state), state };
+          } catch {
+            return null;
+          }
+        };
+        const saved = readChartStates()[slot];
+        let applying = false;
+        let last = '';
+        if (saved?.state) {
+          applying = true;
+          try {
+            active.applyStudyTemplate(saved.state);
+          } catch {
+            /* 旧版本模板不兼容时保留默认指标 */
+          }
+          window.setTimeout(() => {
+            applying = false;
+            last = readState()?.json ?? '';
+          }, 1200);
+        } else {
+          last = readState()?.json ?? '';
+        }
+        // 指标增删/改参数没有稳定的公开事件，轮询快照即可（约 15KB，开销很小）
+        saveTimerRef.current = window.setInterval(() => {
+          if (applying || widgetRef.current !== widget) return;
+          const next = readState();
+          if (!next || next.json === last) return;
+          last = next.json;
+          writeChartState(slot, next.state);
+        }, 1500);
+
         active.crossHairMoved().subscribe(null, (params) => {
           if (!params || typeof params.price !== 'number') return;
           crosshairPrice.current = params.price;
@@ -596,6 +665,8 @@ export function ChartPanel({
   // ---- 卸载 ----
   useEffect(
     () => () => {
+      window.clearInterval(saveTimerRef.current);
+      saveTimerRef.current = 0;
       layerRef.current?.dispose();
       layerRef.current = null;
       registerWidget(slot, null);
@@ -614,9 +685,15 @@ export function ChartPanel({
     if (!chart) return;
     const win = hostRef.current?.querySelector('iframe')?.contentWindow;
     if (!win) return;
+    // iframe 里的点击不会冒泡到外层，在这里记下「最近操作的图表」
+    const focus = () => setActiveSlot(slot);
     win.addEventListener('keydown', handleGlobalShortcut);
-    return () => win.removeEventListener('keydown', handleGlobalShortcut);
-  }, [chart]);
+    win.addEventListener('pointerdown', focus, true);
+    return () => {
+      win.removeEventListener('keydown', handleGlobalShortcut);
+      win.removeEventListener('pointerdown', focus, true);
+    };
+  }, [chart, slot]);
 
   // ---- store -> chart ----
   useEffect(() => {
@@ -771,6 +848,7 @@ export function ChartPanel({
   return (
     <div
       className="relative h-full w-full overflow-hidden"
+      onPointerDown={() => setActiveSlot(slot)}
       onClick={handleChartClick}
       onMouseLeave={() => {
         if (syncCrosshairRef.current) publishCrosshair(null);
@@ -786,6 +864,7 @@ export function ChartPanel({
         syncCrosshair={syncCrosshair}
       />
       {chart && <DrawingTemplates chart={chart} slot={slot} />}
+      {chart && <StudyTemplates chart={chart} slot={slot} />}
       {error && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-tv-bg/90 px-6 text-center text-sm text-tv-down">
           {error}
