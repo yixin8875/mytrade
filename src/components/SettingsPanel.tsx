@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import {
   Bell,
+  Braces,
   ChartCandlestick,
   Check,
   Info,
@@ -9,6 +10,7 @@ import {
   RefreshCw,
   Save,
   ShieldCheck,
+  Trash2,
   Users,
   X,
 } from 'lucide-react';
@@ -17,11 +19,18 @@ import { useApp } from '../store/useApp';
 import { AccountManager } from './AccountManager';
 import { LayoutGallery, SyncToggles } from './LayoutPicker';
 import type { GatewayConfig, RiskLimits, TradeMode } from '../gateway/types';
+import {
+  deletePineScript,
+  readPineScripts,
+  savePineScript,
+  type PineScriptRecord,
+} from '../lib/pineScripts';
 import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
 
 const NAV = [
   { id: 'appearance', label: '外观', hint: '主题与界面', icon: Palette },
   { id: 'chart', label: '图表', hint: '布局与周期', icon: ChartCandlestick },
+  { id: 'pine', label: 'Pine 脚本', hint: '实验：本地执行', icon: Braces },
   { id: 'risk', label: '交易与风控', hint: '手数与风险上限', icon: ShieldCheck },
   { id: 'accounts', label: 'MT5 账户', hint: '自动登录与切换', icon: Users },
   { id: 'alerts', label: '告警', hint: '声音与通知', icon: Bell },
@@ -233,6 +242,7 @@ export function SettingsPanel() {
 
           {section === 'appearance' && <AppearanceSection />}
           {section === 'chart' && <ChartSection />}
+          {section === 'pine' && <PineSection />}
           {section === 'risk' && <RiskSection />}
           {section === 'accounts' && <AccountManager />}
           {section === 'alerts' && <AlertsSection />}
@@ -1005,6 +1015,141 @@ function AboutSection() {
           <Kbd>Shift</Kbd>
           <span className="text-tv-muted">拖动价格时吸附整数点位</span>
         </div>
+      </Card>
+    </>
+  );
+}
+
+/**
+ * Pine 脚本（实验）。
+ *
+ * 粘贴 TradingView 的原生 indicator 源码，保存后由 PineTS 在本地执行。
+ * 指标元信息只在图表创建时生成，所以保存/删除脚本后要刷新一次图表。
+ */
+function PineSection() {
+  const notify = useApp((s) => s.notify);
+  const [scripts, setScripts] = useState<PineScriptRecord[]>(() => readPineScripts());
+  const [source, setSource] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    const refresh = () => setScripts(readPineScripts());
+    window.addEventListener('mytrade:pine-scripts', refresh);
+    return () => window.removeEventListener('mytrade:pine-scripts', refresh);
+  }, []);
+
+  const save = async () => {
+    if (busy || !source.trim()) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const record = await savePineScript(source);
+      setSource('');
+      setMessage({
+        ok: true,
+        text: `已保存「${record.title}」，${record.plots.length} 条曲线。刷新图表后，在图表指标里搜索该名称添加。${
+          record.warning ? `（${record.warning}）` : ''
+        }`,
+      });
+      notify('success', `Pine 脚本「${record.title}」已保存`);
+    } catch (error) {
+      setMessage({ ok: false, text: (error as Error)?.message || '保存失败' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <Card
+        title="Pine 脚本（实验）"
+        description="在本地运行原生 Pine v5/v6 indicator 脚本，行情只来自当前 MT5 网关。"
+      >
+        <div className="space-y-2 text-[11px] leading-relaxed text-tv-muted">
+          <p>
+            支持 plot / hline 折线、ta.*、input.* 和常用逻辑；暂不支持 plotshape、bgcolor、
+            绘图对象（box/line/label）、strategy 和外部数据源，计算结果也不保证与
+            TradingView 完全一致。
+          </p>
+          <p>保存或删除脚本后需要刷新图表：指标元信息只在图表创建时生成。</p>
+        </div>
+        <textarea
+          value={source}
+          onChange={(event) => setSource(event.target.value)}
+          spellCheck={false}
+          placeholder={'//@version=6\nindicator("EMA 示例", overlay=true)\nlen = input.int(20, "长度")\nplot(ta.ema(close, len), "EMA", color=color.orange)'}
+          className="mt-3 h-52 w-full resize-y rounded-lg border border-tv-border bg-tv-bg p-3 font-mono text-[11px] leading-relaxed text-tv-text outline-none placeholder:text-tv-muted/60 focus:border-tv-accent"
+        />
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void save()}
+            disabled={busy || !source.trim()}
+            className="h-7 rounded-md bg-tv-accent px-3 text-[10px] font-semibold text-white hover:opacity-90 disabled:opacity-40"
+          >
+            {busy ? '解析中…' : '保存脚本'}
+          </button>
+          <button
+            onClick={() => setSource('')}
+            className="h-7 rounded-md bg-tv-bg px-2.5 text-[10px] text-tv-muted hover:text-tv-text"
+          >
+            清空
+          </button>
+          <button
+            onClick={() => window.location.reload()}
+            className="ml-auto flex h-7 items-center gap-1 rounded-md bg-tv-bg px-2.5 text-[10px] text-tv-text hover:bg-tv-border"
+          >
+            <RefreshCw size={12} />
+            刷新图表
+          </button>
+        </div>
+        {message && (
+          <div
+            className={clsx(
+              'mt-2 rounded-md px-2.5 py-2 text-[10px] leading-relaxed',
+              message.ok ? 'bg-tv-up/10 text-tv-up' : 'bg-tv-down/10 text-tv-down',
+            )}
+          >
+            {message.text}
+          </div>
+        )}
+        <p className="mt-3 text-[10px] leading-relaxed text-tv-muted">
+          PineTS 是独立的第三方运行时（AGPL-3.0 / 商业授权），与 TradingView 无关联；
+          对外分发此功能前需要确认授权方式。
+        </p>
+      </Card>
+
+      <Card
+        title="已保存的脚本"
+        description="在图表「指标」窗口搜索脚本名称即可添加；删除后已添加的指标会失效。"
+      >
+        {scripts.length === 0 ? (
+          <p className="text-[11px] text-tv-muted">还没有保存的脚本。</p>
+        ) : (
+          <div className="divide-y divide-tv-border/60">
+            {scripts.map((script) => (
+              <div key={script.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[11px] text-tv-text">{script.title}</div>
+                  <div className="mt-0.5 text-[10px] text-tv-muted">
+                    {script.plots.length} 条曲线 · {script.inputs.length} 个参数
+                    {script.warning ? ` · ${script.warning}` : ''}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    deletePineScript(script.id);
+                    notify('success', `已删除「${script.title}」，刷新图表后生效`);
+                  }}
+                  title="删除脚本"
+                  className="rounded-md p-1.5 text-tv-muted hover:bg-tv-bg hover:text-tv-down"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
     </>
   );

@@ -42,6 +42,9 @@ export function UpdatePanel() {
   }, [state.phase, state.manual]);
 
   if (!isUpdateUiAvailable() || state.phase === 'idle') return null;
+  // 自动检查保持静默：没有新版本（或正在检查）时不出任何弹窗，
+  // 只有真的有新版本才提示；手动检查仍显示检查中和已是最新。
+  if (!state.manual && (state.phase === 'checking' || state.phase === 'none')) return null;
   if (state.phase === 'available' && !state.manual && state.version === skippedVersion()) {
     return null;
   }

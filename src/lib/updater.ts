@@ -93,11 +93,13 @@ export function dismissUpdate(): void {
 
 export async function checkForUpdates(manual = false): Promise<void> {
   if (!isTauri()) return;
-  if (
-    state.phase === 'checking' ||
-    state.phase === 'downloading' ||
-    state.phase === 'installing'
-  ) {
+  if (state.phase === 'checking') {
+    // 自动检查还没返回时用户点了「检查更新」：把这次检查改成手动，
+    // 让检查中和结果都能显示出来，而不是被静默掉。
+    if (manual && !state.manual) emit({ ...state, manual: true });
+    return;
+  }
+  if (state.phase === 'downloading' || state.phase === 'installing') {
     return;
   }
   if (pending) {
@@ -107,26 +109,28 @@ export async function checkForUpdates(manual = false): Promise<void> {
   }
 
   emit({ phase: 'checking', manual });
+  // 检查期间可能被用户的手动点击升级为手动检查，结果按最新意图提示
+  const isManual = () => (state.phase === 'checking' ? state.manual : manual);
   try {
     const update = await check({ timeout: 20_000 });
     if (!update) {
-      emit({ phase: 'none', manual });
+      emit({ phase: 'none', manual: isManual() });
       return;
     }
     pending = update;
     emit({
       phase: 'available',
-      manual,
+      manual: isManual(),
       version: update.version,
       currentVersion: update.currentVersion,
       notes: update.body ?? '',
       date: update.date,
     });
   } catch (error) {
-    if (manual) {
+    if (isManual()) {
       emit({
         phase: 'error',
-        manual,
+        manual: true,
         message: (error as Error)?.message || '检查更新失败',
       });
     } else {

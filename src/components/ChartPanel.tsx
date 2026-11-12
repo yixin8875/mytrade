@@ -3,8 +3,10 @@ import { gateway } from '../gateway/client';
 import { handleGlobalShortcut, useApp, type Theme } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, snapToLevel } from '../lib/format';
 import { GatewayDatafeed } from '../chart/tv/datafeed';
+import { PineRunner } from '../chart/tv/pineRunner';
 import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
 import { registerWidget, setActiveSlot } from '../chart/tv/registry';
+import { SessionBoxManager } from '../chart/tv/sessionBoxes';
 import { customIndicators } from '../chart/tv/studies';
 import { publishCrosshair, publishRange, subscribeRange, type RangeState } from '../chart/tv/sync';
 import { ChartChips, type ChartBand, type ChartChip } from './ChartChips';
@@ -16,6 +18,7 @@ import type {
   IChartingLibraryWidget,
   IChartWidgetApi,
   LibrarySymbolInfo,
+  PineJS,
   ResolutionString,
 } from '../../public/charting_library/charting_library';
 import type { SymbolInfo } from '../gateway/types';
@@ -210,6 +213,14 @@ export function ChartPanel({
   const widgetRef = useRef<IChartingLibraryWidget | null>(null);
   const datafeedRef = useRef<GatewayDatafeed | null>(null);
   const layerRef = useRef<PriceLineLayer | null>(null);
+  /** 专业时段指标的箱体（用绘图对象画，跟指标一起出现/消失） */
+  const sessionBoxesRef = useRef<SessionBoxManager | null>(null);
+  /** Pine 指标（实验）运行时，同一张图的所有 Pine 指标共用 */
+  const pineRunnerRef = useRef<PineRunner | null>(null);
+  // 每张图一个上下文 id：同一脚本在多张图上分别计算，结果互不覆盖
+  const [pineContextId] = useState(
+    () => `pine-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+  );
   const startedRef = useRef(false);
   const crosshairPrice = useRef<number | null>(null);
   const lastCrosshairStore = useRef(0);
@@ -535,8 +546,9 @@ export function ChartPanel({
           ],
           intervals: ['1', '5', '15', '60', '240', '1D'] as ResolutionString[],
         },
-        // 自定义指标（JS + PineJS.Std，Pine 源码不能直接运行），见 studies.ts
-        custom_indicators_getter: customIndicators,
+        // 自定义指标（JS + PineJS.Std），以及用户保存的 Pine 脚本（PineTS 本地执行）
+        custom_indicators_getter: (PineJS: PineJS) =>
+          customIndicators(PineJS, pineContextId),
         // 画线模板由应用自己的「画线模板」面板负责（见 DrawingTemplates.tsx），
         // 不用库里那个只显示「应用默认」的内置模板菜单。
         // 主图把图表属性（倒计时、坐标、指标等）存进 localStorage，重启后保留；
@@ -639,6 +651,16 @@ export function ChartPanel({
         layer.start();
         layerRef.current = layer;
 
+        // 专业时段指标只画关键位，时段箱体由这个管理器按指标设置绘制
+        const boxes = new SessionBoxManager(widget);
+        boxes.start();
+        sessionBoxesRef.current = boxes;
+
+        // Pine 脚本（实验）：按指标输入和品种/周期重算，再让指标重绘
+        const pineRunner = new PineRunner(widget, pineContextId);
+        pineRunner.start();
+        pineRunnerRef.current = pineRunner;
+
         setChart(active);
         setError(null);
       });
@@ -676,6 +698,10 @@ export function ChartPanel({
       saveTimerRef.current = 0;
       layerRef.current?.dispose();
       layerRef.current = null;
+      sessionBoxesRef.current?.dispose();
+      sessionBoxesRef.current = null;
+      pineRunnerRef.current?.dispose();
+      pineRunnerRef.current = null;
       registerWidget(slot, null);
       widgetRef.current?.remove();
       widgetRef.current = null;

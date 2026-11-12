@@ -270,17 +270,11 @@
           <span style="--h: 20px; --d: 480ms"></span>
         </div>
         <div class="boot-title">MyTrade</div>
-        <div class="boot-sub" id="boot-sub">正在加载交易终端…</div>
+        <div class="boot-sub" id="boot-sub">正在启动本地网关…</div>
         <div class="boot-bar" aria-hidden="true"><i></i></div>
       </div>
     </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      setTimeout(function () {
-        var sub = document.getElementById('boot-sub');
-        if (sub) sub.textContent = '首次启动可能需要几秒，请稍候…';
-      }, 6000);
-    </script>
   </body>
 </html>
