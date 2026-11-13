@@ -261,6 +261,28 @@ export interface DraftOrder {
   volume: number;
 }
 
+/** 模板阶段：浮盈到某个 R 时执行一次动作（分批止盈 / 移保本） */
+export interface TemplateStep {
+  /** 触发倍数：入场到止损的距离记作 1R */
+  atR: number;
+  /** 平掉当前剩余仓位的百分比（1–99）；null = 本阶段不平仓，只动止损 */
+  closePercent: number | null;
+  /** 平仓后把止损移到开仓价 */
+  moveBreakeven: boolean;
+}
+
+/** 一键下单模板：风险占比、最终止盈、分批止盈阶段 */
+export interface TradeTemplate {
+  id: string;
+  name: string;
+  /** 单笔风险占余额的百分比 */
+  riskPercent: number;
+  /** 最终止盈放在入场价外的 R 倍数；0 = 模板不自动设止盈 */
+  rewardR: number;
+  /** 按 atR 升序执行；空数组 = 成交后不管理 */
+  steps: TemplateStep[];
+}
+
 /** 按风险算手数的设置 */
 export interface RiskSettings {
   /** amount = 固定亏损金额，percent = 余额百分比 */

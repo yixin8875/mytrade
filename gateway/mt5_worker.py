@@ -169,7 +169,7 @@ class Mt5Worker:
         # 移动止损计划：ticket -> {distancePoints, stepPoints}
         self._trailing: dict[int, dict] = {}
         self._trail_next: dict[int, float] = {}
-        # 模板开仓的自动保本：ticket -> {entry, risk, trigger, side}
+        # 模板开仓的分批止盈 / 保本计划：ticket -> {entry, risk, side, steps, next}
         self._auto_be: dict[int, dict] = {}
         self._state_loaded = False
         # 交易日志（成交配对 + MFE/MAE + 统计）与第三方告警通道
@@ -2086,21 +2086,38 @@ class Mt5Worker:
         self._record_execution(
             client_id, ticket, a, payload["price"], latency, state, None, retcode
         )
-        if a["action"] == mt5.TRADE_ACTION_DEAL and p.get("autoBreakeven") and a["sl"] and ticket:
+        plan = p.get("plan") if isinstance(p.get("plan"), dict) else {}
+        steps = self._normalize_plan_steps(plan.get("steps"))
+        if not steps and p.get("autoBreakeven"):
+            # 旧客户端只发 autoBreakeven / autoBreakevenR，按单条「移保本」阶段处理
+            try:
+                be_r = float(p.get("autoBreakevenR") or 1)
+            except (TypeError, ValueError):
+                be_r = 1.0
+            if be_r > 0:
+                steps = [
+                    {
+                        "atR": be_r,
+                        "closePercent": None,
+                        "moveBreakeven": True,
+                        "done": False,
+                    }
+                ]
+        if a["action"] == mt5.TRADE_ACTION_DEAL and a["sl"] and ticket and steps:
             entry = float(payload["price"] or a["price"])
             risk = abs(entry - float(a["sl"]))
             if risk > 0:
-                trigger = entry + risk if a["side"] == "buy" else entry - risk
                 self._auto_be[ticket] = {
                     "entry": entry,
                     "risk": risk,
-                    "trigger": trigger,
                     "side": a["side"],
+                    "steps": steps,
+                    "next": 0.0,
                 }
                 self._save_auto_be()
                 self.store.audit(
-                    "position.auto_breakeven.set",
-                    {"ticket": ticket, "entry": entry, "trigger": trigger},
+                    "position.template_plan.set",
+                    {"ticket": ticket, "entry": entry, "steps": steps},
                 )
         self._emit("trade", {**payload, "state": state, "symbol": a["symbol"], "side": a["side"]})
         return {**payload, "state": state}
@@ -2348,8 +2365,124 @@ class Mt5Worker:
             "autoBreakeven", {str(k): v for k, v in self._auto_be.items()}, self._login()
         )
 
+    @staticmethod
+    def _normalize_plan_steps(raw: Any) -> list[dict]:
+        """清洗前端传来的阶段：R 为正、平仓比例留空或 1–99、按 R 升序、最多 8 条。"""
+        out: list[dict] = []
+        if isinstance(raw, list):
+            for item in raw:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    at_r = float(item.get("atR"))
+                except (TypeError, ValueError):
+                    continue
+                if not (0 < at_r <= 100):
+                    continue
+                close = item.get("closePercent")
+                try:
+                    close = float(close) if close is not None else None
+                except (TypeError, ValueError):
+                    close = None
+                if close is not None and not (0 < close < 100):
+                    close = None
+                out.append(
+                    {
+                        "atR": round(at_r, 4),
+                        "closePercent": close,
+                        "moveBreakeven": bool(item.get("moveBreakeven")),
+                        "done": False,
+                    }
+                )
+        out.sort(key=lambda step: step["atR"])
+        return out[:8]
+
+    @staticmethod
+    def _plan_steps(plan: dict) -> list[dict]:
+        """读计划里的阶段；旧版本只存了 beR，这里补成一条「移保本」阶段。"""
+        steps = plan.get("steps")
+        if isinstance(steps, list):
+            return steps
+        try:
+            be_r = float(plan.get("beR") or 1) or 1.0
+        except (TypeError, ValueError):
+            be_r = 1.0
+        steps = [{"atR": be_r, "closePercent": None, "moveBreakeven": True, "done": False}]
+        plan["steps"] = steps
+        return steps
+
+    def _auto_partial_close(self, ticket: int, percent: Any) -> float | None:
+        """按当前剩余仓位的百分比平仓；仓位小到拆不开时返回 None（只做止损动作）。"""
+        try:
+            pct = float(percent)
+        except (TypeError, ValueError):
+            return None
+        if not (0 < pct < 100):
+            return None
+        found = mt5.positions_get(ticket=ticket)
+        if not found:
+            return None
+        position = found[0]
+        info = self._ensure_symbol(position.symbol)
+        tick = mt5.symbol_info_tick(position.symbol)
+        if tick is None:
+            raise GatewayError("NO_QUOTE", "当前无报价，无法分批平仓")
+        volume = float(position.volume)
+        step = float(getattr(info, "volume_step", 0) or 0.01)
+        min_vol = max(float(getattr(info, "volume_min", 0) or 0), step)
+        target = round_volume(volume * pct / 100.0, step)
+        if target < min_vol - 1e-9 or target > volume - min_vol + 1e-9:
+            return None
+        buy = int(position.type) == 0
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": position.symbol,
+            "volume": target,
+            "type": mt5.ORDER_TYPE_SELL if buy else mt5.ORDER_TYPE_BUY,
+            "position": ticket,
+            "price": float(tick.bid if buy else tick.ask),
+            "deviation": self.cfg.deviation_points,
+            "magic": self.cfg.magic,
+            "comment": "tpl-partial",
+            "type_filling": self._filling_mode(info),
+        }
+        self._result_or_raise(mt5.order_send(request), "position.template_step.partial")
+        return target
+
+    def _auto_move_breakeven(
+        self, ticket: int, position: Any, info: Any, tick: Any
+    ) -> float | None:
+        """把止损移到开仓价；已经在保本或更好时返回 None，成功返回新止损价。"""
+        point = float(info.point)
+        buy = int(position.type) == 0
+        entry = float(position.price_open)
+        stops = max(
+            int(getattr(info, "trade_stops_level", 0) or 0),
+            int(getattr(info, "trade_freeze_level", 0) or 0),
+        )
+        min_dist = (max(stops, 1) + 5) * point
+        price = float(tick.bid if buy else tick.ask)
+        target = min(entry, price - min_dist) if buy else max(entry, price + min_dist)
+        target = align_price(target, info)
+        current_sl = float(position.sl or 0)
+        if current_sl:
+            if buy and current_sl >= target - point / 2:
+                return None
+            if not buy and current_sl <= target + point / 2:
+                return None
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "symbol": position.symbol,
+            "position": ticket,
+            "sl": target,
+            "tp": float(position.tp or 0),
+            "magic": self.cfg.magic,
+        }
+        self._result_or_raise(mt5.order_send(request), "position.template_step.breakeven")
+        return target
+
     def _auto_breakeven(self) -> None:
-        """模板开仓的自动保本：浮盈到 1R 时把止损移到开仓价。"""
+        """模板开仓的分批止盈 / 保本：每轮最多推进一步，失败 3 秒后重试。"""
         if not self._auto_be or not self._connected:
             return
         changed = False
@@ -2365,49 +2498,75 @@ class Mt5Worker:
             tick = mt5.symbol_info_tick(position["symbol"])
             if info is None or tick is None:
                 continue
-            point = float(info.point)
             buy = str(plan.get("side")) == "buy"
             price = float(tick.bid if buy else tick.ask)
-            trigger = float(plan.get("trigger") or 0)
+            entry = float(plan.get("entry") or position["price_open"])
+            risk = float(plan.get("risk") or 0)
+            if risk <= 0:
+                self._auto_be.pop(ticket, None)
+                changed = True
+                continue
+            steps = self._plan_steps(plan)
+            step = next((item for item in steps if not item.get("done")), None)
+            if step is None:
+                self._auto_be.pop(ticket, None)
+                changed = True
+                continue
+            at_r = float(step.get("atR") or 0)
+            trigger = entry + risk * at_r if buy else entry - risk * at_r
             if (buy and price < trigger) or (not buy and price > trigger):
                 continue
-            entry = float(plan.get("entry") or position["price_open"])
-            current_sl = float(position["sl"] or 0)
-            if buy and current_sl > 0 and current_sl >= entry - point / 2:
-                self._auto_be.pop(ticket, None)
-                changed = True
-                continue
-            if not buy and current_sl > 0 and current_sl <= entry + point / 2:
-                self._auto_be.pop(ticket, None)
-                changed = True
-                continue
-            stops = max(
-                int(getattr(info, "trade_stops_level", 0) or 0),
-                int(getattr(info, "trade_freeze_level", 0) or 0),
-            )
-            min_dist = (max(stops, 1) + 5) * point
-            target = min(entry, price - min_dist) if buy else max(entry, price + min_dist)
-            target = align_price(target, info)
-            request = {
-                "action": mt5.TRADE_ACTION_SLTP,
-                "symbol": position["symbol"],
-                "position": ticket,
-                "sl": target,
-                "tp": float(position["tp"] or 0),
-                "magic": self.cfg.magic,
-            }
             try:
-                self._result_or_raise(mt5.order_send(request), "position.auto_breakeven")
+                # 先移止损再分批：移保本是幂等的（已到保本就返回 None），
+                # 这样即使平仓失败重试，也不会把同一阶段平两次。
+                moved = (
+                    self._auto_move_breakeven(ticket, position, info, tick)
+                    if step.get("moveBreakeven")
+                    else None
+                )
+                closed = self._auto_partial_close(ticket, step.get("closePercent"))
             except GatewayError as exc:
                 plan["next"] = time.monotonic() + 3.0
                 self.store.audit(
-                    "position.auto_breakeven.failed", {"ticket": ticket, "error": str(exc)}
+                    "position.template_step.failed",
+                    {"ticket": ticket, "atR": at_r, "error": str(exc)},
                 )
                 continue
-            self._auto_be.pop(ticket, None)
+            step["done"] = True
             changed = True
-            self.store.audit("position.auto_breakeven", {"ticket": ticket, "sl": target})
-            self._emit("autoBreakeven", {"ticket": ticket, "sl": target, "symbol": position["symbol"]})
+            self.store.audit(
+                "position.template_step",
+                {
+                    "ticket": ticket,
+                    "atR": at_r,
+                    "closedVolume": closed,
+                    "breakeven": moved,
+                },
+            )
+            if closed is not None:
+                self._emit(
+                    "templateStep",
+                    {
+                        "ticket": ticket,
+                        "symbol": position["symbol"],
+                        "atR": at_r,
+                        "volume": closed,
+                    },
+                )
+            if moved is not None:
+                self._emit(
+                    "autoBreakeven",
+                    {
+                        "ticket": ticket,
+                        "sl": moved,
+                        "symbol": position["symbol"],
+                        "r": at_r,
+                    },
+                )
+            self._poll_trade_state()
+            position = next((x for x in self._positions if x["ticket"] == ticket), None)
+            if position is None or all(item.get("done") for item in steps):
+                self._auto_be.pop(ticket, None)
         if changed:
             self._save_auto_be()
             self._poll_trade_state()

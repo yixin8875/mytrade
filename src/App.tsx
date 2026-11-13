@@ -199,10 +199,23 @@ export default function App() {
         void captureTradeShot(trade.order);
       }),
       gateway.on('autoBreakeven', (data) => {
-        const event = data as { ticket: number; sl: number; symbol: string };
+        const event = data as { ticket: number; sl: number; symbol: string; r?: number };
+        const r = Number(event.r) > 0 ? Number(event.r) : 1;
         useApp
           .getState()
-          .notify('success', `自动保本：${event.symbol} 已到 1R，止损移到开仓价 ${event.sl}`);
+          .notify(
+            'success',
+            `自动保本：${event.symbol} 已到 ${Number(r.toFixed(2))}R，止损移到开仓价 ${event.sl}`,
+          );
+      }),
+      gateway.on('templateStep', (data) => {
+        const event = data as { ticket: number; symbol: string; atR: number; volume: number };
+        useApp
+          .getState()
+          .notify(
+            'success',
+            `分批止盈：${event.symbol} 已到 ${Number(event.atR.toFixed(2))}R，平掉 ${event.volume} 手`,
+          );
       }),
       gateway.on('alert', (data) => {
         const alert = data as AlertEvent;

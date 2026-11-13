@@ -12,8 +12,10 @@ import type {
   RiskSettings,
   RiskStatus,
   SymbolInfo,
+  TemplateStep,
   Toast,
   TradePreview,
+  TradeTemplate,
   WatchlistRow,
 } from '../gateway/types';
 
@@ -54,6 +56,18 @@ export const PAGES: Page[] = [
   'settings',
 ];
 
+/** 设置页左侧分区，和 SettingsPanel 的 NAV 一一对应 */
+export type SettingsSection =
+  | 'appearance'
+  | 'chart'
+  | 'pine'
+  | 'template'
+  | 'risk'
+  | 'accounts'
+  | 'alerts'
+  | 'updates'
+  | 'about';
+
 /** 用 hash 记住当前页，刷新或从图表 iframe 回来都不会丢 */
 export function routeFromHash(): Page {
   const raw = window.location.hash.replace(/^#\/?/, '');
@@ -83,8 +97,14 @@ interface AppStore {
   alerts: PriceAlert[];
   /** 交易台右侧的告警面板是否展开 */
   alertsOpen: boolean;
-  /** 下单模板：0.5% 风险 + 2R 止盈 + 1R 自动保本 */
+  /** 全部下单模板（风险 %、止盈 R、分批止盈阶段），存 localStorage */
+  templates: TradeTemplate[];
+  /** 下单票当前使用的模板 id */
+  activeTemplateId: string;
+  /** 下单模板当前是否已启用（本轮草稿） */
   templateArmed: boolean;
+  /** 设置页当前分区 */
+  settingsSection: SettingsSection;
   layout: ChartLayout;
   layoutSync: ChartSync;
   /** 深色 / 浅色主题，存 localStorage */
@@ -119,7 +139,13 @@ interface AppStore {
   setRiskStatus: (riskStatus: RiskStatus | null) => void;
   setAlerts: (alerts: PriceAlert[]) => void;
   setAlertsOpen: (open: boolean) => void;
+  setActiveTemplate: (id: string) => void;
+  /** 修改指定模板；id / name 之外走同一套清洗规则 */
+  updateTemplate: (id: string, patch: Partial<Omit<TradeTemplate, 'id'>>) => void;
+  addTemplate: () => void;
+  deleteTemplate: (id: string) => void;
   setTemplateArmed: (armed: boolean) => void;
+  setSettingsSection: (section: SettingsSection) => void;
   setLayout: (layout: ChartLayout) => void;
   setLayoutSync: (patch: Partial<ChartSync>) => void;
   setTheme: (theme: Theme) => void;
@@ -152,6 +178,114 @@ const defaultRisk: RiskSettings = {
 };
 
 const RISK_KEY = 'mytrade.risk';
+
+/** 模板最多带多少个阶段，防止手改配置拖垮 0.4 秒一轮的检查 */
+const MAX_STEPS = 8;
+
+const TEMPLATES_KEY = 'mytrade.templates';
+/** 旧版本单个模板的键，启动时迁移成列表里的「默认模板」 */
+const LEGACY_TEMPLATE_KEY = 'mytrade.template';
+/** 全新安装的默认模板：0.5% 风险 + 2R 止盈 + 1R 移到保本 */
+const DEFAULT_STEPS: TemplateStep[] = [{ atR: 1, closePercent: null, moveBreakeven: true }];
+
+type TemplateInput = Partial<TradeTemplate> & { breakevenR?: number };
+
+function numIn(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
+    ? value
+    : fallback;
+}
+
+function newTemplateId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+}
+
+/** 阶段清洗：R 必须为正、平仓比例留空或 1–99、按 R 升序、最多 MAX_STEPS 条 */
+function normalizeSteps(raw: unknown): TemplateStep[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      const source = (item ?? {}) as Record<string, unknown>;
+      const atR = Number(source.atR);
+      if (!Number.isFinite(atR) || atR <= 0 || atR > 100) return null;
+      const close = source.closePercent == null ? null : Number(source.closePercent);
+      const closePercent =
+        close != null && Number.isFinite(close) && close > 0 && close < 100 ? close : null;
+      return { atR, closePercent, moveBreakeven: source.moveBreakeven === true };
+    })
+    .filter((item): item is TemplateStep => item !== null)
+    .sort((a, b) => a.atR - b.atR)
+    .slice(0, MAX_STEPS);
+}
+
+/**
+ * 把任意来源的模板数据洗干净。
+ * 旧版本只有 riskPercent / rewardR / breakevenR 三个字段，这里转成一个
+ * 「浮盈 beR 移到保本」的阶段，迁移后行为不变。
+ */
+function makeTemplate(raw: TemplateInput = {}): TradeTemplate {
+  const steps = normalizeSteps(raw.steps);
+  const legacyBreakeven = numIn(raw.breakevenR, 0, 50, 0);
+  const hasSteps = Array.isArray(raw.steps);
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : newTemplateId(),
+    name:
+      typeof raw.name === 'string' && raw.name.trim()
+        ? raw.name.trim().slice(0, 24)
+        : '默认模板',
+    riskPercent: numIn(raw.riskPercent, 0.01, 100, 0.5),
+    rewardR: numIn(raw.rewardR, 0, 50, 2),
+    steps:
+      hasSteps || legacyBreakeven <= 0
+        ? steps
+        : [{ atR: legacyBreakeven, closePercent: null, moveBreakeven: true }],
+  };
+}
+
+interface TemplateBundle {
+  templates: TradeTemplate[];
+  activeTemplateId: string;
+}
+
+/** 读模板列表；没有就按旧版单模板迁移，再不行用默认 0.5% / 2R / 1R 保本 */
+function loadTemplates(): TemplateBundle {
+  const saved = readJson<{ activeId?: unknown; list?: unknown }>(TEMPLATES_KEY, {});
+  const list = Array.isArray(saved.list) ? saved.list.map((item) => makeTemplate(item)) : [];
+  if (list.length > 0) {
+    const active =
+      typeof saved.activeId === 'string' && list.some((item) => item.id === saved.activeId)
+        ? saved.activeId
+        : list[0].id;
+    return { templates: list, activeTemplateId: active };
+  }
+  const legacyRaw = window.localStorage.getItem(LEGACY_TEMPLATE_KEY);
+  const template = legacyRaw
+    ? makeTemplate({
+        ...(readJson<Record<string, unknown>>(LEGACY_TEMPLATE_KEY, {}) as TemplateInput),
+        id: 'default',
+        name: '默认模板',
+      })
+    : makeTemplate({ id: 'default', name: '默认模板', steps: DEFAULT_STEPS });
+  return { templates: [template], activeTemplateId: template.id };
+}
+
+function saveTemplates(bundle: TemplateBundle): void {
+  writeJson(TEMPLATES_KEY, { activeId: bundle.activeTemplateId, list: bundle.templates });
+}
+
+/** 当前下单票使用的模板；列表保证至少一条 */
+export function activeTemplate(state: {
+  templates: TradeTemplate[];
+  activeTemplateId: string;
+}): TradeTemplate {
+  return (
+    state.templates.find((item) => item.id === state.activeTemplateId) ?? state.templates[0]
+  );
+}
 
 /** 风险设置存 localStorage，刷新后不用重新填 */
 function loadRisk(): RiskSettings {
@@ -269,7 +403,9 @@ export const useApp = create<AppStore>((set, get) => ({
   riskStatus: null,
   alerts: [],
   alertsOpen: false,
+  ...loadTemplates(),
   templateArmed: false,
+  settingsSection: 'appearance',
   layout: loadLayout(),
   layoutSync: loadLayoutSync(),
   theme: readJson<Theme>(THEME_KEY, 'light') === 'dark' ? 'dark' : 'light',
@@ -325,7 +461,43 @@ export const useApp = create<AppStore>((set, get) => ({
   setRiskStatus: (riskStatus) => set({ riskStatus }),
   setAlerts: (alerts) => set({ alerts }),
   setAlertsOpen: (alertsOpen) => set({ alertsOpen }),
+  setActiveTemplate: (id) =>
+    set((state) => {
+      if (!state.templates.some((item) => item.id === id)) return {};
+      saveTemplates({ templates: state.templates, activeTemplateId: id });
+      return { activeTemplateId: id };
+    }),
+  updateTemplate: (id, patch) =>
+    set((state) => {
+      const templates = state.templates.map((item) =>
+        item.id === id ? makeTemplate({ ...item, ...patch, id: item.id }) : item,
+      );
+      saveTemplates({ templates, activeTemplateId: state.activeTemplateId });
+      return { templates };
+    }),
+  addTemplate: () =>
+    set((state) => {
+      const base = activeTemplate(state);
+      const copy = makeTemplate({
+        ...base,
+        id: newTemplateId(),
+        name: `${base.name.slice(0, 20)} 副本`,
+      });
+      const templates = [...state.templates, copy];
+      saveTemplates({ templates, activeTemplateId: copy.id });
+      return { templates, activeTemplateId: copy.id };
+    }),
+  deleteTemplate: (id) =>
+    set((state) => {
+      if (state.templates.length <= 1) return {};
+      const templates = state.templates.filter((item) => item.id !== id);
+      const activeTemplateId =
+        state.activeTemplateId === id ? templates[0].id : state.activeTemplateId;
+      saveTemplates({ templates, activeTemplateId });
+      return { templates, activeTemplateId };
+    }),
   setTemplateArmed: (templateArmed) => set({ templateArmed }),
+  setSettingsSection: (settingsSection) => set({ settingsSection }),
   setLayout: (layout) => {
     const next = normalizeLayoutId(layout);
     writeJson(LAYOUT_KEY, next);

@@ -10,15 +10,21 @@ import {
   RefreshCw,
   Save,
   ShieldCheck,
+  Target,
   Trash2,
   Users,
   X,
 } from 'lucide-react';
 import { gateway } from '../gateway/client';
-import { useApp } from '../store/useApp';
+import { useApp, type SettingsSection } from '../store/useApp';
 import { AccountManager } from './AccountManager';
 import { LayoutGallery, SyncToggles } from './LayoutPicker';
-import type { GatewayConfig, RiskLimits, TradeMode } from '../gateway/types';
+import type {
+  GatewayConfig,
+  RiskLimits,
+  TemplateStep,
+  TradeMode,
+} from '../gateway/types';
 import {
   deletePineScript,
   readPineScripts,
@@ -31,14 +37,13 @@ const NAV = [
   { id: 'appearance', label: '外观', hint: '主题与界面', icon: Palette },
   { id: 'chart', label: '图表', hint: '布局与周期', icon: ChartCandlestick },
   { id: 'pine', label: 'Pine 脚本', hint: '实验：本地执行', icon: Braces },
+  { id: 'template', label: '交易模板', hint: '风险、止盈与分批', icon: Target },
   { id: 'risk', label: '交易与风控', hint: '手数与风险上限', icon: ShieldCheck },
   { id: 'accounts', label: 'MT5 账户', hint: '自动登录与切换', icon: Users },
   { id: 'alerts', label: '告警', hint: '声音与通知', icon: Bell },
   { id: 'updates', label: '更新', hint: '版本与检查更新', icon: RefreshCw },
   { id: 'about', label: '数据与连接', hint: '终端状态与本机路径', icon: Info },
 ] as const;
-
-type SectionId = (typeof NAV)[number]['id'];
 
 const FRAMES: [string, string][] = [
   ['1', '1m'],
@@ -182,7 +187,8 @@ function validateRisk(form: RiskForm): string | null {
 /** 设置页：控制台中的一个整页，分区导航在页内左侧 */
 export function SettingsPanel() {
   const setPage = useApp((s) => s.setPage);
-  const [section, setSection] = useState<SectionId>('appearance');
+  const section = useApp((s) => s.settingsSection);
+  const setSection = useApp((s) => s.setSettingsSection);
 
   const active = NAV.find((item) => item.id === section) ?? NAV[0];
 
@@ -247,6 +253,7 @@ export function SettingsPanel() {
           {section === 'appearance' && <AppearanceSection />}
           {section === 'chart' && <ChartSection />}
           {section === 'pine' && <PineSection />}
+          {section === 'template' && <TemplateSection />}
           {section === 'risk' && <RiskSection />}
           {section === 'accounts' && <AccountManager />}
           {section === 'alerts' && <AlertsSection />}
@@ -505,6 +512,324 @@ function ChartSection() {
         <div className="text-[12px] leading-relaxed text-console-muted">
           这些内容仍保存在图表本地存储，不会上传。
         </div>
+      </Card>
+    </>
+  );
+}
+
+function num(value: number): string {
+  return `${Number(value.toFixed(2))}`;
+}
+
+function stepSummary(steps: TemplateStep[]): string {
+  if (!steps.length) return '成交后不管理';
+  return steps
+    .map(
+      (step) =>
+        `${num(step.atR)}R${step.closePercent != null ? ` 平${num(step.closePercent)}%` : ''}${
+          step.moveBreakeven ? '→保本' : ''
+        }`,
+    )
+    .join(' · ');
+}
+
+const DEFAULT_TEMPLATE = {
+  riskPercent: 0.5,
+  rewardR: 2,
+  steps: [{ atR: 1, closePercent: null, moveBreakeven: true }] as TemplateStep[],
+};
+
+const NUM_INPUT =
+  'h-8 w-20 rounded-lg border border-console-line bg-console-canvas px-2 text-right font-mono text-[12px] text-console-ink outline-none focus:border-console-accent';
+
+/** 设置页：模板列表 + 当前模板的参数与分批止盈阶段 */
+function TemplateSection() {
+  const templates = useApp((s) => s.templates);
+  const activeTemplateId = useApp((s) => s.activeTemplateId);
+  const setActiveTemplate = useApp((s) => s.setActiveTemplate);
+  const updateTemplate = useApp((s) => s.updateTemplate);
+  const addTemplate = useApp((s) => s.addTemplate);
+  const deleteTemplate = useApp((s) => s.deleteTemplate);
+
+  const template = templates.find((item) => item.id === activeTemplateId) ?? templates[0];
+
+  const [nameDraft, setNameDraft] = useState(template.name);
+  useEffect(() => {
+    setNameDraft(template.name);
+  }, [template.id, template.name]);
+
+  const commitNumber = (
+    field: 'riskPercent' | 'rewardR',
+    raw: string,
+    input: HTMLInputElement,
+  ) => {
+    const value = Number(raw);
+    const [min, max] = field === 'riskPercent' ? [0.01, 100] : [0, 50];
+    const next =
+      raw.trim() === '' || !Number.isFinite(value)
+        ? template[field]
+        : Math.min(max, Math.max(min, value));
+    updateTemplate(template.id, { [field]: next });
+    input.value = `${next}`;
+  };
+
+  const changeStep = (index: number, patch: Partial<TemplateStep>) => {
+    updateTemplate(template.id, {
+      steps: template.steps.map((step, i) => (i === index ? { ...step, ...patch } : step)),
+    });
+  };
+
+  const addStep = () => {
+    const last = template.steps[template.steps.length - 1];
+    updateTemplate(template.id, {
+      steps: [
+        ...template.steps,
+        { atR: last ? last.atR + 1 : 1, closePercent: 50, moveBreakeven: true },
+      ],
+    });
+  };
+
+  const removeStep = (index: number) => {
+    updateTemplate(template.id, {
+      steps: template.steps.filter((_, i) => i !== index),
+    });
+  };
+
+  return (
+    <>
+      <Card
+        title="模板"
+        description="可以有多个模板（如「日内」「波段」），下单票顶部的小标签可快速切换；模板按钮使用选中的这一个。"
+      >
+        <div className="space-y-2">
+          {templates.map((item) => (
+            <div
+              key={item.id}
+              className={clsx(
+                'flex items-center gap-2 rounded-lg border px-3 py-2 transition-colors',
+                item.id === template.id
+                  ? 'border-console-accent bg-console-canvas/70'
+                  : 'border-console-line',
+              )}
+            >
+              <button
+                onClick={() => setActiveTemplate(item.id)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <div className="text-[12px] text-console-ink">{item.name}</div>
+                <div className="mt-0.5 text-[11px] leading-relaxed text-console-muted">
+                  {num(item.riskPercent)}% 风险 ·{' '}
+                  {item.rewardR > 0 ? `止盈 ${num(item.rewardR)}R` : '不自动设止盈'} ·{' '}
+                  {stepSummary(item.steps)}
+                </div>
+              </button>
+              <button
+                onClick={() => deleteTemplate(item.id)}
+                disabled={templates.length <= 1}
+                title={templates.length <= 1 ? '至少保留一个模板' : '删除模板'}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-console-muted transition-colors hover:bg-console-hover hover:text-console-loss disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                <Trash2 size={14} strokeWidth={1.5} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 border-t border-console-line pt-4">
+          <button
+            onClick={addTemplate}
+            className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
+          >
+            复制当前模板
+          </button>
+        </div>
+      </Card>
+
+      <Card
+        title={`编辑「${template.name}」`}
+        description="风险按余额百分比算手数；止盈按 R 倍数放置；阶段在浮盈到达对应 R 时依次执行。"
+      >
+        <Row label="模板名">
+          <input
+            value={nameDraft}
+            maxLength={24}
+            onChange={(event) => setNameDraft(event.target.value)}
+            onBlur={() => {
+              const trimmed = nameDraft.trim();
+              updateTemplate(template.id, { name: trimmed || template.name });
+              setNameDraft(trimmed || template.name);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur();
+            }}
+            className="h-8 w-40 rounded-lg border border-console-line bg-console-canvas px-2 text-[12px] text-console-ink outline-none focus:border-console-accent"
+          />
+        </Row>
+        <Row label="单笔风险" hint="启用模板时按余额的百分比承担风险，手数由止损距离自动反推。">
+          <div className="flex items-center gap-2">
+            <input
+              key={`${template.id}-risk`}
+              type="number"
+              min={0.01}
+              max={100}
+              step={0.1}
+              defaultValue={num(template.riskPercent)}
+              onBlur={(event) =>
+                commitNumber('riskPercent', event.currentTarget.value, event.currentTarget)
+              }
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+              }}
+              className={NUM_INPUT}
+            />
+            <span className="text-[11px] text-console-muted">%</span>
+          </div>
+        </Row>
+        <Row label="最终止盈" hint="设好止损后自动放置；填 0 表示模板不自动设止盈。">
+          <div className="flex items-center gap-2">
+            <input
+              key={`${template.id}-reward`}
+              type="number"
+              min={0}
+              max={50}
+              step={0.1}
+              defaultValue={num(template.rewardR)}
+              onBlur={(event) =>
+                commitNumber('rewardR', event.currentTarget.value, event.currentTarget)
+              }
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+              }}
+              className={NUM_INPUT}
+            />
+            <span className="text-[11px] text-console-muted">R</span>
+          </div>
+        </Row>
+
+        <div className="mt-4 border-t border-console-line pt-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[12px] text-console-ink">分批止盈</div>
+              <div className="mt-1 text-[11px] leading-relaxed text-console-muted">
+                例如「1R 平 50% 并移到保本」：到达 1R 时平掉当时剩余仓位的一半，再把止损移到开仓价。
+                多个阶段按 R 从小到大执行；平仓比例留空表示只动止损。
+              </div>
+            </div>
+            <button
+              onClick={addStep}
+              disabled={template.steps.length >= 8}
+              className="h-7 shrink-0 rounded-lg border border-console-line bg-console-card px-2.5 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              添加阶段
+            </button>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {template.steps.map((step, index) => (
+              <div
+                key={`${template.id}-${index}`}
+                className="flex flex-wrap items-center gap-2 rounded-lg border border-console-line bg-console-canvas/60 px-3 py-2"
+              >
+                <span className="text-[11px] text-console-muted">浮盈</span>
+                <input
+                  type="number"
+                  min={0.1}
+                  max={100}
+                  step={0.1}
+                  defaultValue={num(step.atR)}
+                  title="触发倍数（1R = 入场到止损的距离）"
+                  onBlur={(event) => {
+                    const raw = event.currentTarget.value;
+                    const value = Number(raw);
+                    if (raw.trim() === '' || !Number.isFinite(value) || value <= 0) {
+                      event.currentTarget.value = num(step.atR);
+                      return;
+                    }
+                    const next = Math.min(100, value);
+                    changeStep(index, { atR: next });
+                    event.currentTarget.value = num(next);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                  }}
+                  className={NUM_INPUT}
+                />
+                <span className="text-[11px] text-console-muted">R 时平</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  step={5}
+                  defaultValue={step.closePercent == null ? '' : num(step.closePercent)}
+                  placeholder="—"
+                  title="平掉当时剩余仓位的百分比；留空 = 不平仓"
+                  onBlur={(event) => {
+                    const raw = event.currentTarget.value.trim();
+                    if (raw === '') {
+                      changeStep(index, { closePercent: null });
+                      return;
+                    }
+                    const value = Number(raw);
+                    if (!Number.isFinite(value)) {
+                      event.currentTarget.value =
+                        step.closePercent == null ? '' : num(step.closePercent);
+                      return;
+                    }
+                    const next = Math.min(99, Math.max(1, value));
+                    changeStep(index, { closePercent: next });
+                    event.currentTarget.value = num(next);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                  }}
+                  className={NUM_INPUT}
+                />
+                <span className="text-[11px] text-console-muted">%</span>
+                <label className="ml-1 flex items-center gap-1.5 text-[11px] text-console-ink-2">
+                  <input
+                    type="checkbox"
+                    checked={step.moveBreakeven}
+                    onChange={(event) => changeStep(index, { moveBreakeven: event.target.checked })}
+                    className="h-3.5 w-3.5 accent-[var(--console-accent)]"
+                  />
+                  移到开仓价
+                </label>
+                <button
+                  onClick={() => removeStep(index)}
+                  title="删除阶段"
+                  className="ml-auto flex h-6 w-6 items-center justify-center rounded-md text-console-muted transition-colors hover:bg-console-hover hover:text-console-loss"
+                >
+                  <X size={13} strokeWidth={1.6} />
+                </button>
+              </div>
+            ))}
+            {!template.steps.length && (
+              <div className="rounded-lg border border-dashed border-console-line px-3 py-3 text-[11px] leading-relaxed text-console-muted">
+                还没有阶段：成交后不自动平仓，也不移动止损。
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={() => updateTemplate(template.id, DEFAULT_TEMPLATE)}
+              className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
+            >
+              恢复默认（0.5% / 2R / 1R 保本）
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      <Card title="模板怎么执行" description="点模板按钮后自动完成；成交后的阶段由网关管理。">
+        <ul className="space-y-2 text-[12px] leading-relaxed text-console-muted">
+          <li>· 风险改为余额百分比，并打开自动手数，手数在设好止损后自动算。</li>
+          <li>· 切到市价单，图纸上拖出止损后，止盈按 R 倍数自动放置。</li>
+          <li>
+            · 成交后网关每 0.4 秒检查一次浮盈：到阶段触发价先按比例平仓，再把止损移到开仓价；
+            计划持久化，重启后仍然保留。
+          </li>
+          <li>· 参数存在本机 mytrade.templates，不上传；网关风控上限仍会照常拦截超限订单。</li>
+        </ul>
       </Card>
     </>
   );

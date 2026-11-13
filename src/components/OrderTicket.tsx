@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
+import { Settings2 } from 'lucide-react';
 import { gateway } from '../gateway/client';
-import { useApp } from '../store/useApp';
+import { activeTemplate, useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtVolume, roundVolume } from '../lib/format';
 import type {
   OrderType,
@@ -34,6 +35,11 @@ const ORDER_TYPES: { value: OrderType; label: string }[] = [
 const inputClass =
   'h-8 w-full rounded-lg border border-tv-border bg-tv-raised px-2 font-mono text-[12px] text-tv-text outline-none transition-colors focus:border-tv-accent focus:bg-tv-panel';
 
+/** 模板里的数字显示：2 → "2"，0.50 → "0.5" */
+function num(value: number): string {
+  return `${Number(value.toFixed(2))}`;
+}
+
 export function OrderTicket() {
   const conn = useApp((s) => s.conn);
   const health = useApp((s) => s.health);
@@ -48,8 +54,13 @@ export function OrderTicket() {
   const patchRisk = useApp((s) => s.patchRisk);
   const orderTag = useApp((s) => s.orderTag);
   const setOrderTag = useApp((s) => s.setOrderTag);
+  const template = useApp(activeTemplate);
+  const templates = useApp((s) => s.templates);
+  const setActiveTemplate = useApp((s) => s.setActiveTemplate);
   const templateArmed = useApp((s) => s.templateArmed);
   const setTemplateArmed = useApp((s) => s.setTemplateArmed);
+  const setPage = useApp((s) => s.setPage);
+  const setSettingsSection = useApp((s) => s.setSettingsSection);
   const notify = useApp((s) => s.notify);
 
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -63,6 +74,20 @@ export function OrderTicket() {
   const ready = conn === 'open' && !!health?.connected;
   const mode = health?.tradeMode ?? 'readonly';
   const currency = health?.account?.currency ?? '';
+
+  const stepSummary = template.steps.length
+    ? template.steps
+        .map(
+          (step) =>
+            `${num(step.atR)}R${
+              step.closePercent != null ? ` 平${num(step.closePercent)}%` : ''
+            }${step.moveBreakeven ? '→保本' : ''}`,
+        )
+        .join(' · ')
+    : '成交后不管理';
+  const templateParams = `${num(template.riskPercent)}% 风险 + ${
+    template.rewardR > 0 ? `止盈 ${num(template.rewardR)}R` : '不自动设止盈'
+  }`;
 
   useEffect(() => {
     if (!ready || !info || !draft.active) {
@@ -155,20 +180,40 @@ export function OrderTicket() {
     patchDraft,
   ]);
 
-  // 模板：止损设定后自动把止盈放到 2R；改入场价/止损会重新算
+  // 模板启用期间在设置里改了风险比例，这里跟着套用；手动改风险不会被覆盖
+  useEffect(() => {
+    if (!templateArmed) return;
+    if (risk.mode === 'percent' && risk.value === template.riskPercent && risk.auto) return;
+    patchRisk({ mode: 'percent', value: template.riskPercent, auto: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateArmed, template.riskPercent, patchRisk]);
+
+  // 模板：止损设定后按设置的 R 倍数自动放止盈；改入场价/止损会重新算
   useEffect(() => {
     if (!templateArmed || !info || !draft.active || !(draft.price > 0) || !draft.sl) return;
+    if (!(template.rewardR > 0)) return;
     const risk = Math.abs(draft.price - draft.sl);
     if (!(risk > 0)) return;
     const tick = info.tickSize || info.point || 0;
-    const raw = draft.side === 'buy' ? draft.price + risk * 2 : draft.price - risk * 2;
+    const reward = risk * template.rewardR;
+    const raw = draft.side === 'buy' ? draft.price + reward : draft.price - reward;
     const target = tick ? Number((Math.round(raw / tick) * tick).toFixed(digits)) : raw;
     if (draft.tp == null || Math.abs(draft.tp - target) > (tick || 1e-9) / 2) {
       patchDraft({ tp: target });
     }
     // 只跟随入场价与止损，用户手动改止盈时不抢回
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateArmed, draft.active, draft.side, draft.price, draft.sl, info, digits, patchDraft]);
+  }, [
+    templateArmed,
+    template.rewardR,
+    draft.active,
+    draft.side,
+    draft.price,
+    draft.sl,
+    info,
+    digits,
+    patchDraft,
+  ]);
 
   useEffect(() => {
     if (!confirm) return;
@@ -198,14 +243,14 @@ export function OrderTicket() {
       return;
     }
     if (!info) return;
-    patchRisk({ mode: 'percent', value: 0.5, auto: true });
+    patchRisk({ mode: 'percent', value: template.riskPercent, auto: true });
     patchDraft({
       type: 'market',
       active: true,
       price: defaultPrice(draft.side, 'market', quote, info),
     });
     setTemplateArmed(true);
-    notify('info', '模板已启用：0.5% 风险、止盈 2R、浮盈 1R 自动保本');
+    notify('info', `模板「${template.name}」已启用：${templateParams}；${stepSummary}`);
   };
 
   const setSide = (side: Side) => {
@@ -254,7 +299,16 @@ export function OrderTicket() {
         sl: draft.sl ?? undefined,
         tp: draft.tp ?? undefined,
         tag: orderTag.trim() || undefined,
-        autoBreakeven: templateArmed || undefined,
+        plan:
+          templateArmed && template.steps.length
+            ? {
+                steps: template.steps.map((step) => ({
+                  atR: step.atR,
+                  closePercent: step.closePercent,
+                  moveBreakeven: step.moveBreakeven,
+                })),
+              }
+            : undefined,
       });
       setConfirm(false);
       setTemplateArmed(false);
@@ -279,6 +333,12 @@ export function OrderTicket() {
     draft.type === 'market'
       ? ((draft.side === 'buy' ? quote?.ask : quote?.bid) ?? 0)
       : draft.price;
+
+  const templateLabel = `${template.name} · ${num(template.riskPercent)}%${
+    template.rewardR > 0 ? ` / ${num(template.rewardR)}R` : ''
+  }`;
+  const templateArmedLabel = `已启用 · ${template.name}`;
+  const templateTitle = `${template.name}：${templateParams}；${stepSummary}。先设置止损后会自动算止盈；右侧箭头切换模板，齿轮编辑`;
 
   return (
     <section className="shrink-0 border-b border-tv-border">
@@ -342,18 +402,53 @@ export function OrderTicket() {
           ))}
         </div>
 
-        <button
-          onClick={applyTemplate}
-          title="0.5% 风险 + 止盈 2R + 浮盈 1R 自动保本；先设置止损后会自动算止盈"
-          className={clsx(
-            'h-8 w-full rounded-lg border text-[12px] transition-colors',
-            templateArmed
-              ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
-              : 'border-tv-border bg-tv-panel text-tv-muted hover:text-tv-text',
-          )}
-        >
-          {templateArmed ? '模板已启用 · 0.5% / 2R / 保本' : '模板 · 0.5% 风险 + 2R + 保本'}
-        </button>
+        {templates.length > 1 && (
+          <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5">
+            {templates.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTemplate(item.id)}
+                title={`${item.name}：${num(item.riskPercent)}% 风险${
+                  item.rewardR > 0 ? `、止盈 ${num(item.rewardR)}R` : ''
+                }、${item.steps.length} 个阶段`}
+                className={clsx(
+                  'h-6 shrink-0 rounded-md border px-2 text-[11px] transition-colors',
+                  item.id === template.id
+                    ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
+                    : 'border-tv-border bg-tv-panel text-tv-muted hover:text-tv-text',
+                )}
+              >
+                {item.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="flex gap-1.5">
+          <button
+            onClick={applyTemplate}
+            title={templateTitle}
+            className={clsx(
+              'h-8 flex-1 truncate rounded-lg border text-[12px] transition-colors',
+              templateArmed
+                ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
+                : 'border-tv-border bg-tv-panel text-tv-muted hover:text-tv-text',
+            )}
+          >
+            {templateArmed ? templateArmedLabel : templateLabel}
+          </button>
+          <button
+            onClick={() => {
+              setSettingsSection('template');
+              setPage('settings');
+            }}
+            title="新建或编辑模板：风险 %、止盈 R、分批止盈"
+            aria-label="自定义下单模板"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-tv-border bg-tv-panel text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+          >
+            <Settings2 size={14} strokeWidth={1.6} />
+          </button>
+        </div>
 
         <Field label="风险开仓">
           <div className="space-y-2">
@@ -595,10 +690,7 @@ export function OrderTicket() {
               <ConfirmRow label="止盈" value={fmtPrice(draft.tp, digits)} />
               <ConfirmRow label="预估风险" value={fmtMoney(preview?.riskAmount)} />
               <ConfirmRow label="策略标签" value={orderTag.trim() || '—'} />
-              <ConfirmRow
-                label="自动保本"
-                value={templateArmed && draft.sl ? '浮盈 1R 移到开仓价' : '—'}
-              />
+              <ConfirmRow label="模板步骤" value={templateArmed ? stepSummary : '—'} />
             </dl>
             <div className="mt-5 flex gap-2">
               <button
