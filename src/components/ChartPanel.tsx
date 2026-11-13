@@ -70,8 +70,13 @@ function dropSavedThemeColors(theme: Theme): void {
   }
 }
 
+/** 图表库只认 light / dark；白色主题共用浅色的图表底材 */
+function chartTheme(theme: Theme): 'light' | 'dark' {
+  return theme === 'dark' ? 'dark' : 'light';
+}
+
 function chartOverrides(theme: Theme): Partial<ChartPropertiesOverrides> {
-  const light = theme === 'light';
+  const light = theme !== 'dark';
   return {
     'paneProperties.background': light ? '#ffffff' : '#14161b',
     'paneProperties.backgroundType': 'solid',
@@ -646,7 +651,7 @@ export function ChartPanel({
     startedRef.current = true;
     if (!datafeedRef.current) datafeedRef.current = new GatewayDatafeed();
     const initialTheme = useApp.getState().theme;
-    if (slot === 'main') dropSavedThemeColors(initialTheme);
+    if (slot === 'main') dropSavedThemeColors(chartTheme(initialTheme));
 
     try {
       const widget = new tv.widget({
@@ -656,11 +661,11 @@ export function ChartPanel({
         symbol,
         interval: resolution as ResolutionString,
         locale: 'zh',
-        theme: initialTheme,
+        theme: chartTheme(initialTheme),
         autosize: true,
         fullscreen: false,
         loading_screen: {
-          backgroundColor: initialTheme === 'light' ? '#ffffff' : '#14161b',
+          backgroundColor: initialTheme === 'dark' ? '#14161b' : '#ffffff',
           foregroundColor: accentForTheme(useApp.getState().accentColor, initialTheme),
         },
         overrides: chartOverrides(initialTheme),
@@ -814,7 +819,7 @@ export function ChartPanel({
     let cancelled = false;
     try {
       widget
-        .changeTheme(theme)
+        .changeTheme(chartTheme(theme))
         .then(() => {
           if (!cancelled) widget.applyOverrides(chartOverrides(theme));
         })

@@ -55,6 +55,47 @@
   --radius-panel: 16px;
 }
 
+/* 白色：纯白底材，只靠发丝线分面；语义色与强调色和浅色一致 */
+html[data-theme="white"] {
+  --color-tv-bg: #ffffff;
+  --color-tv-panel: #ffffff;
+  --color-tv-raised: #f6f7f9;
+  --color-tv-border: #e5e9ee;
+  --color-tv-text: #161b22;
+  --color-tv-muted: #5f6b7a;
+  --color-tv-faint: #8a94a2;
+  --color-tv-up: #0f7a55;
+  --color-tv-down: #c2413a;
+  --color-tv-warn: #a9691a;
+  --color-tv-accent: #1f5fd6;
+  --color-tv-accent-soft: #e9effc;
+  --color-tv-up-soft: #e7f4ee;
+  --color-tv-down-soft: #fbecea;
+  --color-tv-warn-soft: #fbf3e6;
+  --color-tv-hover: #f3f5f7;
+
+  /* 复盘页也换成中性白纸，不再带暖调 */
+  --color-console-canvas: #fbfbfa;
+  --color-console-sidebar: #f6f6f4;
+  --color-console-card: #ffffff;
+  --color-console-ink: #1b1b19;
+  --color-console-ink-2: #4b4b47;
+  --color-console-muted: #6e6e68;
+  --color-console-faint: #9a9a92;
+  --color-console-line: #e8e8e3;
+  --color-console-line-2: #d9d9d3;
+  --color-console-hover: #f2f2ef;
+  --color-console-selected: #edede9;
+  --color-console-accent: #1f5fd6;
+  --color-console-accent-soft: #e9effc;
+  --color-console-gain: #0f7a55;
+  --color-console-loss: #c2413a;
+  --color-console-warn: #a9691a;
+  --color-console-gain-soft: #e7f4ee;
+  --color-console-loss-soft: #fbecea;
+  --color-console-warn-soft: #fbf3e6;
+}
+
 /* 深色仍是可选项：同一套角色，换成墨色阶梯，不改变任何布局 */
 html[data-theme="dark"] {
   --color-tv-bg: #14161b;

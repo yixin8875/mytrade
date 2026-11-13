@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { gateway } from '../gateway/client';
-import { useApp, type SettingsSection } from '../store/useApp';
+import { THEMES, useApp, type SettingsSection, type Theme } from '../store/useApp';
 import { AccountManager } from './AccountManager';
 import { LayoutGallery, SyncToggles } from './LayoutPicker';
 import type {
@@ -392,6 +392,36 @@ function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
+const THEME_PREVIEWS: Record<
+  Theme,
+  { label: string; shell: string; rail: string; bar: string; line: string; faint: string }
+> = {
+  light: {
+    label: '浅色',
+    shell: 'border-[#e3e8ee] bg-[#eef1f5]',
+    rail: 'bg-[#dde4ec]',
+    bar: 'bg-white',
+    line: 'bg-[#c9d3df]',
+    faint: 'bg-[#d7dde5]',
+  },
+  white: {
+    label: '白色',
+    shell: 'border-[#e5e9ee] bg-white',
+    rail: 'bg-[#f2f4f6]',
+    bar: 'bg-white ring-1 ring-[#e5e9ee]',
+    line: 'bg-[#dfe4ea]',
+    faint: 'bg-[#eef0f3]',
+  },
+  dark: {
+    label: '深色',
+    shell: 'border-[#2a2f38] bg-[#14161b]',
+    rail: 'bg-[#1f232a]',
+    bar: 'bg-[#22262e]',
+    line: 'bg-[#39414d]',
+    faint: 'bg-[#2a2f38]',
+  },
+};
+
 function AppearanceSection() {
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
@@ -411,69 +441,50 @@ function AppearanceSection() {
     <>
       <Card
         title="主题"
-        description="交易台与复盘页共用一套字体、间距和语义色，只有底材不同。设置保存在本机，重启后保留。"
+        description="三种底材：浅色冷灰、纯白、深色墨面。字体、间距和语义色一致，只有底材不同；设置保存在本机，重启后保留。"
       >
-        <div className="grid grid-cols-2 gap-3">
-          {(['light', 'dark'] as const).map((value) => (
-            <button
-              key={value}
-              onClick={() => setTheme(value)}
-              className={clsx(
-                'rounded-xl border p-3 text-left transition-colors',
-                theme === value
-                  ? 'border-console-accent ring-1 ring-console-accent'
-                  : 'border-console-line hover:border-console-line-2',
-              )}
-            >
-              <div
+        <div className="grid grid-cols-3 gap-3">
+          {THEMES.map((value) => {
+            const preview = THEME_PREVIEWS[value];
+            return (
+              <button
+                key={value}
+                onClick={() => setTheme(value)}
                 className={clsx(
-                  'mb-2.5 flex h-16 gap-1.5 rounded-lg border p-2',
-                  value === 'light'
-                    ? 'border-[#e3e8ee] bg-[#eef1f5]'
-                    : 'border-[#2a2f38] bg-[#14161b]',
+                  'rounded-xl border p-3 text-left transition-colors',
+                  theme === value
+                    ? 'border-console-accent ring-1 ring-console-accent'
+                    : 'border-console-line hover:border-console-line-2',
                 )}
               >
                 <div
                   className={clsx(
-                    'w-6 rounded',
-                    value === 'light' ? 'bg-[#dde4ec]' : 'bg-[#1f232a]',
+                    'mb-2.5 flex h-16 gap-1.5 rounded-lg border p-2',
+                    preview.shell,
                   )}
-                />
-                <div className="flex-1 space-y-1.5">
-                  <div
-                    className={clsx(
-                      'h-2.5 rounded',
-                      value === 'light' ? 'bg-white' : 'bg-[#22262e]',
-                    )}
-                  />
-                  <div className="flex gap-1">
-                    <div
-                      className={clsx(
-                        'h-1.5 flex-1 rounded',
-                        value === 'light' ? 'bg-[#c9d3df]' : 'bg-[#39414d]',
-                      )}
-                    />
-                    <div
-                      className="h-1.5 w-4 rounded"
-                      style={{ backgroundColor: accentForTheme(accentColor, value) }}
-                    />
+                >
+                  <div className={clsx('w-6 rounded', preview.rail)} />
+                  <div className="flex-1 space-y-1.5">
+                    <div className={clsx('h-2.5 rounded', preview.bar)} />
+                    <div className="flex gap-1">
+                      <div className={clsx('h-1.5 flex-1 rounded', preview.line)} />
+                      <div
+                        className="h-1.5 w-4 rounded"
+                        style={{ backgroundColor: accentForTheme(accentColor, value) }}
+                      />
+                    </div>
+                    <div className={clsx('h-1.5 w-12 rounded', preview.faint)} />
                   </div>
-                  <div
-                    className={clsx(
-                      'h-1.5 w-12 rounded',
-                      value === 'light' ? 'bg-[#d7dde5]' : 'bg-[#2a2f38]',
-                    )}
-                  />
                 </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[12px] font-medium text-console-ink">
-                  {value === 'light' ? '浅色' : '深色'}
-                </span>
-                {theme === value && <Check size={13} strokeWidth={1.5} className="text-console-accent" />}
-              </div>
-            </button>
-          ))}
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] font-medium text-console-ink">{preview.label}</span>
+                  {theme === value && (
+                    <Check size={13} strokeWidth={1.5} className="text-console-accent" />
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </Card>
 
@@ -544,7 +555,7 @@ function AppearanceSection() {
         <ul className="space-y-2 text-[12px] leading-relaxed text-console-muted">
           <li>· 交易台：图表、下单、持仓与挂单，数字用等宽字体对齐。</li>
           <li>· 复盘区：概览、日志、报表、执行、审计与设置，读起来像纸面记录。</li>
-          <li>· 深色主题只作用于实时台，复盘页始终是暖纸；语义色在两种底材上一致。</li>
+          <li>· 深色主题下复盘页换成暖石墨，白色主题下是中性白纸；语义色在所有底材上一致。</li>
         </ul>
       </Card>
     </>

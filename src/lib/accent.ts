@@ -87,6 +87,7 @@ export function accentForTheme(hex: string, theme: Theme): string {
 
 const PANELS: Record<Theme, { tv: string; console: string; soft: number }> = {
   light: { tv: '#ffffff', console: '#fffdf8', soft: 0.11 },
+  white: { tv: '#ffffff', console: '#ffffff', soft: 0.11 },
   dark: { tv: '#1a1d23', console: '#211c16', soft: 0.16 },
 };
 

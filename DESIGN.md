@@ -229,8 +229,9 @@ TV 库自带完整主题体系。要做到"完全一致"：
 - 布局尺寸对齐 TV：顶栏 38px、左栏 52px、右栏 300px、底部交易条 48px
 - 图标优先用库自带，其次用 TradingView 风格的线性图标集
 
-**深 / 浅色切换**（`src/store/useApp.ts` 的 `theme`）：
-- 自有面板用 Tailwind 4 `@theme` 变量 `--color-tv-*`；浅色主题在 `src/index.css` 用 `html[data-theme="light"]` 整套覆盖，组件代码不写死颜色。
+**浅色 / 白色 / 深色切换**（`src/store/useApp.ts` 的 `theme`）：
+- 自有面板用 Tailwind 4 `@theme` 变量 `--color-tv-*`；浅色是默认值，`src/index.css` 用 `html[data-theme="white"]` 和 `html[data-theme="dark"]` 整套覆盖，组件代码不写死颜色。
+- 图表库只认 light / dark，白色主题在 `ChartPanel.tsx` 里映射成 light。
 - 图表由 `ChartPanel` 监听 `theme`，调用 `widget.changeTheme(theme)` 后再 `applyOverrides(chartOverrides(theme))` 补齐背景、网格、坐标轴与蜡烛颜色；不重建 widget，已画的线保留。
 - 选择存 localStorage `mytrade.theme`，顶部栏按钮切换。
 

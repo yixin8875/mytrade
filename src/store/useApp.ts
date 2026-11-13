@@ -35,7 +35,10 @@ export interface ChartSync {
   dateRange: boolean;
 }
 
-export type Theme = 'dark' | 'light';
+/** 浅色 = 冷灰仪器台，白色 = 纯白底材，深色 = 墨色阶梯 */
+export type Theme = 'light' | 'white' | 'dark';
+
+export const THEMES: Theme[] = ['light', 'white', 'dark'];
 
 /** 控制台页面：概览 / 交易台 / 交易日志 / 统计报表 / 执行质量 / 审计日志 / 设置 */
 export type Page =
@@ -343,6 +346,11 @@ function loadLayout(): ChartLayout {
   return normalizeLayoutId(readJson<unknown>(LAYOUT_KEY, '1'));
 }
 
+function loadTheme(): Theme {
+  const raw = readJson<unknown>(THEME_KEY, 'light');
+  return raw === 'dark' || raw === 'white' ? raw : 'light';
+}
+
 const defaultLayoutSync: ChartSync = {
   symbol: false,
   interval: false,
@@ -414,7 +422,7 @@ export const useApp = create<AppStore>((set, get) => ({
   settingsSection: 'appearance',
   layout: loadLayout(),
   layoutSync: loadLayoutSync(),
-  theme: readJson<Theme>(THEME_KEY, 'light') === 'dark' ? 'dark' : 'light',
+  theme: loadTheme(),
   accentColor: normalizeHex(readJson<unknown>(ACCENT_KEY, DEFAULT_ACCENT)) ?? DEFAULT_ACCENT,
   alertSound: loadPrefs().sound,
   alertDesktop: loadPrefs().desktop,
