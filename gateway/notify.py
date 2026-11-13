@@ -14,7 +14,7 @@ def alert_text(alert: dict) -> str:
     note = f"（{alert['note']}）" if alert.get("note") else ""
     market = alert.get("marketPrice")
     price_text = f"，现价 {market}" if market is not None else ""
-    return f"[MyTrade] {alert.get('symbol')} {arrow} {alert.get('price')}{price_text}{note}"
+    return f"[Tally] {alert.get('symbol')} {arrow} {alert.get('price')}{price_text}{note}"
 
 
 def post_json(url: str, payload: dict, headers: dict | None = None, timeout: float = 6.0) -> None:

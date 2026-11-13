@@ -197,7 +197,7 @@ export async function installUpdate(): Promise<void> {
       emit({
         phase: 'error',
         manual: true,
-        message: '网关进程未能完全退出，安装包无法覆盖文件。请完全退出 MyTrade 后重试。',
+        message: '网关进程未能完全退出，安装包无法覆盖文件。请完全退出 Tally 后重试。',
       });
       return;
     }

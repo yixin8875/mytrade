@@ -1,4 +1,4 @@
-# MyTrade · MT5 图表交易终端
+# Tally · MT5 图表交易终端
 
 在 TradingView 风格的图表上直接画线、拖拽价格、下单，订单经本地网关推送到本机 MetaTrader 5 执行。
 
@@ -76,11 +76,13 @@ npm run check
 
 产物：
 
-- `src-tauri/target/release/bundle/msi/MyTrade_0.5.8_x64_en-US.msi`
-- `src-tauri/target/release/bundle/nsis/MyTrade_0.5.8_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/Tally_0.5.8_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/Tally_0.5.8_x64-setup.exe`
 - 同名 `.sig` 文件（Tauri 更新签名，发布到 GitHub 时使用）
 
 安装包未签名，首次运行 Windows 可能弹 SmartScreen，选「更多信息 → 仍要运行」。安装包已包含网关 sidecar，启动应用时会在后台自动拉起，退出应用时自动关闭，不需要另开终端运行 Python。
+
+> 品牌已改名为 Tally，但数据目录仍沿用 `MyTrade`，避免旧安装的数据和凭据需要迁移。
 
 网关数据统一保存在 `%LOCALAPPDATA%\MyTrade\gateway\`：`config.json`（账户与风控）、`data\`（交易库、凭据、截图）、`audit\`（审计日志）和 `gateway.log`。从源码目录第一次运行新版网关时，会把旧的 `gateway/config.json`、`gateway/data/`、`gateway/audit/` 复制到这个目录一次；之后桌面版和手动启动共用同一份数据。
 

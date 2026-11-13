@@ -226,7 +226,7 @@ export default function App() {
         if (state.alertSound) beep();
         if (state.alertDesktop) {
           desktopNotify(
-            'MyTrade 告警',
+            'Tally 告警',
             `${text}${alert.marketPrice ? `，现价 ${alert.marketPrice}` : ''}`,
           );
         }

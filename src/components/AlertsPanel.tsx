@@ -143,7 +143,7 @@ export function AlertsPanel() {
       return;
     }
     setAlertPrefs({ alertDesktop: true });
-    desktopNotify('MyTrade 告警', '桌面通知已开启，价格触发时会弹出提醒');
+    desktopNotify('Tally 告警', '桌面通知已开启，价格触发时会弹出提醒');
   };
 
   return (

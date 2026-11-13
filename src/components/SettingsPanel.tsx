@@ -206,7 +206,7 @@ export function SettingsPanel() {
       <aside className="flex w-[208px] shrink-0 flex-col border-r border-console-line bg-console-sidebar px-3 py-5">
         <div className="px-2.5">
           <div className="text-[13px] font-semibold text-console-ink">设置</div>
-          <div className="mt-0.5 text-[11px] text-console-muted">MyTrade · MT5</div>
+          <div className="mt-0.5 text-[11px] text-console-muted">Tally · MT5</div>
         </div>
 
         <nav className="mt-5 space-y-0.5">
@@ -1192,7 +1192,7 @@ function RiskSection() {
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-console-warn/30 bg-console-warn-soft px-3 py-2.5 text-[11px] leading-relaxed text-console-ink-2">
           <Info size={14} strokeWidth={1.5} className="mt-0.5 shrink-0 text-console-warn" />
           <span>
-            当前生效：单笔上限 {base.max_lot} 手、单笔风险 {base.max_risk_pct}%。这些是 MyTrade
+            当前生效：单笔上限 {base.max_lot} 手、单笔风险 {base.max_risk_pct}%。这些是 Tally
             的风控值，不是券商限制；自动手数会被截到上限，手动超过会被网关拒绝。
           </span>
         </div>

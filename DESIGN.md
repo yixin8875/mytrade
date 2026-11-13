@@ -1,4 +1,4 @@
-# MyTrade · 自有 TradingView 级图表交易终端（MT5）
+# Tally · 自有 TradingView 级图表交易终端（MT5）
 
 > 目标：一个界面完全采用 TradingView 的桌面交易终端，在图上直接画线、下单、拖拽止损止盈，订单实时推送到本机 MT5 执行，并把持仓/挂单/成交回报同步回图表。
 

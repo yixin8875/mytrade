@@ -37,12 +37,12 @@ const NAV: { label: string; items: { page: Page; label: string; icon: typeof Lay
 /** 与启动页同一支标记：五根蜡烛，不做渐变和阴影 */
 function Mark() {
   return (
-    <span className="flex h-[18px] items-end gap-[3px]" aria-hidden="true">
-      <span className="h-2 w-[3px] rounded-[1px] bg-console-muted" />
-      <span className="h-3.5 w-[3px] rounded-[1px] bg-console-ink" />
-      <span className="h-2.5 w-[3px] rounded-[1px] bg-console-muted" />
-      <span className="h-[18px] w-[3px] rounded-[1px] bg-console-ink" />
-      <span className="h-[15px] w-[3px] rounded-[1px] bg-console-muted" />
+    <span className="relative flex h-[18px] items-center gap-[3px]" aria-hidden="true">
+      <span className="h-[15px] w-[3px] rounded-[1px] bg-console-ink" />
+      <span className="h-[15px] w-[3px] rounded-[1px] bg-console-ink" />
+      <span className="h-[15px] w-[3px] rounded-[1px] bg-console-ink" />
+      <span className="h-[15px] w-[3px] rounded-[1px] bg-console-ink" />
+      <span className="absolute left-[-4px] top-1/2 h-[2.5px] w-[26px] -translate-y-1/2 -rotate-[30deg] rounded-[1px] bg-console-accent" />
     </span>
   );
 }
@@ -77,7 +77,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
         <div className="flex h-16 items-center gap-3 px-4">
           <Mark />
           <div className="min-w-0">
-            <div className="text-[15px] font-semibold leading-none">MyTrade</div>
+            <div className="text-[15px] font-semibold leading-none">Tally</div>
             <div className="mt-1 text-[11px] leading-none text-console-muted">
               MT5 交易终端
             </div>

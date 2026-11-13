@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "MyTrade",
+  "productName": "Tally",
   "version": "0.5.8",
   "identifier": "com.mytrade.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "MyTrade · MT5",
+        "title": "Tally · MT5",
         "width": 1440,
         "height": 900,
         "minWidth": 1100,

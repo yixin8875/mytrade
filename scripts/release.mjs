@@ -198,7 +198,7 @@ async function ensureRelease(version, notes, token, draft) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       tag_name: tag,
-      name: `MyTrade ${tag}`,
+      name: `Tally ${tag}`,
       body: notes,
       draft,
       prerelease: false,
@@ -254,7 +254,7 @@ async function main() {
   const notes =
     option('notes') ||
     process.env.RELEASE_NOTES ||
-    `MyTrade v${version}：新增 GitHub 自动更新，修复与改进见提交记录。`;
+    `Tally v${version}：新增 GitHub 自动更新，修复与改进见提交记录。`;
   const signingKey = resolveSigningKey();
 
   if (!flag('skip-build')) runBuild(signingKey);

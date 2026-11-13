@@ -11,7 +11,7 @@ from pathlib import Path
 # DPAPI 的附加熵：同一台机器上的其他程序即使拿到文件也不能直接解密
 _ENTROPY = b"mytrade.mt5.credentials.v1"
 _CRYPTPROTECT_UI_FORBIDDEN = 0x1
-_DESCRIPTION = "MyTrade MT5 账户凭据"
+_DESCRIPTION = "Tally MT5 账户凭据"
 
 
 class CredentialError(RuntimeError):

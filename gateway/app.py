@@ -61,7 +61,7 @@ async def lifespan(_: FastAPI):
     log.info("MT5 worker stopped")
 
 
-app = FastAPI(title="MyTrade Gateway", version="0.5.8", lifespan=lifespan)
+app = FastAPI(title="Tally Gateway", version="0.5.8", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -157,7 +157,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
 if __name__ == "__main__":
     log.info(
-        "starting MyTrade gateway on %s:%s (mode=%s, data=%s)",
+        "starting Tally gateway on %s:%s (mode=%s, data=%s)",
         cfg.host,
         cfg.port,
         cfg.trade_mode,

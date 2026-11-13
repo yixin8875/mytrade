@@ -1,4 +1,4 @@
-"""MyTrade 下单链路冒烟测试（仅允许模拟账户）。
+"""Tally 下单链路冒烟测试（仅允许模拟账户）。
 
 用法：
     python scripts/verify_trade.py [SYMBOL] [WAIT_ALGO_SECONDS]
