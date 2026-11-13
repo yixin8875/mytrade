@@ -81,9 +81,38 @@ npm run tauri:build
 
 安装前应用会先结束网关整棵进程树（含 PyInstaller 子进程和残留的孤儿进程），并等到 `mytrade-gateway.exe` 可覆盖后才启动安装器，避免 Windows 因文件被占用卡住；如果网关未能完全退出会取消安装并保留当前版本，安装失败会自动把网关重新拉起来。
 
-发布新版本在本机执行，因为 `public/charting_library/` 没有提交到 Git，GitHub 云端 runner 无法编译完整应用：
+#### 用 GitHub Actions 发布（推荐）
 
-1. 同步修改版本号：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`gateway/app.py`、`gateway/mt5_worker.py`（后两处影响状态栏显示的网关版本）。
+`public/charting_library/` 因为许可限制没有进 Git，云端 runner 默认编译不出完整应用。一次性配置一个放图表库的私有仓库后，之后只要改版本号、打 tag，构建和上传都在 GitHub 上完成。
+
+一次性准备：
+
+1. 新建私有仓库（例如 `yixin8875/mytrade-charting`），把本机 `public/charting_library/` 里的文件放在仓库根目录，`charting_library.standalone.js` 要在根目录。
+2. 在主仓库 `mytrade` 的 Settings → Secrets and variables → Actions 添加：
+   - `CHARTING_LIBRARY_REPO`：`yixin8875/mytrade-charting`
+   - `CHARTING_LIBRARY_TOKEN`：只对该私有仓库有 Contents: Read 权限的 fine-grained PAT
+   - `TAURI_SIGNING_PRIVATE_KEY`：`~/.tauri/mytrade.key` 的完整内容
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：私钥密码（没有就留空）
+3. Settings → Actions → General → Workflow permissions 设为 Read and write（工作流里也声明了 `contents: write`）。
+
+之后发布新版本：
+
+1. 同步修改版本号：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`（`src-tauri/Cargo.lock` 里 `name = "app"` 那一段）、`gateway/app.py`、`gateway/mt5_worker.py`。
+2. 提交并打 tag，推上去：
+
+```bash
+git commit -am "chore: 发布 v0.5.8"
+git tag v0.5.8
+git push origin main --tags
+```
+
+3. `.github/workflows/release.yml` 会先校验 tag 与 `tauri.conf.json` 的版本一致，再构建网关 sidecar、MSI/NSIS，生成 `latest.json` 并创建/更新 Release。也可以在 Actions 页面手动 Run workflow。
+
+> 图表库的私有仓库不要公开：Charting Library 的许可不允许再分发。不想建私有仓库的话，可以改用带本地 `charting_library` 文件的自托管 runner，或继续用下面的本机发布。
+
+#### 本机发布
+
+1. 同步修改上面那组版本号。
 2. 确认本机 `public/charting_library/` 存在。
 3. 设置一个有 `contents: write` 权限的 GitHub token 后发布：
 
