@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { normalizeLayoutId } from '../chart/layouts';
+import { DEFAULT_ACCENT, normalizeHex } from '../lib/accent';
 import type {
   Account,
   ConnState,
@@ -109,6 +110,8 @@ interface AppStore {
   layoutSync: ChartSync;
   /** 深色 / 浅色主题，存 localStorage */
   theme: Theme;
+  /** 强调色 #rrggbb，存 localStorage；默认色不写覆盖，交给 CSS 默认值 */
+  accentColor: string;
   alertSound: boolean;
   alertDesktop: boolean;
   /** 图表十字线最新价格（用于快速建告警） */
@@ -149,6 +152,8 @@ interface AppStore {
   setLayout: (layout: ChartLayout) => void;
   setLayoutSync: (patch: Partial<ChartSync>) => void;
   setTheme: (theme: Theme) => void;
+  /** 传非法值时回到默认强调色 */
+  setAccentColor: (hex: string) => void;
   setAlertPrefs: (patch: Partial<Pick<AppStore, 'alertSound' | 'alertDesktop'>>) => void;
   setCrosshairPrice: (price: number | null) => void;
   setWatchlist: (watchlist: string[]) => void;
@@ -309,6 +314,7 @@ function loadRisk(): RiskSettings {
 const LAYOUT_KEY = 'mytrade.layout';
 const LAYOUT_SYNC_KEY = 'mytrade.layoutSync';
 const THEME_KEY = 'mytrade.theme';
+const ACCENT_KEY = 'mytrade.accent';
 const RES_KEY = 'mytrade.resolution';
 const PREFS_KEY = 'mytrade.alertPrefs';
 const WATCH_KEY = 'mytrade.watchlist';
@@ -409,6 +415,7 @@ export const useApp = create<AppStore>((set, get) => ({
   layout: loadLayout(),
   layoutSync: loadLayoutSync(),
   theme: readJson<Theme>(THEME_KEY, 'light') === 'dark' ? 'dark' : 'light',
+  accentColor: normalizeHex(readJson<unknown>(ACCENT_KEY, DEFAULT_ACCENT)) ?? DEFAULT_ACCENT,
   alertSound: loadPrefs().sound,
   alertDesktop: loadPrefs().desktop,
   crosshairPrice: null,
@@ -512,6 +519,11 @@ export const useApp = create<AppStore>((set, get) => ({
   setTheme: (theme) => {
     writeJson(THEME_KEY, theme);
     set({ theme });
+  },
+  setAccentColor: (hex) => {
+    const accentColor = normalizeHex(hex) ?? DEFAULT_ACCENT;
+    writeJson(ACCENT_KEY, accentColor);
+    set({ accentColor });
   },
   setAlertPrefs: (patch) =>
     set((state) => {

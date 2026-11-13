@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { gateway } from '../gateway/client';
 import { handleGlobalShortcut, useApp, type Theme } from '../store/useApp';
+import { accentForTheme } from '../lib/accent';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, snapToLevel } from '../lib/format';
 import { requestModify, revertModify } from '../lib/modifyQueue';
 import { GatewayDatafeed } from '../chart/tv/datafeed';
@@ -660,7 +661,7 @@ export function ChartPanel({
         fullscreen: false,
         loading_screen: {
           backgroundColor: initialTheme === 'light' ? '#ffffff' : '#14161b',
-          foregroundColor: initialTheme === 'light' ? '#1f5fd6' : '#7ba1ff',
+          foregroundColor: accentForTheme(useApp.getState().accentColor, initialTheme),
         },
         overrides: chartOverrides(initialTheme),
         // 收藏画线工具：左侧工具栏里点星标即可收藏，收藏的工具会浮在图上快捷调用

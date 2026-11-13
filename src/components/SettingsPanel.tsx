@@ -26,6 +26,12 @@ import type {
   TradeMode,
 } from '../gateway/types';
 import {
+  ACCENT_PRESETS,
+  DEFAULT_ACCENT,
+  accentForTheme,
+  normalizeHex,
+} from '../lib/accent';
+import {
   deletePineScript,
   readPineScripts,
   savePineScript,
@@ -389,6 +395,17 @@ function Kbd({ children }: { children: ReactNode }) {
 function AppearanceSection() {
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
+  const accentColor = useApp((s) => s.accentColor);
+  const setAccentColor = useApp((s) => s.setAccentColor);
+  const [hexDraft, setHexDraft] = useState(accentColor);
+
+  useEffect(() => setHexDraft(accentColor), [accentColor]);
+
+  const commitHex = (value: string) => {
+    const next = normalizeHex(value);
+    if (next) setAccentColor(next);
+    else setHexDraft(accentColor);
+  };
 
   return (
     <>
@@ -436,7 +453,10 @@ function AppearanceSection() {
                         value === 'light' ? 'bg-[#c9d3df]' : 'bg-[#39414d]',
                       )}
                     />
-                    <div className="h-1.5 w-4 rounded bg-[#1f5fd6]" />
+                    <div
+                      className="h-1.5 w-4 rounded"
+                      style={{ backgroundColor: accentForTheme(accentColor, value) }}
+                    />
                   </div>
                   <div
                     className={clsx(
@@ -454,6 +474,66 @@ function AppearanceSection() {
               </div>
             </button>
           ))}
+        </div>
+      </Card>
+
+      <Card
+        title="强调色"
+        description="只用于选中、焦点、链接这类强调元素；涨跌的绿红是语义色，不跟着变。深色下会自动提亮，保证在深底上看得清。"
+      >
+        <div className="flex flex-wrap gap-2">
+          {ACCENT_PRESETS.map((preset) => {
+            const active = accentColor === preset.value;
+            return (
+              <button
+                key={preset.value}
+                onClick={() => setAccentColor(preset.value)}
+                className={clsx(
+                  'flex h-9 items-center gap-2 rounded-lg border px-2.5 transition-colors',
+                  active
+                    ? 'border-console-ink bg-console-hover'
+                    : 'border-console-line hover:border-console-line-2',
+                )}
+              >
+                <span
+                  className="h-4 w-4 rounded-full ring-1 ring-black/10"
+                  style={{ backgroundColor: accentForTheme(preset.value, theme) }}
+                />
+                <span className="text-[12px] text-console-ink-2">{preset.name}</span>
+                {active && <Check size={12} strokeWidth={2} className="text-console-ink" />}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-console-line pt-3">
+          <label className="flex items-center gap-2 text-[12px] text-console-muted">
+            自定义
+            <input
+              type="color"
+              value={accentColor}
+              onChange={(event) => setAccentColor(event.target.value)}
+              className="h-8 w-10 cursor-pointer rounded border border-console-line bg-console-card p-0.5"
+              aria-label="自定义强调色"
+            />
+          </label>
+          <input
+            value={hexDraft}
+            onChange={(event) => setHexDraft(event.target.value)}
+            onBlur={(event) => commitHex(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitHex(event.currentTarget.value);
+            }}
+            spellCheck={false}
+            className="console-input w-28 font-mono uppercase"
+            aria-label="强调色十六进制值"
+          />
+          <button
+            onClick={() => setAccentColor(DEFAULT_ACCENT)}
+            className="console-btn console-btn-secondary"
+          >
+            恢复默认
+          </button>
         </div>
       </Card>
 

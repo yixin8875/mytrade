@@ -20,6 +20,7 @@ import { AuditView } from './views/Audit';
 import { primaryHost, primaryWidget } from './chart/tv/registry';
 import { buildShotMeta } from './chart/tv/shotMeta';
 import { gateway } from './gateway/client';
+import { applyAccent } from './lib/accent';
 import { beep, desktopNotify } from './lib/alert';
 import { handleGlobalShortcut, routeFromHash, useApp, type SidebarTab } from './store/useApp';
 import type {
@@ -299,13 +300,15 @@ export default function App() {
   const ordersCount = useApp((s) => s.orders.length);
   const watchCount = useApp((s) => s.watchlist.length);
   const theme = useApp((s) => s.theme);
+  const accentColor = useApp((s) => s.accentColor);
   const activeAccountId = useApp((s) => s.health?.activeAccountId ?? '');
   const activeLogin = useApp((s) => s.account?.login ?? 0);
   const alertsOpen = useApp((s) => s.alertsOpen);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-  }, [theme]);
+    applyAccent(accentColor, theme);
+  }, [theme, accentColor]);
 
   useEffect(() => {
     if (conn !== 'open' || !symbol) return;
