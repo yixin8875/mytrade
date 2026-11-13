@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit && python -m pytest -q",
     "preview": "vite preview",
     "gateway": "python gateway/app.py",
     "gateway:setup": "python -m venv build/gateway-venv && build/gateway-venv/Scripts/python -m pip install -r gateway/requirements-build.txt",

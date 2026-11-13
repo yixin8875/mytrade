@@ -65,10 +65,19 @@ npm run gateway:setup
 npm run tauri:build
 ```
 
+开发自检（不需要打包，也不连 MT5）：
+
+```bash
+python -m pip install -r gateway/requirements-dev.txt
+npm run check
+```
+
+`npm run check` 先跑 TypeScript 类型检查，再跑 `gateway/tests` 下的 pytest：下单计划清洗与旧格式迁移、风控字段校验、日志分类与截图标注。
+
 产物：
 
-- `src-tauri/target/release/bundle/msi/MyTrade_0.5.7_x64_en-US.msi`
-- `src-tauri/target/release/bundle/nsis/MyTrade_0.5.7_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/MyTrade_0.5.8_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/MyTrade_0.5.8_x64-setup.exe`
 - 同名 `.sig` 文件（Tauri 更新签名，发布到 GitHub 时使用）
 
 安装包未签名，首次运行 Windows 可能弹 SmartScreen，选「更多信息 → 仍要运行」。安装包已包含网关 sidecar，启动应用时会在后台自动拉起，退出应用时自动关闭，不需要另开终端运行 Python。

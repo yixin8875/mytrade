@@ -20,6 +20,9 @@ def _weighted(pairs: list[tuple[float, float]]) -> float:
 
 def _close_kind(comment: str) -> str:
     text = comment.strip().lower()
+    # 模板分批止盈的成交注释是 "tpl-partial"，开头的 tp 不是止盈单
+    if text.startswith("tpl"):
+        return "manual"
     if text.startswith("tp"):
         return "tp"
     if text.startswith("sl"):
