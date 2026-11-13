@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { AlertsPanel } from './components/AlertsPanel';
+import { CalendarPanel } from './components/CalendarPanel';
 import { ChartGrid } from './components/ChartGrid';
+import { CommandPalette } from './components/CommandPalette';
 import { ConsoleShell } from './components/ConsoleShell';
 import { OrderTicket } from './components/OrderTicket';
 import { OrdersPanel } from './components/OrdersPanel';
@@ -249,6 +251,7 @@ export default function App() {
   const activeAccountId = useApp((s) => s.health?.activeAccountId ?? '');
   const activeLogin = useApp((s) => s.account?.login ?? 0);
   const alertsOpen = useApp((s) => s.alertsOpen);
+  const calendarOpen = useApp((s) => s.calendarOpen);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -289,8 +292,9 @@ export default function App() {
             <main className="relative min-w-0 flex-1">
               {/* 切换账户或原地改登录号后重建图表，避免沿用上一个账户的品种和历史缓存 */}
               <ChartGrid key={`${activeAccountId}:${activeLogin}`} />
-              {/* 价格告警覆盖在图表右侧，不挤压图表也不另开弹窗 */}
+              {/* 价格告警 / 财经日历覆盖在图表右侧，不挤压图表也不另开弹窗 */}
               {alertsOpen && <AlertsPanel />}
+              {calendarOpen && <CalendarPanel />}
             </main>
             <aside className="flex w-[336px] shrink-0 flex-col border-l border-tv-border bg-tv-panel">
               <OrderTicket />
@@ -338,6 +342,7 @@ export default function App() {
       {page === 'settings' && <SettingsPanel />}
 
       <UpdatePanel />
+      <CommandPalette />
       <Toast />
     </ConsoleShell>
   );

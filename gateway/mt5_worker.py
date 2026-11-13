@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import math
 import queue
 import threading
 import time
@@ -11,7 +12,9 @@ from typing import Any, Awaitable, Callable
 
 import MetaTrader5 as mt5
 
+import exporter
 from accounts import AccountError, AccountManager
+from calendar_feed import week_payload
 from config import BASE_DIR, Config
 from journal import TradeJournal
 from notify import Notifier
@@ -172,6 +175,8 @@ class Mt5Worker:
         # 模板开仓的分批止盈 / 保本计划：ticket -> {entry, risk, side, steps, next}
         self._auto_be: dict[int, dict] = {}
         self._state_loaded = False
+        # 已经记录过初始风险的持仓 ticket（重复轮询时不要反复写库）
+        self._risk_tracked: dict[int, float] = {}
         # 交易日志（成交配对 + MFE/MAE + 统计）与第三方告警通道
         self._journal = TradeJournal(store)
         self._notifier = Notifier(cfg.alert_channels, store)
@@ -477,6 +482,7 @@ class Mt5Worker:
         self._watch_day = {}
         self._subs.clear()
         self._bar_subs.clear()
+        self._risk_tracked = {}
         self._server_offset = 0
         # 换账户后默认回到只读，避免把上一个账户的交易模式带过去
         self._trade_mode = "readonly"
@@ -775,6 +781,15 @@ class Mt5Worker:
                 "written": self._journal.sync(self._login(), force=True)
             },
             "journal.screenshot.save": self._journal_shot,
+            "calendar.week": lambda _: week_payload(),
+            "data.export": self._data_export,
+            "data.info": lambda _: {
+                "dir": str(self.store.base_dir),
+                "exports": str(self.store.base_dir / "exports"),
+                "backups": str(self.store.base_dir / "backups"),
+            },
+            "data.backup.create": self._data_backup,
+            "data.backup.list": lambda _: exporter.list_backups(self.store.base_dir),
             "alerts.list": lambda _: self.store.alerts_list(self._login()),
             "alerts.create": self._alert_create,
             "alerts.update": self._alert_update,
@@ -1026,6 +1041,38 @@ class Mt5Worker:
         self.store.audit(
             "journal.screenshot",
             {"positionId": position_id, "bytes": out["bytes"], "login": login},
+        )
+        return out
+
+    # ---------- 导出 / 备份 ----------
+
+    def _data_export(self, p: dict) -> dict:
+        kind = str(p.get("kind") or "journal")
+        days = int(p.get("days") or 30)
+        login = self._login()
+        try:
+            if kind == "journal":
+                return exporter.export_journal(self.store, login, days)
+            if kind == "executions":
+                return exporter.export_executions(self.store, login, days)
+            if kind == "audit":
+                return exporter.export_audit(self.store, days)
+            if kind == "settings":
+                settings = p.get("settings") if isinstance(p.get("settings"), dict) else None
+                return exporter.export_settings(self.store, self.cfg, login, settings)
+        except OSError as exc:
+            raise GatewayError("EXPORT_FAILED", f"导出失败: {exc}") from exc
+        raise GatewayError("BAD_EXPORT", f"未知导出类型: {kind}")
+
+    def _data_backup(self, p: dict) -> dict:
+        settings = p.get("settings") if isinstance(p.get("settings"), dict) else None
+        try:
+            out = exporter.create_backup(self.store, self.cfg, settings)
+        except OSError as exc:
+            raise GatewayError("BACKUP_FAILED", f"备份失败: {exc}") from exc
+        self.store.audit(
+            "data.backup",
+            {"name": out["name"], "bytes": out["bytes"], "login": self._login()},
         )
         return out
 
@@ -1582,6 +1629,57 @@ class Mt5Worker:
         if next_orders != self._orders:
             self._orders = next_orders
             self._emit("orders", next_orders)
+        self._capture_position_risks(positions)
+
+    def _risk_for(
+        self, symbol: str, side: str, volume: float, entry: float, sl: float
+    ) -> float | None:
+        """按开仓价与止损价折算初始风险（账户货币的绝对值）。"""
+        if entry <= 0 or sl <= 0 or volume <= 0:
+            return None
+        base = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
+        try:
+            value = mt5.order_calc_profit(base, symbol, volume, entry, sl)
+        except Exception:  # noqa: BLE001
+            return None
+        if value is None:
+            return None
+        risk = abs(float(value))
+        return risk if math.isfinite(risk) and risk > 0 else None
+
+    def _capture_position_risks(self, positions: Any) -> None:
+        """持仓一旦带上止损就把初始风险落库，之后统计 R 不再依赖下单意图。
+
+        手动在终端开的单、先开仓后补止损的单也能被覆盖。
+        """
+        login = self._login()
+        if login <= 0:
+            return
+        for position in positions or []:
+            ticket = int(position.ticket)
+            sl = float(position.sl or 0)
+            if sl <= 0 or ticket in self._risk_tracked:
+                continue
+            side = "buy" if int(position.type) == 0 else "sell"
+            risk = self._risk_for(
+                str(position.symbol), side, float(position.volume), float(position.price_open), sl
+            )
+            if risk is None:
+                continue
+            self.store.record_position_risk(
+                {
+                    "login": login,
+                    "position_id": ticket,
+                    "symbol": str(position.symbol),
+                    "side": side,
+                    "volume": float(position.volume),
+                    "entry": float(position.price_open),
+                    "sl": sl,
+                    "risk": risk,
+                    "source": "position",
+                }
+            )
+            self._risk_tracked[ticket] = sl
 
     def _stop_out_price(self, position: Any, info: Any) -> float | None:
         """只持有这一单时，账户净值跌到券商强平线对应的价格（估算）。"""
@@ -2086,6 +2184,24 @@ class Mt5Worker:
         self._record_execution(
             client_id, ticket, a, payload["price"], latency, state, None, retcode
         )
+        if state == "filled" and ticket and a["sl"]:
+            entry = float(payload["price"] or a["price"])
+            risk = self._risk_for(a["symbol"], a["side"], a["volume"], entry, float(a["sl"]))
+            if risk is not None:
+                self.store.record_position_risk(
+                    {
+                        "login": login,
+                        "position_id": ticket,
+                        "symbol": a["symbol"],
+                        "side": a["side"],
+                        "volume": a["volume"],
+                        "entry": entry,
+                        "sl": float(a["sl"]),
+                        "risk": risk,
+                        "source": "order",
+                    }
+                )
+                self._risk_tracked[ticket] = float(a["sl"])
         plan = p.get("plan") if isinstance(p.get("plan"), dict) else {}
         steps = self._normalize_plan_steps(plan.get("steps"))
         if not steps and p.get("autoBreakeven"):
@@ -2268,6 +2384,31 @@ class Mt5Worker:
         result = mt5.order_send(request)
         out = self._result_or_raise(result, "position.modify")
         self._poll_trade_state()
+        # 原本没有止损、这次才补上的，按补止损时的价格记录初始风险
+        if (
+            sl > 0
+            and float(position.sl or 0) <= 0
+            and ticket not in self._risk_tracked
+        ):
+            side = "buy" if int(position.type) == 0 else "sell"
+            risk = self._risk_for(
+                position.symbol, side, float(position.volume), float(position.price_open), sl
+            )
+            if risk is not None:
+                self.store.record_position_risk(
+                    {
+                        "login": self._login(),
+                        "position_id": ticket,
+                        "symbol": position.symbol,
+                        "side": side,
+                        "volume": float(position.volume),
+                        "entry": float(position.price_open),
+                        "sl": sl,
+                        "risk": risk,
+                        "source": "position",
+                    }
+                )
+                self._risk_tracked[ticket] = sl
         return out
 
     def _breakeven(self, p: dict) -> dict:

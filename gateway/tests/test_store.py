@@ -31,6 +31,59 @@ def test_intent_sl_map_keeps_earliest_stop(tmp_path):
     assert store.intent_sl_map(2, [5]) == {}
 
 
+def test_position_risk_keeps_first_record(tmp_path):
+    store = Store(tmp_path)
+    base = {
+        "login": 1,
+        "position_id": 9,
+        "symbol": "EURUSD",
+        "side": "buy",
+        "volume": 0.1,
+        "entry": 1.08,
+        "sl": 1.075,
+        "source": "position",
+    }
+    assert store.record_position_risk({**base, "risk": 25.0}) is True
+    assert store.record_position_risk({**base, "risk": 99.0}) is False
+    assert store.position_risk_map(1, [9]) == {
+        9: {
+            "risk": 25.0,
+            "source": "position",
+            "entry": 1.08,
+            "sl": 1.075,
+            "volume": 0.1,
+        }
+    }
+    assert store.position_risk_map(1, [10]) == {}
+
+
+def test_journal_risk_is_written_only_when_missing(tmp_path):
+    store = Store(tmp_path)
+    record = {
+        "login": 1,
+        "position_id": 9,
+        "symbol": "EURUSD",
+        "side": "buy",
+        "volume": 0.1,
+        "entry_price": 1.08,
+        "exit_price": 1.085,
+        "profit": 50.0,
+        "open_time": 100,
+        "close_time": 200,
+        "duration_sec": 100,
+    }
+    store.upsert_journal(record)
+    store.journal_set_risks(1, {9: (25.0, "intent")})
+    row = store.journal_get(9, 1) or {}
+    assert row["risk"] == 25.0
+    assert row["risk_source"] == "intent"
+    # 后续同步带了别的风险也不覆盖第一条
+    store.upsert_journal({**record, "risk": 99.0, "risk_source": "order"})
+    row = store.journal_get(9, 1) or {}
+    assert row["risk"] == 25.0
+    assert row["risk_source"] == "intent"
+
+
 def test_execution_entry_map_uses_first_record_per_ticket(tmp_path):
     store = Store(tmp_path)
     base = {

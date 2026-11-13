@@ -71,7 +71,26 @@ class Store:
                     tag TEXT,
                     closed_by TEXT,
                     has_shot INTEGER NOT NULL DEFAULT 0,
+                    risk REAL,
+                    risk_source TEXT,
                     recorded_at INTEGER NOT NULL,
+                    PRIMARY KEY (login, position_id)
+                )
+                """
+            )
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS position_risk (
+                    login INTEGER NOT NULL DEFAULT 0,
+                    position_id INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    volume REAL NOT NULL,
+                    entry REAL NOT NULL,
+                    sl REAL NOT NULL,
+                    risk REAL NOT NULL,
+                    source TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
                     PRIMARY KEY (login, position_id)
                 )
                 """
@@ -134,8 +153,17 @@ class Store:
             self._db.execute("ALTER TABLE intents ADD COLUMN tag TEXT")
         if "login" not in self._columns("journal"):
             self._rebuild_journal()
+        # 初始风险（账户货币）与来源：成交止损 / 持仓止损 / 下单止损
+        journal_columns = self._columns("journal")
+        if "risk" not in journal_columns:
+            self._db.execute("ALTER TABLE journal ADD COLUMN risk REAL")
+        if "risk_source" not in journal_columns:
+            self._db.execute("ALTER TABLE journal ADD COLUMN risk_source TEXT")
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_journal_login ON journal(login, close_time)"
+        )
+        self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_position_risk_login ON position_risk(login, position_id)"
         )
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_executions_login ON executions(login, created_at)"
@@ -173,6 +201,8 @@ class Store:
                     tag TEXT,
                     closed_by TEXT,
                     has_shot INTEGER NOT NULL DEFAULT 0,
+                    risk REAL,
+                    risk_source TEXT,
                     recorded_at INTEGER NOT NULL,
                     PRIMARY KEY (login, position_id)
                 )
@@ -183,10 +213,12 @@ class Store:
                 INSERT INTO journal
                     (login, position_id, symbol, side, volume, entry_price, exit_price, profit,
                      swap, commission, open_time, close_time, duration_sec, mfe, mae, tag,
-                     closed_by, has_shot, recorded_at)
+                     closed_by, has_shot, risk, risk_source, recorded_at)
                 SELECT 0, position_id, symbol, side, volume, entry_price, exit_price, profit,
                        swap, commission, open_time, close_time, duration_sec, mfe, mae, tag,
-                       closed_by, has_shot, recorded_at
+                       closed_by, has_shot,
+                       NULL, NULL,
+                       recorded_at
                 FROM journal_legacy
                 """
             )
@@ -346,8 +378,8 @@ class Store:
                 INSERT INTO journal
                     (login, position_id, symbol, side, volume, entry_price, exit_price, profit,
                      swap, commission, open_time, close_time, duration_sec, mfe, mae,
-                     tag, closed_by, recorded_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     tag, closed_by, risk, risk_source, recorded_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(login, position_id) DO UPDATE SET
                     exit_price=excluded.exit_price,
                     profit=excluded.profit,
@@ -359,6 +391,12 @@ class Store:
                     mae=excluded.mae,
                     closed_by=excluded.closed_by,
                     recorded_at=excluded.recorded_at,
+                    risk=CASE
+                        WHEN journal.risk IS NULL OR journal.risk <= 0
+                        THEN excluded.risk ELSE journal.risk END,
+                    risk_source=CASE
+                        WHEN journal.risk IS NULL OR journal.risk <= 0
+                        THEN excluded.risk_source ELSE journal.risk_source END,
                     tag=COALESCE(journal.tag, excluded.tag)
                 """,
                 (
@@ -379,6 +417,8 @@ class Store:
                     record.get("mae"),
                     record.get("tag"),
                     record.get("closed_by"),
+                    record.get("risk"),
+                    record.get("risk_source"),
                     int(time.time()),
                 ),
             )
@@ -449,6 +489,83 @@ class Store:
                 ).fetchall()
                 for row in rows:
                     out.setdefault(int(row["ticket"]), float(row["sl"]))
+        return out
+
+    def journal_export(self, login: int = 0, since: int = 0) -> list[dict[str, Any]]:
+        """导出用：区间内全部已平仓交易，不设条数上限。"""
+        with self._lock:
+            rows = self._db.execute(
+                """SELECT * FROM journal WHERE login=? AND close_time>=?
+                   ORDER BY close_time ASC""",
+                (int(login), int(since)),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def journal_set_risks(
+        self, login: int, values: dict[int, tuple[float, str]]
+    ) -> None:
+        """批量补写初始风险：只填空值，不覆盖已经记录的风险。"""
+        if not values:
+            return
+        with self._lock:
+            self._db.executemany(
+                """UPDATE journal SET risk=?, risk_source=?
+                   WHERE login=? AND position_id=? AND (risk IS NULL OR risk <= 0)""",
+                [
+                    (float(risk), source, int(login), int(ticket))
+                    for ticket, (risk, source) in values.items()
+                    if risk is not None and risk > 0
+                ],
+            )
+            self._db.commit()
+
+    # ---------- 持仓初始风险（开仓时/改止损时落库） ----------
+
+    def record_position_risk(self, record: dict[str, Any]) -> bool:
+        """记录一笔持仓的初始风险；同一 ticket 只保留第一次记录。"""
+        with self._lock:
+            cur = self._db.execute(
+                """INSERT INTO position_risk
+                       (login, position_id, symbol, side, volume, entry, sl, risk, source, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(login, position_id) DO NOTHING""",
+                (
+                    int(record.get("login") or 0),
+                    int(record["position_id"]),
+                    str(record["symbol"]),
+                    str(record["side"]),
+                    float(record["volume"]),
+                    float(record["entry"]),
+                    float(record["sl"]),
+                    float(record["risk"]),
+                    str(record.get("source") or "position"),
+                    int(record.get("created_at") or time.time()),
+                ),
+            )
+            self._db.commit()
+            return cur.rowcount > 0
+
+    def position_risk_map(self, login: int, tickets: list[int]) -> dict[int, dict[str, Any]]:
+        unique = sorted({int(ticket) for ticket in tickets if ticket})
+        out: dict[int, dict[str, Any]] = {}
+        with self._lock:
+            for start in range(0, len(unique), 500):
+                chunk = unique[start : start + 500]
+                marks = ",".join("?" * len(chunk))
+                rows = self._db.execute(
+                    f"""SELECT position_id, risk, source, entry, sl, volume
+                        FROM position_risk
+                        WHERE login=? AND position_id IN ({marks})""",
+                    (int(login), *chunk),
+                ).fetchall()
+                for row in rows:
+                    out[int(row["position_id"])] = {
+                        "risk": float(row["risk"]),
+                        "source": str(row["source"] or "position"),
+                        "entry": float(row["entry"]),
+                        "sl": float(row["sl"]),
+                        "volume": float(row["volume"]),
+                    }
         return out
 
     # ---------- alerts ----------

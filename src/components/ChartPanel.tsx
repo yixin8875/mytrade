@@ -4,8 +4,10 @@ import { handleGlobalShortcut, useApp, type Theme } from '../store/useApp';
 import { accentForTheme } from '../lib/accent';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, snapToLevel } from '../lib/format';
 import { requestModify, revertModify } from '../lib/modifyQueue';
+import { CalendarLayer } from '../chart/tv/calendarLayer';
 import { GatewayDatafeed } from '../chart/tv/datafeed';
 import { PineRunner } from '../chart/tv/pineRunner';
+import { currenciesForSymbol, loadCalendar } from '../lib/calendar';
 import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
 import { registerWidget, setActiveSlot } from '../chart/tv/registry';
 import { SessionBoxManager } from '../chart/tv/sessionBoxes';
@@ -275,6 +277,8 @@ export function ChartPanel({
   const layerRef = useRef<PriceLineLayer | null>(null);
   /** 专业时段指标的箱体（用绘图对象画，跟指标一起出现/消失） */
   const sessionBoxesRef = useRef<SessionBoxManager | null>(null);
+  /** 财经日历事件的竖线标注 */
+  const calendarLayerRef = useRef<CalendarLayer | null>(null);
   /** Pine 指标（实验）运行时，同一张图的所有 Pine 指标共用 */
   const pineRunnerRef = useRef<PineRunner | null>(null);
   // 每张图一个上下文 id：同一脚本在多张图上分别计算，结果互不覆盖
@@ -333,6 +337,7 @@ export function ChartPanel({
   const setSymbol = useApp((s) => s.setSymbol);
   const setResolution = useApp((s) => s.setResolution);
   const theme = useApp((s) => s.theme);
+  const calendarOverlay = useApp((s) => s.calendarOverlay);
   const notify = useApp((s) => s.notify);
 
   const infoRef = useRef<SymbolInfo | undefined>(info);
@@ -797,6 +802,11 @@ export function ChartPanel({
         boxes.start();
         sessionBoxesRef.current = boxes;
 
+        // 财经日历竖线：价格锚点用当前报价，事件本身按时间定位
+        const calendar = new CalendarLayer(widget, () => useApp.getState().quote?.bid ?? 0);
+        calendar.start();
+        calendarLayerRef.current = calendar;
+
         // Pine 脚本（实验）：按指标输入和品种/周期重算，再让指标重绘
         const pineRunner = new PineRunner(widget, pineContextId);
         pineRunner.start();
@@ -832,6 +842,32 @@ export function ChartPanel({
     };
   }, [theme, chart]);
 
+  // ---- 财经日历标注：当前品种相关的高/中影响事件 ----
+  useEffect(() => {
+    const layer = calendarLayerRef.current;
+    if (!layer || !chart) return;
+    if (!calendarOverlay) {
+      layer.setEvents([], []);
+      return;
+    }
+    let alive = true;
+    const refresh = async () => {
+      try {
+        const week = await loadCalendar();
+        if (!alive || calendarLayerRef.current !== layer) return;
+        layer.setEvents(week.events, currenciesForSymbol(symbol));
+      } catch {
+        /* 网关离线时保留已有标注 */
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5 * 60 * 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [calendarOverlay, symbol, chart]);
+
   // ---- 卸载 ----
   useEffect(
     () => () => {
@@ -841,6 +877,8 @@ export function ChartPanel({
       layerRef.current = null;
       sessionBoxesRef.current?.dispose();
       sessionBoxesRef.current = null;
+      calendarLayerRef.current?.dispose();
+      calendarLayerRef.current = null;
       pineRunnerRef.current?.dispose();
       pineRunnerRef.current = null;
       registerWidget(slot, null);

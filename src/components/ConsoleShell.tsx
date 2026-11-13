@@ -6,6 +6,7 @@ import {
   FileClock,
   LayoutDashboard,
   RefreshCw,
+  Search,
   Settings as SettingsIcon,
   ShieldCheck,
 } from 'lucide-react';
@@ -57,6 +58,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   const positions = useApp((s) => s.positions);
   const orders = useApp((s) => s.orders);
   const risk = useApp((s) => s.riskStatus);
+  const setPaletteOpen = useApp((s) => s.setPaletteOpen);
 
   const mode = health?.tradeMode ?? 'readonly';
   const modeLabel = mode === 'readonly' ? '只读' : mode === 'demo' ? '模拟' : '实盘';
@@ -82,6 +84,20 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
               MT5 交易终端
             </div>
           </div>
+        </div>
+
+        <div className="px-3 pb-3">
+          <button
+            onClick={() => setPaletteOpen(true)}
+            title="搜索命令（Ctrl K）"
+            className="flex h-8 w-full items-center gap-2 rounded-lg border border-console-line bg-console-card px-2.5 text-[12px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+          >
+            <Search size={14} strokeWidth={1.5} className="shrink-0" />
+            <span className="flex-1 text-left">搜索命令</span>
+            <kbd className="rounded border border-console-line-2 px-1 py-0.5 font-mono text-[10px] text-console-faint">
+              Ctrl K
+            </kbd>
+          </button>
         </div>
 
         <div className="border-y border-console-line px-4 py-3">

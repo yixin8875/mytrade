@@ -87,6 +87,18 @@ export function ReportsView() {
   );
   const empty = !loading && (!summary || summary.trades === 0);
   const noR = !loading && rCurve.length === 0;
+  // 风险来源：订单止损最可靠，其次是持仓期记录与下单意图
+  const sources = r?.sources;
+  const sourceText = sources
+    ? [
+        sources.order ? `订单 ${sources.order}` : null,
+        sources.position ? `持仓 ${sources.position}` : null,
+        sources.intent ? `意图 ${sources.intent}` : null,
+        sources.journal ? `存档 ${sources.journal}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ') || '—'
+    : '—';
 
   return (
     <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
@@ -303,6 +315,16 @@ export function ReportsView() {
                 value={summary ? fmtMoney(summary.maxDrawdown) : '—'}
                 tone={summary && summary.maxDrawdown > 0 ? 'text-console-loss' : undefined}
               />
+              <InfoRow
+                label="R 覆盖"
+                value={
+                  summary
+                    ? `${r?.trades ?? 0} / ${summary.trades} 笔 · ${fmtPct(r?.coverage)}`
+                    : '—'
+                }
+                tone={r?.coverage != null && r.coverage < 50 ? 'text-console-warn' : undefined}
+              />
+              <InfoRow label="风险来源" value={sourceText} />
             </div>
             <button
               onClick={() => setPage('executions')}
@@ -326,8 +348,9 @@ export function ReportsView() {
         </div>
 
         <p className="mt-4 text-[11px] text-console-faint">
-          统计区间按平仓时间计算；未标记策略的交易归入「未标记」。R 用下单时的止损距离折算，
-          没有记录止损的交易不计入 R 与模板执行统计。
+          统计区间按平仓时间计算；未标记策略的交易归入「未标记」。R 用初始止损距离折算：
+          优先取成交订单的止损，其次持仓期记录的止损，最后用下单意图里的止损；
+          三者都没有的交易不计入 R 与模板执行统计。
         </p>
       </div>
     </div>

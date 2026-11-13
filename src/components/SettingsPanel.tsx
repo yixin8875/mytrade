@@ -1,10 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import {
+  ArchiveRestore,
   Bell,
   Braces,
   ChartCandlestick,
   Check,
+  Database,
+  Download,
+  FolderOpen,
   Info,
   Palette,
   RefreshCw,
@@ -19,7 +23,16 @@ import { gateway } from '../gateway/client';
 import { THEMES, useApp, type SettingsSection, type Theme } from '../store/useApp';
 import { AccountManager } from './AccountManager';
 import { LayoutGallery, SyncToggles } from './LayoutPicker';
+import {
+  isDesktopApp,
+  restoreBackup,
+  revealPath,
+  settingsSnapshot,
+} from '../lib/dataExport';
 import type {
+  BackupInfo,
+  DataPaths,
+  ExportResult,
   GatewayConfig,
   RiskLimits,
   TemplateStep,
@@ -47,6 +60,7 @@ const NAV = [
   { id: 'risk', label: '交易与风控', hint: '手数与风险上限', icon: ShieldCheck },
   { id: 'accounts', label: 'MT5 账户', hint: '自动登录与切换', icon: Users },
   { id: 'alerts', label: '告警', hint: '声音与通知', icon: Bell },
+  { id: 'data', label: '数据与备份', hint: '导出、备份与恢复', icon: Database },
   { id: 'updates', label: '更新', hint: '版本与检查更新', icon: RefreshCw },
   { id: 'about', label: '数据与连接', hint: '终端状态与本机路径', icon: Info },
 ] as const;
@@ -263,11 +277,303 @@ export function SettingsPanel() {
           {section === 'risk' && <RiskSection />}
           {section === 'accounts' && <AccountManager />}
           {section === 'alerts' && <AlertsSection />}
+          {section === 'data' && <DataSection />}
           {section === 'updates' && <UpdatesSection />}
           {section === 'about' && <AboutSection />}
         </div>
       </main>
     </div>
+  );
+}
+
+const EXPORTS = [
+  { kind: 'journal', label: '交易日志 CSV', hint: '已平仓交易、初始风险与 R' },
+  { kind: 'executions', label: '执行质量 CSV', hint: '点差、滑点、延迟与拒单' },
+  { kind: 'audit', label: '审计日志 JSONL', hint: '下单、风控、模板执行事件' },
+  { kind: 'settings', label: '设置 JSON', hint: '风控参数、模板与界面偏好' },
+] as const;
+
+type ExportKind = (typeof EXPORTS)[number]['kind'];
+
+function fmtBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function fmtWhen(ts: number): string {
+  return new Date(ts * 1000).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function DataSection() {
+  const notify = useApp((s) => s.notify);
+  const [days, setDays] = useState(30);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<ExportResult | null>(null);
+  const [backups, setBackups] = useState<BackupInfo[]>([]);
+  const [paths, setPaths] = useState<DataPaths | null>(null);
+  const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const desktop = isDesktopApp();
+
+  const refreshBackups = () =>
+    gateway
+      .call<BackupInfo[]>('data.backup.list')
+      .then(setBackups)
+      .catch(() => {
+        /* 网关不可用时保留旧列表 */
+      });
+
+  useEffect(() => {
+    let alive = true;
+    gateway
+      .call<BackupInfo[]>('data.backup.list')
+      .then((list) => {
+        if (alive) setBackups(list);
+      })
+      .catch(() => {});
+    gateway
+      .call<DataPaths>('data.info')
+      .then((info) => {
+        if (alive) setPaths(info);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const exportData = async (kind: ExportKind) => {
+    setBusy(kind);
+    try {
+      const out = await gateway.call<ExportResult>(
+        'data.export',
+        {
+          kind,
+          days,
+          settings: kind === 'settings' ? settingsSnapshot() : undefined,
+        },
+        30_000,
+      );
+      setResult(out);
+      notify('success', `已导出 ${out.name}（${out.rows} 行）`);
+    } catch (error) {
+      notify('error', (error as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const createBackup = async () => {
+    setBusy('backup');
+    try {
+      const out = await gateway.call<BackupInfo>(
+        'data.backup.create',
+        { settings: settingsSnapshot() },
+        60_000,
+      );
+      notify('success', `备份已创建：${out.name}（${fmtBytes(out.bytes)}）`);
+      await refreshBackups();
+    } catch (error) {
+      notify('error', (error as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const restore = async (name: string) => {
+    if (confirmRestore !== name) {
+      setConfirmRestore(name);
+      window.setTimeout(() => setConfirmRestore(null), 5000);
+      return;
+    }
+    setConfirmRestore(null);
+    setRestoring(true);
+    try {
+      const message = await restoreBackup(name);
+      notify('success', message);
+      window.setTimeout(() => window.location.reload(), 2500);
+    } catch (error) {
+      notify('error', (error as Error).message);
+      setRestoring(false);
+    }
+  };
+
+  const reveal = async (path: string) => {
+    try {
+      await revealPath(path);
+    } catch (error) {
+      notify('error', (error as Error).message);
+    }
+  };
+
+  return (
+    <>
+      <Card
+        title="导出交易数据"
+        description="导出到本机数据目录，CSV 带 UTF-8 BOM，Excel 直接打开不乱码。"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[12px] text-console-muted">区间</span>
+          <Segmented
+            value={String(days)}
+            options={[
+              { value: '7', label: '7 天' },
+              { value: '30', label: '30 天' },
+              { value: '90', label: '90 天' },
+              { value: '0', label: '全部' },
+            ]}
+            onChange={(value) => setDays(Number(value))}
+          />
+        </div>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {EXPORTS.map((item) => (
+            <button
+              key={item.kind}
+              onClick={() => void exportData(item.kind)}
+              disabled={busy !== null}
+              className="flex items-start gap-2.5 rounded-lg border border-console-line bg-console-card px-3 py-2.5 text-left transition-colors hover:bg-console-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download size={15} strokeWidth={1.5} className="mt-0.5 shrink-0 text-console-muted" />
+              <span className="min-w-0">
+                <span className="block text-[12px] font-medium text-console-ink">
+                  {busy === item.kind ? '导出中…' : item.label}
+                </span>
+                <span className="mt-0.5 block text-[11px] text-console-muted">{item.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {result && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-console-line bg-console-canvas px-3 py-2 text-[11px] text-console-ink-2">
+            <span className="min-w-0 flex-1 truncate font-mono">
+              {result.name} · {result.rows} 行 · {fmtBytes(result.bytes)}
+            </span>
+            {desktop && (
+              <button
+                onClick={() => void reveal(result.path)}
+                className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+              >
+                <FolderOpen size={13} strokeWidth={1.5} />
+                定位文件
+              </button>
+            )}
+          </div>
+        )}
+      </Card>
+
+      <Card
+        title="整库备份"
+        description="把交易库、审计日志、截图和设置打包成 zip，存放在本机 backups 目录。"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void createBackup()}
+            disabled={busy !== null || restoring}
+            className="flex h-8 items-center gap-1.5 rounded-lg bg-console-ink px-3 text-[12px] font-medium text-console-card transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ArchiveRestore size={14} strokeWidth={1.5} />
+            {busy === 'backup' ? '备份中…' : '创建备份'}
+          </button>
+          <span className="text-[11px] text-console-muted">
+            {backups.length > 0 ? `已有 ${backups.length} 个备份` : '还没有备份'}
+          </span>
+        </div>
+
+        <div className="mt-4 divide-y divide-console-line/70">
+          {backups.length === 0 && (
+            <div className="py-6 text-center text-[12px] text-console-muted">
+              备份会保存在本机，不含 MT5 登录凭据。
+            </div>
+          )}
+          {backups.map((item) => (
+            <div key={item.name} className="flex items-center gap-2 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-mono text-[11.5px] text-console-ink">{item.name}</div>
+                <div className="mt-0.5 text-[11px] text-console-muted">
+                  {fmtWhen(item.createdAt)} · {fmtBytes(item.bytes)}
+                </div>
+              </div>
+              {desktop && (
+                <button
+                  onClick={() => void reveal(item.path)}
+                  className="h-7 shrink-0 rounded-lg px-2 text-[11px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+                >
+                  定位
+                </button>
+              )}
+              <button
+                onClick={() => void restore(item.name)}
+                disabled={!desktop || restoring}
+                className={clsx(
+                  'h-7 shrink-0 rounded-lg border px-2.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                  confirmRestore === item.name
+                    ? 'border-console-loss bg-console-loss text-white'
+                    : 'border-console-line text-console-ink-2 hover:bg-console-hover',
+                )}
+              >
+                {restoring && confirmRestore !== item.name
+                  ? '恢复中…'
+                  : confirmRestore === item.name
+                    ? '确认恢复？'
+                    : '恢复'}
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <p className="mt-4 text-[11px] leading-relaxed text-console-muted">
+          恢复会先停止网关、用备份替换数据库并重启，旧数据保留为 data.old-* 目录。
+          {!desktop && ' 恢复和文件定位只能在桌面版使用。'}
+        </p>
+      </Card>
+
+      <Card
+        title="本机数据目录"
+        description="所有交易数据只保存在这台电脑上，不会上传。"
+        footer={
+          desktop && paths ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => void reveal(paths.exports)}
+                className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
+              >
+                打开导出目录
+              </button>
+              <button
+                onClick={() => void reveal(paths.backups)}
+                className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
+              >
+                打开备份目录
+              </button>
+            </div>
+          ) : undefined
+        }
+      >
+        <div className="space-y-1.5 rounded-lg border border-console-line bg-console-canvas px-3 py-2.5 font-mono text-[11px] text-console-ink-2">
+          <div className="truncate">{paths?.dir ?? '读取中…'}</div>
+          {paths && (
+            <>
+              <div className="truncate text-console-muted">exports: {paths.exports}</div>
+              <div className="truncate text-console-muted">backups: {paths.backups}</div>
+            </>
+          )}
+        </div>
+        <p className="mt-3 text-[11px] leading-relaxed text-console-muted">
+          备份不包含 config.json 与 MT5 登录凭据；换机后重新登录账户即可。审计日志是 JSONL，
+          每行一个事件，便于外部分析。
+        </p>
+      </Card>
+    </>
   );
 }
 

@@ -369,6 +369,13 @@ export interface JournalRStats {
   maxDrawdownR: number;
   /** 最高浮盈达到 1R 的交易占比 */
   hit1R: number | null;
+  /** 风险来源计数：成交订单止损 / 持仓期记录 / 下单意图 */
+  sources?: {
+    journal: number;
+    order: number;
+    position: number;
+    intent: number;
+  };
 }
 
 export interface JournalTemplateStats {
@@ -539,4 +546,48 @@ export interface AutoBreakevenEvent {
   ticket: number;
   sl: number;
   symbol: string;
+}
+
+/** 财经日历事件（来自网关缓存的 ForexFactory 周历） */
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  country: string;
+  impact: 'High' | 'Medium' | 'Low' | 'Holiday' | string;
+  forecast: string;
+  previous: string;
+  /** 源站 ISO 时间（带时区偏移） */
+  date: string;
+  /** Unix 秒，前端按本地时区显示 */
+  ts: number;
+}
+
+export interface CalendarWeek {
+  events: CalendarEvent[];
+  fetchedAt: number;
+  stale: boolean;
+  error: string | null;
+}
+
+export interface ExportResult {
+  kind: 'csv' | 'json' | 'jsonl';
+  name: string;
+  path: string;
+  rows: number;
+  bytes: number;
+}
+
+export interface BackupInfo {
+  name: string;
+  path: string;
+  bytes: number;
+  createdAt: number;
+  auditDays?: number;
+  screenshots?: number;
+}
+
+export interface DataPaths {
+  dir: string;
+  exports: string;
+  backups: string;
 }

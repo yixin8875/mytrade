@@ -69,6 +69,7 @@ export type SettingsSection =
   | 'risk'
   | 'accounts'
   | 'alerts'
+  | 'data'
   | 'updates'
   | 'about';
 
@@ -101,6 +102,12 @@ interface AppStore {
   alerts: PriceAlert[];
   /** 交易台右侧的告警面板是否展开 */
   alertsOpen: boolean;
+  /** 交易台右侧的财经日历面板是否展开 */
+  calendarOpen: boolean;
+  /** 是否在图表上标注财经事件（存 localStorage） */
+  calendarOverlay: boolean;
+  /** Ctrl+K 命令面板 */
+  paletteOpen: boolean;
   /** 全部下单模板（风险 %、止盈 R、分批止盈阶段），存 localStorage */
   templates: TradeTemplate[];
   /** 下单票当前使用的模板 id */
@@ -145,6 +152,9 @@ interface AppStore {
   setRiskStatus: (riskStatus: RiskStatus | null) => void;
   setAlerts: (alerts: PriceAlert[]) => void;
   setAlertsOpen: (open: boolean) => void;
+  setCalendarOpen: (open: boolean) => void;
+  setCalendarOverlay: (enabled: boolean) => void;
+  setPaletteOpen: (open: boolean) => void;
   setActiveTemplate: (id: string) => void;
   /** 修改指定模板；id / name 之外走同一套清洗规则 */
   updateTemplate: (id: string, patch: Partial<Omit<TradeTemplate, 'id'>>) => void;
@@ -387,6 +397,12 @@ function loadPrefs(): AlertPrefs {
   return { sound: raw.sound !== false, desktop: raw.desktop === true };
 }
 
+const CALENDAR_OVERLAY_KEY = 'mytrade.calendarOverlay';
+
+function loadCalendarOverlay(): boolean {
+  return window.localStorage.getItem(CALENDAR_OVERLAY_KEY) === '1';
+}
+
 function loadWatchlist(): string[] {
   const raw = readJson<string[]>(WATCH_KEY, []);
   return Array.isArray(raw) ? raw.filter((item) => typeof item === 'string') : [];
@@ -417,6 +433,9 @@ export const useApp = create<AppStore>((set, get) => ({
   riskStatus: null,
   alerts: [],
   alertsOpen: false,
+  calendarOpen: false,
+  calendarOverlay: loadCalendarOverlay(),
+  paletteOpen: false,
   ...loadTemplates(),
   templateArmed: false,
   settingsSection: 'appearance',
@@ -476,6 +495,16 @@ export const useApp = create<AppStore>((set, get) => ({
   setRiskStatus: (riskStatus) => set({ riskStatus }),
   setAlerts: (alerts) => set({ alerts }),
   setAlertsOpen: (alertsOpen) => set({ alertsOpen }),
+  setCalendarOpen: (calendarOpen) => set({ calendarOpen }),
+  setCalendarOverlay: (calendarOverlay) => {
+    try {
+      window.localStorage.setItem(CALENDAR_OVERLAY_KEY, calendarOverlay ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+    set({ calendarOverlay });
+  },
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   setActiveTemplate: (id) =>
     set((state) => {
       if (!state.templates.some((item) => item.id === id)) return {};
@@ -591,6 +620,17 @@ export const selectSymbolInfo = (state: AppStore): SymbolInfo | undefined =>
  * B / S 只准备市价草稿（仍需确认），Esc 关弹窗/取消划线。
  */
 export function handleGlobalShortcut(event: KeyboardEvent): void {
+  // Ctrl/Cmd+K 打开命令面板；输入框里也要能用
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    event.key.toLowerCase() === 'k'
+  ) {
+    event.preventDefault();
+    const state = useApp.getState();
+    state.setPaletteOpen(!state.paletteOpen);
+    return;
+  }
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   const target = event.target as HTMLElement | null;
   if (target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
@@ -598,6 +638,8 @@ export function handleGlobalShortcut(event: KeyboardEvent): void {
 
   if (event.key === 'Escape') {
     state.setAlertsOpen(false);
+    state.setCalendarOpen(false);
+    state.setPaletteOpen(false);
     if (state.draft.active) state.patchDraft({ active: false });
     return;
   }

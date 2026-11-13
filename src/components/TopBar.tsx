@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
-import { Bell } from 'lucide-react';
+import { Bell, CalendarDays } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, spreadPoints } from '../lib/format';
@@ -46,6 +46,8 @@ export function TopBar() {
   const alerts = useApp((s) => s.alerts);
   const alertsOpen = useApp((s) => s.alertsOpen);
   const setAlertsOpen = useApp((s) => s.setAlertsOpen);
+  const calendarOpen = useApp((s) => s.calendarOpen);
+  const setCalendarOpen = useApp((s) => s.setCalendarOpen);
   const notify = useApp((s) => s.notify);
   const [confirmKill, setConfirmKill] = useState(false);
   const [confirmLive, setConfirmLive] = useState(false);
@@ -167,6 +169,21 @@ export function TopBar() {
         {activeAlerts > 0 && (
           <span className="num font-mono text-[11px] text-tv-faint">{activeAlerts}</span>
         )}
+      </button>
+
+      <button
+        onClick={() => setCalendarOpen(!calendarOpen)}
+        aria-pressed={calendarOpen}
+        title="财经日历"
+        className={clsx(
+          'flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] transition-colors',
+          calendarOpen
+            ? 'bg-tv-raised text-tv-text'
+            : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+        )}
+      >
+        <CalendarDays size={14} strokeWidth={1.5} />
+        日历
       </button>
 
       <div className="flex-1" />
