@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { clsx } from 'clsx';
-import { Activity, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtSigned, signedClass } from '../lib/format';
@@ -58,11 +58,11 @@ export function ReportsView() {
 
   return (
     <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
-      <div className="mx-auto w-full max-w-[1240px] px-8 py-7">
+      <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-[24px] font-semibold tracking-tight">统计报表</h1>
-            <p className="mt-1 text-[11.5px] text-console-muted">
+            <h1 className="text-[24px] font-medium tracking-[-0.01em]">统计报表</h1>
+            <p className="mt-1.5 text-[13px] text-console-muted">
               以已平仓交易为准，按区间汇总胜率、盈亏与执行表现
             </p>
           </div>
@@ -82,19 +82,19 @@ export function ReportsView() {
               onClick={() => setPage('executions')}
               className="console-btn console-btn-secondary"
             >
-              <ShieldCheck size={13} />
+              <ShieldCheck size={14} strokeWidth={1.5} />
               执行质量
             </button>
           </div>
         </header>
 
         {error && (
-          <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[11px] text-console-loss">
+          <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
             读取统计失败：{error}
           </div>
         )}
 
-        <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="readout mt-6 grid-cols-2 lg:grid-cols-4">
           <Metric
             label="净盈亏"
             value={summary ? fmtSigned(summary.netPnl) : '—'}
@@ -129,22 +129,27 @@ export function ReportsView() {
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(280px,1fr)]">
           <section className="console-card overflow-hidden">
-            <div className="flex items-center justify-between border-b border-console-line px-5 py-3">
-              <div className="flex items-center gap-2">
-                <Activity size={14} className="text-console-muted" />
-                <span className="text-[13px] font-semibold">累计盈亏曲线</span>
+            <div className="flex items-baseline justify-between gap-4 border-b border-console-line px-5 py-4">
+              <div>
+                <div className="text-[13px] font-semibold">累计盈亏曲线</div>
+                <div className="mt-1 text-[12px] text-console-muted">按平仓顺序累计</div>
               </div>
-              <div className="flex items-center gap-3 text-[10.5px] text-console-muted">
-                <span>最大回撤 {summary ? fmtMoney(summary.maxDrawdown) : '—'}</span>
-                <span className={clsx('num', summary ? signedClass(summary.netPnl) : '')}>
+              <div className="flex items-baseline gap-4 text-[12px] text-console-muted">
+                <span>
+                  最大回撤
+                  <span className="num ml-1.5 font-mono text-console-ink-2">
+                    {summary ? fmtMoney(summary.maxDrawdown) : '—'}
+                  </span>
+                </span>
+                <span className={clsx('num font-mono text-[13px] font-medium', summary ? signedClass(summary.netPnl) : '')}>
                   {summary ? fmtSigned(summary.netPnl) : ''}
                 </span>
               </div>
             </div>
 
-            <div className="px-4 pb-4 pt-3">
+            <div className="px-5 pb-4 pt-4">
               {empty ? (
-                <div className="flex h-[220px] items-center justify-center text-[11.5px] text-console-faint">
+                <div className="flex h-[260px] items-center justify-center text-[12px] text-console-faint">
                   {loading ? '读取中…' : '这段时间还没有已平仓交易'}
                 </div>
               ) : (
@@ -154,7 +159,7 @@ export function ReportsView() {
           </section>
 
           <section className="console-card flex flex-col overflow-hidden">
-            <div className="border-b border-console-line px-5 py-3 text-[13px] font-semibold">
+            <div className="border-b border-console-line px-5 py-4 text-[13px] font-semibold">
               区间概览
             </div>
             <div className="flex-1 divide-y divide-console-line/70 px-5">
@@ -189,20 +194,20 @@ export function ReportsView() {
             </div>
             <button
               onClick={() => setPage('executions')}
-              className="m-3 flex items-center justify-center gap-1.5 rounded-lg border border-console-line bg-white py-2 text-[11px] text-console-ink-2 hover:bg-console-hover"
+              className="m-3 flex items-center justify-center gap-1.5 rounded-lg border border-console-line bg-console-card py-2 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
             >
               查看执行质量（点差 / 滑点 / 延迟）
             </button>
           </section>
         </div>
 
-        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
           <BreakdownCard title="按品种" rows={stats?.bySymbol ?? []} loading={loading} />
           <BreakdownCard title="按时段" rows={stats?.byHour ?? []} loading={loading} />
           <BreakdownCard title="按策略标签" rows={stats?.byTag ?? []} loading={loading} />
         </div>
 
-        <p className="mt-4 text-[10px] text-console-faint">
+        <p className="mt-4 text-[11px] text-console-faint">
           统计区间按平仓时间计算；未标记策略的交易归入「未标记」。
         </p>
       </div>
@@ -218,8 +223,8 @@ function EquityCurve({
   loading: boolean;
 }) {
   const W = 900;
-  const H = 220;
-  const PAD = 10;
+  const H = 260;
+  const PAD = 16;
 
   const geometry = useMemo(() => {
     if (curve.length === 0) return null;
@@ -240,12 +245,14 @@ function EquityCurve({
       first: curve[0]?.t ?? 0,
       end: curve[curve.length - 1]?.t ?? 0,
       lastValue: values[values.length - 1],
+      min,
+      max,
     };
   }, [curve]);
 
   if (!geometry) {
     return (
-      <div className="flex h-[220px] items-center justify-center text-[11.5px] text-console-faint">
+      <div className="flex h-[260px] items-center justify-center text-[12px] text-console-faint">
         {loading ? '读取中…' : '暂无曲线数据'}
       </div>
     );
@@ -258,10 +265,22 @@ function EquityCurve({
       <svg
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
-        className="h-[220px] w-full"
+        className="h-[260px] w-full"
         role="img"
         aria-label="累计盈亏曲线"
       >
+        {[0.25, 0.5, 0.75].map((t) => (
+          <line
+            key={t}
+            x1={PAD}
+            x2={W - PAD}
+            y1={PAD + t * (H - PAD * 2)}
+            y2={PAD + t * (H - PAD * 2)}
+            stroke="var(--color-console-line)"
+            strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
         <line
           x1={PAD}
           x2={W - PAD}
@@ -269,30 +288,33 @@ function EquityCurve({
           y2={geometry.zeroY}
           stroke="var(--color-console-line-2)"
           strokeWidth="1"
-          strokeDasharray="3 3"
+          strokeDasharray="4 4"
           vectorEffect="non-scaling-stroke"
         />
         <polygon
           points={geometry.area}
           fill={gain ? 'var(--color-console-gain-soft)' : 'var(--color-console-loss-soft)'}
-          opacity="0.8"
+          opacity="0.7"
         />
         <polyline
           points={geometry.line}
           fill="none"
           stroke={gain ? 'var(--color-console-gain)' : 'var(--color-console-loss)'}
-          strokeWidth="1.8"
+          strokeWidth="2"
           strokeLinejoin="round"
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      <div className="mt-1.5 flex items-center justify-between text-[10px] text-console-faint">
-        <span>{fmtDay(geometry.first)}</span>
-        <span className={clsx('num', signedClass(geometry.lastValue))}>
+      <div className="mt-2 flex items-center justify-between text-[11px] text-console-faint">
+        <span className="font-mono">{fmtDay(geometry.first)}</span>
+        <span className="font-mono">
+          最高 {fmtSigned(geometry.max)} · 最低 {fmtSigned(geometry.min)}
+        </span>
+        <span className={clsx('num font-mono font-medium', signedClass(geometry.lastValue))}>
           {fmtSigned(geometry.lastValue)}
         </span>
-        <span>{fmtDay(geometry.end)}</span>
+        <span className="font-mono">{fmtDay(geometry.end)}</span>
       </div>
     </div>
   );
@@ -311,17 +333,18 @@ function BreakdownCard({
 
   return (
     <section className="console-card overflow-hidden">
-      <div className="border-b border-console-line px-4 py-2.5 text-[12px] font-semibold">
-        {title}
+      <div className="flex items-baseline justify-between border-b border-console-line px-5 py-3.5">
+        <span className="text-[13px] font-semibold">{title}</span>
+        <span className="num font-mono text-[11px] text-console-faint">{rows.length} 组</span>
       </div>
       <div className="p-2">
         {rows.length === 0 && (
-          <div className="px-2 py-8 text-center text-[11px] text-console-faint">
+          <div className="px-2 py-8 text-center text-[12px] text-console-faint">
             {loading ? '读取中…' : '暂无数据'}
           </div>
         )}
         {rows.map((row) => (
-          <div key={row.key} className="relative rounded-md px-2 py-1.5">
+          <div key={row.key} className="relative rounded-lg px-2.5 py-2">
             <div
               className={clsx(
                 'absolute inset-y-1 left-0 rounded-sm opacity-70',
@@ -329,17 +352,17 @@ function BreakdownCard({
               )}
               style={{ width: max > 0 ? `${(Math.abs(row.pnl) / max) * 100}%` : '0%' }}
             />
-            <div className="relative flex items-center gap-2 text-[10.5px]">
+            <div className="relative flex items-center gap-2 text-[12px]">
               <span className="w-16 shrink-0 truncate font-medium text-console-ink">
                 {row.key}
               </span>
-              <span className="num w-12 shrink-0 text-right text-console-muted">
+              <span className="num w-12 shrink-0 text-right font-mono text-[11px] text-console-muted">
                 {row.trades} 笔
               </span>
-              <span className="num w-10 shrink-0 text-right text-console-muted">
+              <span className="num w-10 shrink-0 text-right font-mono text-[11px] text-console-muted">
                 {row.winRate.toFixed(0)}%
               </span>
-              <span className={clsx('num flex-1 text-right font-medium', signedClass(row.pnl))}>
+              <span className={clsx('num flex-1 text-right font-mono font-medium', signedClass(row.pnl))}>
                 {fmtSigned(row.pnl)}
               </span>
             </div>
@@ -362,19 +385,26 @@ function Metric({
   tone?: string;
 }) {
   return (
-    <div className="console-card px-4 py-3.5">
-      <div className="text-[10.5px] text-console-muted">{label}</div>
-      <div className={clsx('num mt-1 text-[20px] font-semibold tracking-tight', tone)}>{value}</div>
-      <div className="mt-0.5 truncate text-[9.5px] text-console-faint">{hint ?? ' '}</div>
+    <div className="readout-cell">
+      <div className="text-[12px] text-console-muted">{label}</div>
+      <div
+        className={clsx(
+          'num mt-1.5 font-mono text-[24px] font-medium leading-none tracking-[-0.01em]',
+          tone,
+        )}
+      >
+        {value}
+      </div>
+      <div className="mt-2 truncate text-[11px] text-console-faint">{hint ?? ' '}</div>
     </div>
   );
 }
 
 function InfoRow({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="flex items-center justify-between py-2.5 text-[11px]">
+    <div className="flex items-center justify-between py-3 text-[12px]">
       <span className="text-console-muted">{label}</span>
-      <span className={clsx('num font-medium text-console-ink', tone)}>{value}</span>
+      <span className={clsx('num font-mono font-medium text-console-ink', tone)}>{value}</span>
     </div>
   );
 }

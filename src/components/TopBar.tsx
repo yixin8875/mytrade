@@ -8,17 +8,17 @@ import { AccountSwitcher } from './AccountSwitcher';
 import { LayoutPickerButton } from './LayoutPicker';
 import type { RiskStatus, TradeMode } from '../gateway/types';
 
-/** 亏损额度使用比例 → 颜色（绿 → 琥珀 → 红） */
-function riskTone(risk: RiskStatus): string {
-  if (risk.halted) return 'bg-tv-down/15 text-tv-down';
+/** 亏损额度使用比例 → 状态点与文字色（绿 → 琥珀 → 红） */
+function riskTone(risk: RiskStatus): { dot: string; text: string } {
+  if (risk.halted) return { dot: 'bg-tv-down', text: 'text-tv-down' };
   if (risk.dailyLossLimit > 0) {
     const used = risk.dailyLoss / risk.dailyLossLimit;
-    if (used >= 0.8) return 'bg-tv-down/15 text-tv-down';
-    if (used >= 0.5) return 'bg-amber-500/15 text-amber-400';
+    if (used >= 0.8) return { dot: 'bg-tv-down', text: 'text-tv-down' };
+    if (used >= 0.5) return { dot: 'bg-tv-warn', text: 'text-tv-warn' };
   }
   // 冷却 / 次数用尽不算危险，用琥珀色提示即可
-  if (!risk.canTrade) return 'bg-amber-500/15 text-amber-400';
-  return 'bg-tv-bg text-tv-text';
+  if (!risk.canTrade) return { dot: 'bg-tv-warn', text: 'text-tv-warn' };
+  return { dot: 'bg-tv-up', text: 'text-tv-text' };
 }
 
 function riskHint(risk: RiskStatus): string {
@@ -127,24 +127,26 @@ export function TopBar() {
     }
   };
 
+  const tone = riskStatus ? riskTone(riskStatus) : null;
+
   return (
-    <header className="flex h-11 shrink-0 items-center gap-3 border-b border-tv-border bg-tv-panel px-3">
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-tv-border bg-tv-panel px-3">
       <LayoutPickerButton />
 
       <div className="h-5 w-px bg-tv-border" />
 
-      <div className="flex items-center gap-3 font-mono text-[11px]">
-        <span className="flex items-center gap-1">
-          <span className="text-tv-muted">Bid</span>
-          <span className="text-tv-text">{quote ? fmtPrice(quote.bid, info?.digits ?? 5) : '—'}</span>
+      <div className="flex items-center gap-4 font-mono text-[12px]">
+        <span className="flex items-baseline gap-1.5">
+          <span className="font-sans text-[11px] text-tv-muted">Bid</span>
+          <span className="num">{quote ? fmtPrice(quote.bid, info?.digits ?? 5) : '—'}</span>
         </span>
-        <span className="flex items-center gap-1">
-          <span className="text-tv-muted">Ask</span>
-          <span className="text-tv-text">{quote ? fmtPrice(quote.ask, info?.digits ?? 5) : '—'}</span>
+        <span className="flex items-baseline gap-1.5">
+          <span className="font-sans text-[11px] text-tv-muted">Ask</span>
+          <span className="num">{quote ? fmtPrice(quote.ask, info?.digits ?? 5) : '—'}</span>
         </span>
-        <span className="flex items-center gap-1">
-          <span className="text-tv-muted">点差</span>
-          <span className="text-tv-text">{spread != null ? spread.toFixed(0) : '—'}</span>
+        <span className="flex items-baseline gap-1.5">
+          <span className="font-sans text-[11px] text-tv-muted">点差</span>
+          <span className="num">{spread != null ? spread.toFixed(0) : '—'}</span>
         </span>
       </div>
 
@@ -154,18 +156,16 @@ export function TopBar() {
         data-alerts-toggle
         title="价格告警面板"
         className={clsx(
-          'flex h-6 items-center gap-1 rounded px-2 text-[10px] transition-colors',
+          'flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] transition-colors',
           alertsOpen
-            ? 'bg-tv-border text-tv-text'
+            ? 'bg-tv-raised text-tv-text'
             : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
         )}
       >
-        <Bell size={12} />
+        <Bell size={14} strokeWidth={1.5} />
         告警
         {activeAlerts > 0 && (
-          <span className="num rounded-full bg-tv-accent/20 px-1 text-[9px] font-semibold text-tv-accent">
-            {activeAlerts}
-          </span>
+          <span className="num font-mono text-[11px] text-tv-faint">{activeAlerts}</span>
         )}
       </button>
 
@@ -173,33 +173,39 @@ export function TopBar() {
 
       <AccountSwitcher />
 
-      <div className="text-right leading-tight">
-        <div className="font-mono text-[11px] text-tv-text">余额 {fmtMoney(account?.balance)}</div>
-        <div className="font-mono text-[10px] text-tv-muted">净值 {fmtMoney(account?.equity)}</div>
+      <div className="flex items-baseline gap-4 border-l border-tv-border pl-4 font-mono text-[12px]">
+        <span className="flex items-baseline gap-1.5">
+          <span className="font-sans text-[11px] text-tv-muted">余额</span>
+          <span className="num">{fmtMoney(account?.balance)}</span>
+        </span>
+        <span className="flex items-baseline gap-1.5">
+          <span className="font-sans text-[11px] text-tv-muted">净值</span>
+          <span className="num text-tv-muted">{fmtMoney(account?.equity)}</span>
+        </span>
       </div>
 
-      {riskStatus && (
+      {riskStatus && tone && (
         <div
           title={riskHint(riskStatus)}
-          className={clsx(
-            'rounded px-2 py-0.5 text-right font-mono leading-tight',
-            riskTone(riskStatus),
-          )}
+          className="flex items-center gap-2 border-l border-tv-border pl-4"
         >
-          <div className="text-[10px]">
-            今日 {fmtSigned(riskStatus.dayPnl)}
-            {riskStatus.dailyLossLimit > 0 && (
-              <span className="ml-1 opacity-60">/ -{fmtMoney(riskStatus.dailyLossLimit)}</span>
-            )}
-          </div>
-          <div className="text-[9px] opacity-70">
-            {halted
-              ? '已停机'
-              : riskStatus.blockReason
-                ? riskStatus.blockReason
-                : riskStatus.dailyLossLimit > 0
-                  ? `额度剩 ${fmtMoney(riskStatus.remaining)}`
-                  : `开仓 ${riskStatus.tradesToday}`}
+          <span className={clsx('h-1.5 w-1.5 rounded-full', tone.dot)} />
+          <div className="leading-tight">
+            <div className={clsx('num font-mono text-[12px]', tone.text)}>
+              今日 {fmtSigned(riskStatus.dayPnl)}
+              {riskStatus.dailyLossLimit > 0 && (
+                <span className="ml-1 text-tv-faint">/ -{fmtMoney(riskStatus.dailyLossLimit)}</span>
+              )}
+            </div>
+            <div className="text-[11px] text-tv-muted">
+              {halted
+                ? '已停机'
+                : riskStatus.blockReason
+                  ? riskStatus.blockReason
+                  : riskStatus.dailyLossLimit > 0
+                    ? `额度剩 ${fmtMoney(riskStatus.remaining)}`
+                    : `开仓 ${riskStatus.tradesToday}`}
+            </div>
           </div>
         </div>
       )}
@@ -213,12 +219,12 @@ export function TopBar() {
             : '一键平掉全部仓位并禁止再开仓'
         }
         className={clsx(
-          'h-6 shrink-0 rounded px-2 text-[10px] font-semibold transition-colors',
+          'h-7 shrink-0 rounded-lg border px-2.5 text-[12px] font-medium transition-colors',
           halted
-            ? 'bg-amber-500 text-black hover:bg-amber-400'
+            ? 'border-tv-warn/40 bg-tv-warn-soft text-tv-warn hover:bg-tv-warn/15'
             : confirmKill
-              ? 'bg-tv-down text-white'
-              : 'bg-tv-down/15 text-tv-down hover:bg-tv-down hover:text-white',
+              ? 'border-tv-down bg-tv-down text-white'
+              : 'border-tv-down/35 text-tv-down hover:bg-tv-down-soft',
           !terminal && 'cursor-not-allowed opacity-40',
         )}
       >
@@ -236,11 +242,11 @@ export function TopBar() {
               : '切换只读 / 模拟可交易'
         }
         className={clsx(
-          'h-6 rounded px-2 text-[10px] font-medium transition-colors',
-          mode === 'readonly' && 'bg-tv-border text-tv-text',
-          mode === 'demo' && 'bg-emerald-600 text-white',
-          mode === 'live' && 'bg-red-600 text-white',
-          confirmLive && 'bg-red-600 text-white',
+          'h-7 rounded-lg border px-2.5 text-[12px] font-medium transition-colors',
+          mode === 'readonly' && 'border-tv-border bg-tv-raised text-tv-muted',
+          mode === 'demo' && 'border-tv-up/35 bg-tv-up-soft text-tv-up',
+          mode === 'live' && 'border-tv-down/35 bg-tv-down-soft text-tv-down',
+          confirmLive && 'border-tv-down bg-tv-down text-white',
           (!terminal || modeLocked) && 'cursor-not-allowed opacity-40',
         )}
       >
@@ -253,11 +259,11 @@ export function TopBar() {
               : '实盘交易'}
       </button>
 
-      <div className="flex items-center gap-1.5 text-[10px] text-tv-muted">
+      <div className="flex items-center gap-1.5 pl-1 text-[11px] text-tv-muted">
         <span
           className={clsx(
-            'h-2 w-2 rounded-full',
-            terminal ? 'bg-tv-up' : online ? 'bg-amber-400' : 'bg-tv-down',
+            'h-1.5 w-1.5 rounded-full',
+            terminal ? 'bg-tv-up' : online ? 'bg-tv-warn' : 'bg-tv-down',
           )}
         />
         {terminal ? '已连接' : online ? '等待终端' : '未连接'}

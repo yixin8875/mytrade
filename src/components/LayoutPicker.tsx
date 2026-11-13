@@ -41,13 +41,13 @@ export function LayoutGallery({
   onChange: (id: string) => void;
 }) {
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {LAYOUT_GROUPS.map((group) => (
-        <div key={group.count} className="flex items-center gap-2">
-          <span className="w-4 shrink-0 select-none text-right font-mono text-[10px] text-tv-muted">
+        <div key={group.count} className="flex items-center gap-2.5">
+          <span className="w-5 shrink-0 select-none text-right font-mono text-[11px] text-tv-faint">
             {group.count}
           </span>
-          <div className="flex flex-wrap items-center gap-0.5">
+          <div className="flex flex-wrap items-center gap-1">
             {group.presets.map((preset) => (
               <button
                 key={preset.id}
@@ -57,9 +57,9 @@ export function LayoutGallery({
                 aria-pressed={value === preset.id}
                 onClick={() => onChange(preset.id)}
                 className={clsx(
-                  'rounded p-0.5 transition-colors',
+                  'rounded-md p-1 transition-colors',
                   value === preset.id
-                    ? 'bg-tv-accent/20 text-tv-accent'
+                    ? 'bg-tv-accent-soft text-tv-accent'
                     : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
                 )}
               >
@@ -86,7 +86,7 @@ export function SyncToggles({ className }: { className?: string }) {
   const setSync = useApp((s) => s.setLayoutSync);
 
   return (
-    <div className={clsx('grid grid-cols-3 gap-x-1 gap-y-1', className)}>
+    <div className={clsx('grid grid-cols-3 gap-x-2 gap-y-1.5', className)}>
       {SYNC_ITEMS.map((item) => {
         const on = sync[item.key];
         return (
@@ -97,18 +97,18 @@ export function SyncToggles({ className }: { className?: string }) {
             aria-pressed={on}
             onClick={() => setSync({ [item.key]: !on } as Partial<ChartSync>)}
             className={clsx(
-              'flex items-center gap-1 rounded px-1 py-0.5 text-left text-[10px] transition-colors',
+              'flex items-center gap-1.5 rounded-md px-1 py-1 text-left text-[11px] transition-colors',
               on ? 'text-tv-text' : 'text-tv-muted hover:text-tv-text',
             )}
           >
             <span
               className={clsx(
-                'flex h-3 w-3 shrink-0 items-center justify-center rounded-[3px] border transition-colors',
-                on ? 'border-tv-accent bg-tv-accent' : 'border-tv-border bg-tv-bg',
+                'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[4px] border transition-colors',
+                on ? 'border-tv-accent bg-tv-accent' : 'border-tv-border bg-tv-raised',
               )}
             >
               {on && (
-                <svg viewBox="0 0 10 10" className="h-2 w-2 text-black" aria-hidden="true">
+                <svg viewBox="0 0 10 10" className="h-2.5 w-2.5 text-white" aria-hidden="true">
                   <path
                     d="M1.5 5.2 3.8 7.5 8.5 2.2"
                     fill="none"
@@ -160,8 +160,8 @@ export function LayoutPickerButton() {
         title="图表布局与联动"
         aria-expanded={open}
         className={clsx(
-          'flex h-6 items-center gap-1 rounded px-1.5 text-[10px] transition-colors',
-          open ? 'bg-tv-border text-tv-text' : 'bg-tv-bg text-tv-text hover:bg-tv-border',
+          'flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] transition-colors',
+          open ? 'bg-tv-hover text-tv-text' : 'text-tv-text hover:bg-tv-hover',
         )}
       >
         <LayoutIcon preset={preset} className="h-3.5 w-3.5" />
@@ -170,12 +170,12 @@ export function LayoutPickerButton() {
 
       {open && (
         <div
-          className="absolute left-0 top-full z-50 mt-1 w-[340px] overflow-y-auto rounded-lg border border-tv-border bg-tv-panel p-2 shadow-2xl"
+          className="absolute left-0 top-full z-50 mt-1.5 w-[348px] overflow-y-auto rounded-xl border border-tv-border bg-tv-panel p-3 shadow-[0_18px_48px_-16px_rgba(0,0,0,0.35)]"
           style={{ maxHeight: 'min(70vh, 520px)' }}
         >
-          <div className="mb-1 flex items-center justify-between px-1">
-            <span className="text-[10px] font-medium text-tv-text">图表布局</span>
-            <span className="font-mono text-[10px] text-tv-muted">
+          <div className="mb-2 flex items-baseline justify-between px-1">
+            <span className="text-[12px] font-medium text-tv-text">图表布局</span>
+            <span className="num font-mono text-[11px] text-tv-faint">
               {preset.count} 图 · {preset.label}
             </span>
           </div>
@@ -186,8 +186,8 @@ export function LayoutPickerButton() {
               setOpen(false);
             }}
           />
-          <div className="mt-2 border-t border-tv-border pt-2">
-            <div className="mb-1 px-1 text-[10px] font-medium text-tv-text">同步到所有图表</div>
+          <div className="mt-3 border-t border-tv-border pt-3">
+            <div className="mb-1.5 px-1 text-[11px] text-tv-muted">同步到所有图表</div>
             <SyncToggles className="px-1" />
           </div>
         </div>

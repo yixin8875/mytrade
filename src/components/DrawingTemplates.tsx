@@ -402,35 +402,35 @@ export function DrawingTemplates({
         title="单击开合模板面板；按住拖动可移动位置"
         style={{ touchAction: 'none' }}
         className={clsx(
-          'flex h-6 cursor-move items-center gap-1 rounded border border-tv-border/60 px-1.5 text-[10px] shadow select-none',
-          open ? 'bg-tv-accent text-white' : 'bg-tv-panel/90 text-tv-muted hover:text-tv-text',
+          'flex h-7 cursor-move select-none items-center gap-1.5 rounded-lg border border-tv-border px-2 text-[11px] transition-colors',
+          open ? 'bg-tv-hover text-tv-text' : 'bg-tv-panel/95 text-tv-muted hover:text-tv-text',
         )}
       >
-        <GripVertical size={11} className="opacity-60" />
-        <PencilRuler size={12} />
+        <GripVertical size={13} strokeWidth={1.5} className="opacity-60" />
+        <PencilRuler size={14} strokeWidth={1.5} />
         画线模板
       </button>
 
       {open && (
         <div
           className={clsx(
-            'absolute left-0 w-[252px] rounded border border-tv-border bg-tv-panel p-2 shadow-2xl',
-            openUp ? 'bottom-7' : 'top-7',
+            'absolute left-0 w-[272px] rounded-xl border border-tv-border bg-tv-panel p-3 shadow-[0_18px_48px_-16px_rgba(0,0,0,0.35)]',
+            openUp ? 'bottom-8' : 'top-8',
           )}
         >
-          <div className="mb-1.5 flex items-center gap-1">
-            <span className="text-[11px] font-medium text-tv-text">画线模板</span>
+          <div className="mb-2 flex items-center gap-1">
+            <span className="text-[12px] font-medium text-tv-text">画线模板</span>
             <span className="flex-1" />
             <button
               onClick={() => setOpen(false)}
-              className="flex h-5 w-5 items-center justify-center rounded text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+              className="flex h-6 w-6 items-center justify-center rounded-md text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
               title="关闭"
             >
-              <X size={12} />
+              <X size={14} strokeWidth={1.5} />
             </button>
           </div>
 
-          <div className="mb-1.5 rounded bg-tv-bg px-2 py-1 text-[10px] text-tv-muted">
+          <div className="mb-2 rounded-md bg-tv-raised px-2.5 py-1.5 text-[11px] text-tv-muted">
             {selection ? (
               <span className="text-tv-text">已选中：{toolLabel(selection.name)}</span>
             ) : (
@@ -438,7 +438,7 @@ export function DrawingTemplates({
             )}
           </div>
 
-          <div className="flex gap-1">
+          <div className="flex gap-1.5">
             <input
               ref={inputRef}
               value={name}
@@ -448,61 +448,61 @@ export function DrawingTemplates({
                 if (event.key === 'Escape') setOpen(false);
               }}
               placeholder="模板名，如「红色粗线」"
-              className="h-6 min-w-0 flex-1 rounded border border-tv-border bg-tv-bg px-1.5 text-[10px] text-tv-text outline-none focus:border-tv-accent"
+              className="h-7 min-w-0 flex-1 rounded-lg border border-tv-border bg-tv-raised px-2 text-[11px] text-tv-text outline-none focus:border-tv-accent"
             />
             <button
               onClick={save}
               disabled={!selection}
-              className="h-6 shrink-0 rounded bg-tv-accent px-2 text-[10px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="h-7 shrink-0 rounded-lg bg-tv-text px-2.5 text-[11px] font-medium text-tv-bg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             >
               保存
             </button>
           </div>
 
-          <label className="mt-1.5 flex cursor-pointer items-center gap-1 text-[10px] text-tv-muted">
+          <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] leading-relaxed text-tv-muted">
             <input
               type="checkbox"
               checked={asDefault}
               onChange={(event) => setAsDefault(event.target.checked)}
-              className="h-3 w-3 accent-[#2962ff]"
+              className="h-3.5 w-3.5 accent-tv-accent"
             />
             应用时也设为该类型画线的默认样式
           </label>
 
-          <div className="mt-1.5 max-h-[210px] overflow-auto">
+          <div className="mt-2 max-h-[210px] overflow-auto">
             {list.length === 0 ? (
-              <div className="py-3 text-center text-[10px] text-tv-muted">
+              <div className="py-3 text-center text-[11px] text-tv-muted">
                 {selection ? `还没有「${toolLabel(selection.name)}」的模板` : '还没有保存过模板'}
               </div>
             ) : (
               list.map((template) => (
                 <div
                   key={`${template.type}:${template.name}`}
-                  className="group flex items-center gap-1 rounded px-1 py-1 hover:bg-tv-hover"
+                  className="group flex items-center gap-1 rounded-md px-1 py-1.5 hover:bg-tv-hover"
                 >
                   <button
                     onClick={() => apply(template)}
                     title="应用到当前选中的画线"
                     className="min-w-0 flex-1 text-left"
                   >
-                    <div className="truncate text-[10px] text-tv-text">{template.name}</div>
-                    <div className="truncate text-[9px] text-tv-muted">
+                    <div className="truncate text-[11px] text-tv-text">{template.name}</div>
+                    <div className="truncate text-[11px] text-tv-faint">
                       {toolLabel(template.type)} · {fmtDate(template.savedAt)}
                     </div>
                   </button>
                   <button
                     onClick={() => remove(template)}
                     title="删除模板"
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-tv-muted opacity-0 hover:bg-tv-down/15 hover:text-tv-down group-hover:opacity-100"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-tv-muted opacity-0 transition-colors hover:bg-tv-down-soft hover:text-tv-down group-hover:opacity-100"
                   >
-                    <Trash2 size={11} />
+                    <Trash2 size={13} strokeWidth={1.5} />
                   </button>
                 </div>
               ))
             )}
           </div>
 
-          <div className="mt-1.5 border-t border-tv-border/60 pt-1 text-[9px] leading-relaxed text-tv-muted">
+          <div className="mt-2 border-t border-tv-border pt-2 text-[11px] leading-relaxed text-tv-faint">
             模板保存在本机。勾选「默认样式」后，之后新画的同类线也会用这套颜色、线宽和字体。
           </div>
         </div>

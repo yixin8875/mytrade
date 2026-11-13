@@ -8,7 +8,7 @@ import { fmtPrice } from '../lib/format';
 import type { PriceAlert } from '../gateway/types';
 
 const inputClass =
-  'h-7 min-w-0 rounded border border-tv-border bg-tv-bg px-2 font-mono text-[11px] text-tv-text outline-none focus:border-tv-accent';
+  'h-7 min-w-0 rounded-lg border border-tv-border bg-tv-raised px-2 font-mono text-[12px] text-tv-text outline-none focus:border-tv-accent';
 
 /** 稳定的空数组：选择器每次返回新 [] 会触发 useSyncExternalStore 无限重渲染 */
 const NO_CHANNELS: string[] = [];
@@ -149,83 +149,96 @@ export function AlertsPanel() {
   return (
     <aside
       data-panel="alerts"
-      className="absolute inset-y-0 right-0 z-20 flex w-[320px] flex-col border-l border-tv-border bg-tv-panel shadow-[-10px_0_28px_rgba(0,0,0,0.28)]"
+      className="absolute inset-y-0 right-0 z-20 flex w-[320px] flex-col border-l border-tv-border bg-tv-panel shadow-[-12px_0_32px_-16px_rgba(0,0,0,0.35)]"
     >
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-tv-border px-3">
-        <Bell size={13} className="text-tv-muted" />
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-tv-border px-4">
+        <Bell size={14} strokeWidth={1.5} className="text-tv-muted" />
         <span className="text-[12px] font-medium text-tv-text">价格告警</span>
         {activeCount > 0 && (
-          <span className="rounded-full bg-tv-accent/20 px-1.5 text-[9px] font-semibold text-tv-accent">
-            {activeCount}
-          </span>
+          <span className="num font-mono text-[11px] text-tv-muted">{activeCount}</span>
         )}
         <span className="flex-1" />
         <button
           onClick={() => setOpen(false)}
-          className="flex h-6 w-6 items-center justify-center rounded text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
           title="关闭告警面板"
+          aria-label="关闭告警面板"
         >
-          <X size={13} />
+          <X size={14} strokeWidth={1.5} />
         </button>
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-tv-border/70 px-3 py-2">
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-tv-border px-3 py-2.5">
         <button
           onClick={toggleSound}
           className={clsx(
-            'h-6 rounded px-2 text-[10px] transition-colors',
-            sound ? 'bg-tv-accent text-white' : 'bg-tv-bg text-tv-muted hover:text-tv-text',
+            'flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] transition-colors',
+            sound
+              ? 'border-tv-border bg-tv-raised text-tv-text'
+              : 'border-transparent text-tv-muted hover:bg-tv-hover hover:text-tv-text',
           )}
         >
-          {sound ? '声音 开' : '声音 关'}
+          <span
+            className={clsx('h-1.5 w-1.5 rounded-full', sound ? 'bg-tv-up' : 'bg-tv-faint')}
+          />
+          声音
         </button>
         <button
           onClick={() => void toggleDesktop()}
           className={clsx(
-            'h-6 rounded px-2 text-[10px] transition-colors',
-            desktop ? 'bg-tv-accent text-white' : 'bg-tv-bg text-tv-muted hover:text-tv-text',
+            'flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] transition-colors',
+            desktop
+              ? 'border-tv-border bg-tv-raised text-tv-text'
+              : 'border-transparent text-tv-muted hover:bg-tv-hover hover:text-tv-text',
           )}
         >
-          {desktop ? '桌面通知 开' : '桌面通知 关'}
+          <span
+            className={clsx('h-1.5 w-1.5 rounded-full', desktop ? 'bg-tv-up' : 'bg-tv-faint')}
+          />
+          桌面通知
         </button>
         <button
           onClick={() => void test()}
-          className="h-6 rounded bg-tv-border px-2 text-[10px] text-tv-text hover:bg-tv-hover"
+          className="ml-auto h-7 rounded-lg px-2 text-[11px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
         >
-          测试提醒
+          测试
         </button>
       </div>
 
-      <div className="space-y-2 border-b border-tv-border/70 px-3 py-3">
+      <div className="space-y-2.5 border-b border-tv-border px-3 py-3">
         <div className="flex items-center gap-2">
-          <span className="w-8 shrink-0 text-[10px] text-tv-muted">品种</span>
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-tv-text">
+          <span className="w-8 shrink-0 text-[11px] text-tv-muted">品种</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-tv-text">
             {symbol || '—'}
           </span>
           <div className="flex gap-1">
             <button
               onClick={() => setKind('above')}
               className={clsx(
-                'h-6 rounded px-1.5 text-[10px]',
-                kind === 'above' ? 'bg-tv-up text-white' : 'bg-tv-bg text-tv-muted',
+                'h-7 rounded-lg border px-2 text-[11px] transition-colors',
+                kind === 'above'
+                  ? 'border-tv-up/40 bg-tv-up-soft text-tv-up'
+                  : 'border-transparent text-tv-muted hover:bg-tv-hover hover:text-tv-text',
               )}
             >
-              上穿 ≥
+              上穿
             </button>
             <button
               onClick={() => setKind('below')}
               className={clsx(
-                'h-6 rounded px-1.5 text-[10px]',
-                kind === 'below' ? 'bg-tv-down text-white' : 'bg-tv-bg text-tv-muted',
+                'h-7 rounded-lg border px-2 text-[11px] transition-colors',
+                kind === 'below'
+                  ? 'border-tv-down/40 bg-tv-down-soft text-tv-down'
+                  : 'border-transparent text-tv-muted hover:bg-tv-hover hover:text-tv-text',
               )}
             >
-              下穿 ≤
+              下穿
             </button>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="w-8 shrink-0 text-[10px] text-tv-muted">价格</span>
+          <span className="w-8 shrink-0 text-[11px] text-tv-muted">价格</span>
           <input
             type="number"
             step={Math.pow(10, -digits)}
@@ -238,14 +251,14 @@ export function AlertsPanel() {
               const base = useApp.getState().quote?.bid;
               if (base) setPrice(base.toFixed(digits));
             }}
-            className="h-7 shrink-0 rounded bg-tv-bg px-2 text-[10px] text-tv-muted hover:text-tv-text"
+            className="h-7 shrink-0 rounded-lg px-2 text-[11px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
           >
             现价
           </button>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="w-8 shrink-0 text-[10px] text-tv-muted">备注</span>
+          <span className="w-8 shrink-0 text-[11px] text-tv-muted">备注</span>
           <input
             type="text"
             maxLength={80}
@@ -256,30 +269,30 @@ export function AlertsPanel() {
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-tv-muted">
-          <label className="flex items-center gap-1">
+        <div className="flex items-center gap-2 text-[11px] text-tv-muted">
+          <label className="flex items-center gap-1.5">
             <input
               type="checkbox"
               checked={repeat}
               onChange={(event) => setRepeat(event.target.checked)}
+              className="accent-tv-accent"
             />
             重复
           </label>
-          <span>冷却</span>
           <input
             type="number"
             min={0}
             value={cooldown}
             onChange={(event) => setCooldown(event.target.value)}
             disabled={!repeat}
-            className="h-6 w-12 rounded border border-tv-border bg-tv-bg px-1 text-right font-mono text-[10px] text-tv-text outline-none focus:border-tv-accent disabled:opacity-40"
+            className="h-6 w-11 rounded-md border border-tv-border bg-tv-raised px-1 text-right font-mono text-[11px] text-tv-text outline-none focus:border-tv-accent disabled:opacity-40"
           />
           <span>秒</span>
           <button
             onClick={() => void create()}
             disabled={busy}
             className={clsx(
-              'ml-auto h-7 rounded bg-tv-accent px-3 text-[10.5px] font-semibold text-white hover:opacity-90',
+              'ml-auto h-7 rounded-lg bg-tv-text px-3 text-[12px] font-medium text-tv-bg transition-opacity hover:opacity-90',
               busy && 'opacity-50',
             )}
           >
@@ -290,7 +303,7 @@ export function AlertsPanel() {
 
       <div className="min-h-0 flex-1 overflow-auto">
         {alerts.length === 0 && (
-          <div className="px-4 py-8 text-center text-[10.5px] leading-relaxed text-tv-muted">
+          <div className="px-4 py-8 text-center text-[12px] leading-relaxed text-tv-muted">
             还没有告警。
             <br />
             选中价格和方向后添加。
@@ -300,28 +313,34 @@ export function AlertsPanel() {
           <div
             key={alert.id}
             className={clsx(
-              'flex items-center gap-1.5 border-b border-tv-border/50 px-3 py-2 text-[10.5px]',
-              !alert.enabled && 'opacity-50',
+              'group flex items-center gap-2 border-b border-tv-border/60 px-3 py-2.5 text-[12px]',
+              !alert.enabled && 'opacity-55',
             )}
           >
             <span
               className={clsx(
-                'w-8 shrink-0 rounded px-1 py-0.5 text-center text-[9px] font-semibold text-white',
-                alert.kind === 'above' ? 'bg-tv-up' : 'bg-tv-down',
+                'flex w-9 shrink-0 items-center gap-1 text-[11px]',
+                alert.kind === 'above' ? 'text-tv-up' : 'text-tv-down',
               )}
             >
+              <span
+                className={clsx(
+                  'h-1.5 w-1.5 rounded-full',
+                  alert.kind === 'above' ? 'bg-tv-up' : 'bg-tv-down',
+                )}
+              />
               {alert.kind === 'above' ? '上穿' : '下穿'}
             </span>
             <div className="min-w-0 flex-1">
               <div className="truncate font-mono text-tv-text">
                 {alert.symbol} · {fmtPrice(alert.price, digitsFor(alert.symbol))}
                 {alert.repeat ? (
-                  <span className="ml-1 rounded bg-tv-accent/20 px-1 text-[9px] text-tv-accent">
+                  <span className="ml-1.5 font-mono text-[11px] text-tv-faint">
                     ×{alert.cooldown_sec}s
                   </span>
                 ) : null}
               </div>
-              <div className="truncate text-[9.5px] text-tv-muted">
+              <div className="mt-0.5 truncate text-[11px] text-tv-muted">
                 {alert.note || '无备注'}
                 {alert.trigger_count > 0 ? ` · 触发 ${alert.trigger_count} 次` : ''}
               </div>
@@ -329,27 +348,33 @@ export function AlertsPanel() {
             <button
               onClick={() => void toggleEnabled(alert)}
               title={alert.enabled ? '停用' : '启用'}
+              aria-label={alert.enabled ? '停用告警' : '启用告警'}
               className={clsx(
-                'flex h-5 w-5 shrink-0 items-center justify-center rounded',
+                'flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors',
                 alert.enabled
-                  ? 'bg-tv-border text-tv-text hover:bg-tv-hover'
-                  : 'bg-tv-accent/20 text-tv-accent hover:bg-tv-accent/30',
+                  ? 'text-tv-muted hover:bg-tv-hover hover:text-tv-text'
+                  : 'text-tv-accent hover:bg-tv-accent-soft',
               )}
             >
-              {alert.enabled ? <Pause size={11} /> : <Play size={11} />}
+              {alert.enabled ? (
+                <Pause size={13} strokeWidth={1.5} />
+              ) : (
+                <Play size={13} strokeWidth={1.5} />
+              )}
             </button>
             <button
               onClick={() => void remove(alert)}
               title="删除"
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-tv-muted hover:bg-tv-down/20 hover:text-tv-down"
+              aria-label="删除告警"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-tv-muted transition-colors hover:bg-tv-down-soft hover:text-tv-down"
             >
-              <Trash2 size={11} />
+              <Trash2 size={13} strokeWidth={1.5} />
             </button>
           </div>
         ))}
       </div>
 
-      <div className="shrink-0 border-t border-tv-border px-3 py-2 text-[9px] leading-relaxed text-tv-muted">
+      <div className="shrink-0 border-t border-tv-border px-4 py-2.5 text-[11px] leading-relaxed text-tv-faint">
         第三方推送：{channels.length > 0 ? channels.join(' / ') : '未配置（见 config.json）'}。
         声音与桌面通知需要页面保持打开。
       </div>

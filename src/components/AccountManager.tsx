@@ -20,7 +20,7 @@ import type {
 } from '../gateway/types';
 
 const inputClass =
-  'h-8 w-full rounded-lg border border-tv-border bg-tv-bg px-2 text-[11px] text-tv-text outline-none focus:border-tv-accent';
+  'h-8 w-full rounded-lg border border-console-line bg-console-canvas px-2.5 text-[12px] text-console-ink outline-none focus:border-console-accent';
 
 type Draft = {
   id?: string;
@@ -190,11 +190,11 @@ export function AccountManager() {
 
   return (
     <>
-      <section className="mb-4 rounded-xl border border-tv-border bg-tv-panel p-5 shadow-sm">
+      <section className="mb-4 rounded-xl border border-console-line bg-console-card p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="text-[13px] font-semibold">MT5 账户</div>
-            <p className="mt-1 max-w-[620px] text-[11px] leading-relaxed text-tv-muted">
+            <div className="text-[13px] font-semibold text-console-ink">MT5 账户</div>
+            <p className="mt-1.5 max-w-[620px] text-[12px] leading-relaxed text-console-muted">
               保存登录号、服务器和密码后，网关会在启动或切换账户时自动登录 MT5。
               修改当前账户的连接信息或密码会立即重新连接。
             </p>
@@ -203,17 +203,17 @@ export function AccountManager() {
             <button
               onClick={() => void refresh()}
               disabled={!gatewayOnline}
-              className="flex h-7 items-center gap-1.5 rounded-lg border border-tv-border px-2.5 text-[10.5px] text-tv-muted hover:bg-tv-hover hover:text-tv-text disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-console-line bg-console-card px-2.5 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <RefreshCw size={12} />
+              <RefreshCw size={14} strokeWidth={1.5} />
               刷新
             </button>
             <button
               onClick={() => setDraft(newDraft(active))}
               disabled={!gatewayOnline}
-              className="flex h-7 items-center gap-1.5 rounded-lg bg-tv-accent px-2.5 text-[10.5px] font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-8 items-center gap-1.5 rounded-lg bg-console-ink px-3 text-[12px] font-medium text-console-card transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <Plus size={12} />
+              <Plus size={14} strokeWidth={1.5} />
               添加账户
             </button>
           </div>
@@ -222,10 +222,10 @@ export function AccountManager() {
         {error && (
           <div
             className={clsx(
-              'mt-4 rounded-lg border px-3 py-2 text-[10.5px] leading-relaxed',
+              'mt-4 rounded-lg border px-3 py-2 text-[11px] leading-relaxed',
               error.code === 'AUTH_FAILED'
-                ? 'border-tv-down/30 bg-tv-down/10 text-tv-down'
-                : 'border-amber-500/30 bg-amber-500/10 text-amber-500',
+                ? 'border-console-loss/30 bg-console-loss-soft text-console-loss'
+                : 'border-console-warn/30 bg-console-warn-soft text-console-warn',
             )}
           >
             {error.message}
@@ -233,17 +233,17 @@ export function AccountManager() {
         )}
 
         {draft && (
-          <div className="mt-4 rounded-xl border border-tv-accent/40 bg-tv-bg/60 p-4">
+          <div className="mt-4 rounded-xl border border-console-line bg-console-canvas/60 p-4">
             <div className="flex items-center justify-between">
-              <div className="text-[12px] font-medium">
+              <div className="text-[13px] font-medium text-console-ink">
                 {draft.id ? `编辑账户 · ${editing?.label ?? draft.label}` : '添加 MT5 账户'}
               </div>
               <button
                 onClick={() => setDraft(null)}
-                className="flex h-6 w-6 items-center justify-center rounded text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
                 title="关闭"
               >
-                <X size={13} />
+                <X size={14} strokeWidth={1.5} />
               </button>
             </div>
 
@@ -281,7 +281,7 @@ export function AccountManager() {
                   value={draft.terminalPath}
                   placeholder="C:\\Program Files\\MetaTrader 5\\terminal64.exe"
                   onChange={(event) => setDraft({ ...draft, terminalPath: event.target.value })}
-                  className={clsx(inputClass, 'font-mono text-[10px]')}
+                  className={clsx(inputClass, 'font-mono text-[11px]')}
                 />
               </Field>
             </div>
@@ -307,7 +307,7 @@ export function AccountManager() {
               </Field>
               <div className="flex items-end pb-1">
                 {draft.id && editing?.hasPassword ? (
-                  <label className="flex items-center gap-2 text-[10.5px] text-tv-muted">
+                  <label className="flex items-center gap-2 text-[11px] text-console-muted">
                     <input
                       type="checkbox"
                       checked={draft.clearPassword}
@@ -322,7 +322,7 @@ export function AccountManager() {
                     清除已保存的密码
                   </label>
                 ) : (
-                  <span className="text-[9.5px] leading-relaxed text-tv-muted">
+                  <span className="text-[11px] leading-relaxed text-console-muted">
                     同一终端可以配置多个登录号；切换时 MT5 会退出当前账户并登录目标账户。
                   </span>
                 )}
@@ -333,27 +333,27 @@ export function AccountManager() {
               <button
                 onClick={() => void save()}
                 disabled={busy === 'save'}
-                className="flex h-7 items-center gap-1.5 rounded-lg bg-tv-accent px-3 text-[10.5px] font-medium text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+                className="flex h-8 items-center gap-1.5 rounded-lg bg-console-ink px-3 text-[12px] font-medium text-console-card transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
               >
-                {busy === 'save' && <Loader2 size={11} className="animate-spin" />}
+                {busy === 'save' && <Loader2 size={13} className="animate-spin" />}
                 保存
               </button>
               <button
                 onClick={() => setDraft(null)}
-                className="h-7 rounded-lg border border-tv-border px-3 text-[10.5px] text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+                className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
               >
                 取消
               </button>
-              <span className="ml-auto text-[9.5px] text-tv-muted">
+              <span className="ml-auto text-[11px] text-console-faint">
                 保存后如需使用新账户，请在列表里点「使用」。
               </span>
             </div>
           </div>
         )}
 
-        <div className="mt-4 divide-y divide-tv-border/60 border-t border-tv-border/60">
+        <div className="mt-4 divide-y divide-console-line/70 border-t border-console-line">
           {accounts.length === 0 && (
-            <div className="py-8 text-center text-[10.5px] leading-relaxed text-tv-muted">
+            <div className="py-8 text-center text-[12px] leading-relaxed text-console-muted">
               没有读取到账户信息。
               <br />
               请确认网关已启动；升级后需要重启一次网关。
@@ -365,35 +365,34 @@ export function AccountManager() {
             return (
               <div key={item.id} className="flex flex-wrap items-start gap-3 py-3">
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[11.5px] font-medium text-tv-text">{item.label}</span>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <span className="text-[13px] font-medium text-console-ink">{item.label}</span>
                     {current && (
-                      <span className="rounded-full bg-tv-accent/15 px-1.5 py-0.5 text-[9px] text-tv-accent">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-console-accent">
+                        <span className="h-1.5 w-1.5 rounded-full bg-console-accent" />
                         当前
                       </span>
                     )}
                     {item.hasPassword ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-tv-up/10 px-1.5 py-0.5 text-[9px] text-tv-up">
-                        <ShieldCheck size={9} />
+                      <span className="inline-flex items-center gap-1 text-[11px] text-console-gain">
+                        <ShieldCheck size={12} strokeWidth={1.5} />
                         自动登录
                       </span>
                     ) : (
-                      <span className="rounded-full bg-tv-border px-1.5 py-0.5 text-[9px] text-tv-muted">
-                        终端登录
-                      </span>
+                      <span className="text-[11px] text-console-faint">终端登录</span>
                     )}
                     {item.connected && (
-                      <span className="flex items-center gap-1 text-[9px] text-tv-up">
-                        <span className="h-1.5 w-1.5 rounded-full bg-tv-up" />
+                      <span className="flex items-center gap-1 text-[11px] text-console-gain">
+                        <span className="h-1.5 w-1.5 rounded-full bg-console-gain" />
                         已连接
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 font-mono text-[10px] text-tv-muted">
+                  <div className="mt-1 font-mono text-[11px] text-console-muted">
                     {item.login || '未设置登录号'}
                     {item.server ? ` · ${item.server}` : ' · 未设置服务器'}
                   </div>
-                  <div className="mt-0.5 truncate font-mono text-[9.5px] text-tv-muted/80">
+                  <div className="mt-0.5 truncate font-mono text-[11px] text-console-faint">
                     {item.terminalPath || '未设置终端路径'}
                   </div>
                 </div>
@@ -402,10 +401,10 @@ export function AccountManager() {
                     onClick={() => void switchTo(item)}
                     disabled={current || !gatewayOnline || !!busy}
                     className={clsx(
-                      'h-6 rounded border px-2 text-[9.5px]',
+                      'h-7 rounded-lg border px-2.5 text-[11px] transition-colors',
                       current
-                        ? 'cursor-default border-tv-border text-tv-muted/50'
-                        : 'border-tv-border text-tv-text hover:bg-tv-hover',
+                        ? 'cursor-default border-console-line text-console-faint'
+                        : 'border-console-line text-console-ink-2 hover:bg-console-hover hover:text-console-ink',
                     )}
                   >
                     {busy === `switch:${item.id}` ? '切换中…' : current ? '使用中' : '使用'}
@@ -424,20 +423,20 @@ export function AccountManager() {
                     }
                     disabled={!gatewayOnline || !!busy}
                     title="编辑账户"
-                    className="flex h-6 w-6 items-center justify-center rounded border border-tv-border text-tv-muted hover:bg-tv-hover hover:text-tv-text disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-console-line text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    <Pencil size={10} />
+                    <Pencil size={13} strokeWidth={1.5} />
                   </button>
                   <button
                     onClick={() => void remove(item)}
                     disabled={current || accounts.length <= 1 || !gatewayOnline || !!busy}
                     title={current ? '请先切换到其他账户再删除' : '删除账户'}
-                    className="flex h-6 w-6 items-center justify-center rounded border border-tv-border text-tv-muted hover:bg-tv-down/15 hover:text-tv-down disabled:cursor-not-allowed disabled:opacity-30"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-console-line text-console-muted transition-colors hover:bg-console-loss-soft hover:text-console-loss disabled:cursor-not-allowed disabled:opacity-30"
                   >
                     {rowBusy && busy?.startsWith('delete:') ? (
-                      <Loader2 size={10} className="animate-spin" />
+                      <Loader2 size={13} className="animate-spin" />
                     ) : (
-                      <Trash2 size={10} />
+                      <Trash2 size={13} strokeWidth={1.5} />
                     )}
                   </button>
                 </div>
@@ -446,18 +445,18 @@ export function AccountManager() {
           })}
         </div>
 
-        <div className="mt-3 text-[9.5px] leading-relaxed text-tv-muted">
+        <div className="mt-4 text-[11px] leading-relaxed text-console-faint">
           顶部账户菜单也可快速切换。账户列表写入 gateway/config.json；密码单独保存到
           gateway/data/credentials.json，仅当前 Windows 用户可解密。
         </div>
       </section>
 
-      <section className="mb-4 rounded-xl border border-tv-border bg-tv-panel p-5 shadow-sm">
-        <div className="flex items-center gap-2 text-[13px] font-semibold">
-          <KeyRound size={14} className="text-tv-muted" />
+      <section className="mb-4 rounded-xl border border-console-line bg-console-card p-5">
+        <div className="flex items-center gap-2 text-[13px] font-semibold text-console-ink">
+          <KeyRound size={16} strokeWidth={1.5} className="text-console-muted" />
           自动登录说明
         </div>
-        <ul className="mt-3 space-y-1.5 text-[11px] leading-relaxed text-tv-muted">
+        <ul className="mt-3.5 space-y-2 text-[12px] leading-relaxed text-console-muted">
           <li>· 保存密码后，网关启动时会先连接终端，再用登录号/服务器/密码登录目标账户。</li>
           <li>· 同一 terminal64.exe 可配置多个账户；切换会改变该终端当前登录的账户。</li>
           <li>· 希望多个账户同时在线时，请为每个账户使用不同的 terminal64.exe 路径。</li>
@@ -479,9 +478,9 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[10.5px] text-tv-text">{label}</span>
+      <span className="mb-1.5 block text-[11px] text-console-ink-2">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-[9.5px] leading-relaxed text-tv-muted">{hint}</span>}
+      {hint && <span className="mt-1.5 block text-[11px] leading-relaxed text-console-faint">{hint}</span>}
     </label>
   );
 }

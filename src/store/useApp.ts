@@ -272,7 +272,7 @@ export const useApp = create<AppStore>((set, get) => ({
   templateArmed: false,
   layout: loadLayout(),
   layoutSync: loadLayoutSync(),
-  theme: readJson<Theme>(THEME_KEY, 'dark') === 'light' ? 'light' : 'dark',
+  theme: readJson<Theme>(THEME_KEY, 'light') === 'dark' ? 'dark' : 'light',
   alertSound: loadPrefs().sound,
   alertDesktop: loadPrefs().desktop,
   crosshairPrice: null,

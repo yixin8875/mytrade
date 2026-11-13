@@ -136,33 +136,35 @@ export function StudyTemplates({
         onClick={() => setOpen((value) => !value)}
         title="指标会自动记住；这里可以把指标组合存成命名模板，随时套用"
         className={clsx(
-          'flex h-6 items-center gap-1 rounded border border-tv-border/60 px-1.5 text-[10px] shadow select-none',
-          open ? 'bg-tv-accent text-white' : 'bg-tv-panel/90 text-tv-muted hover:text-tv-text',
+          'flex h-7 select-none items-center gap-1.5 rounded-lg border border-tv-border px-2 text-[11px] transition-colors',
+          open
+            ? 'bg-tv-hover text-tv-text'
+            : 'bg-tv-panel/95 text-tv-muted hover:text-tv-text',
         )}
       >
-        <Activity size={12} />
+        <Activity size={14} strokeWidth={1.5} />
         指标模板
       </button>
 
       {open && (
-        <div className="absolute bottom-7 left-0 w-[252px] rounded border border-tv-border bg-tv-panel p-2 shadow-2xl">
-          <div className="mb-1.5 flex items-center gap-1">
-            <span className="text-[11px] font-medium text-tv-text">指标模板</span>
+        <div className="absolute bottom-8 left-0 w-[272px] rounded-xl border border-tv-border bg-tv-panel p-3 shadow-[0_18px_48px_-16px_rgba(0,0,0,0.35)]">
+          <div className="mb-2 flex items-center gap-1">
+            <span className="text-[12px] font-medium text-tv-text">指标模板</span>
             <span className="flex-1" />
             <button
               onClick={() => setOpen(false)}
-              className="flex h-5 w-5 items-center justify-center rounded text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+              className="flex h-6 w-6 items-center justify-center rounded-md text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
               title="关闭"
             >
-              <X size={12} />
+              <X size={14} strokeWidth={1.5} />
             </button>
           </div>
 
-          <div className="mb-1.5 rounded bg-tv-bg px-2 py-1 text-[10px] text-tv-muted">
-            当前图表有 <span className="text-tv-text">{count}</span> 个指标（不含成交量）
+          <div className="mb-2 rounded-md bg-tv-raised px-2.5 py-1.5 text-[11px] text-tv-muted">
+            当前图表有 <span className="num font-mono text-tv-text">{count}</span> 个指标（不含成交量）
           </div>
 
-          <div className="flex gap-1">
+          <div className="flex gap-1.5">
             <input
               ref={inputRef}
               value={name}
@@ -172,50 +174,50 @@ export function StudyTemplates({
                 if (event.key === 'Escape') setOpen(false);
               }}
               placeholder="模板名，如「趋势组合」"
-              className="h-6 min-w-0 flex-1 rounded border border-tv-border bg-tv-bg px-1.5 text-[10px] text-tv-text outline-none focus:border-tv-accent"
+              className="h-7 min-w-0 flex-1 rounded-lg border border-tv-border bg-tv-raised px-2 text-[11px] text-tv-text outline-none focus:border-tv-accent"
             />
             <button
               onClick={save}
-              className="h-6 shrink-0 rounded bg-tv-accent px-2 text-[10px] font-medium text-white"
+              className="h-7 shrink-0 rounded-lg bg-tv-text px-2.5 text-[11px] font-medium text-tv-bg transition-opacity hover:opacity-90"
             >
               保存
             </button>
           </div>
 
-          <div className="mt-1.5 max-h-[210px] overflow-auto">
+          <div className="mt-2 max-h-[210px] overflow-auto">
             {list.length === 0 ? (
-              <div className="py-3 text-center text-[10px] text-tv-muted">
+              <div className="py-3 text-center text-[11px] text-tv-muted">
                 还没有保存过指标模板
               </div>
             ) : (
               list.map((template) => (
                 <div
                   key={template.name}
-                  className="group flex items-center gap-1 rounded px-1 py-1 hover:bg-tv-hover"
+                  className="group flex items-center gap-1 rounded-md px-1 py-1.5 hover:bg-tv-hover"
                 >
                   <button
                     onClick={() => apply(template)}
                     title="把这个指标组合套到当前图表"
                     className="min-w-0 flex-1 text-left"
                   >
-                    <div className="truncate text-[10px] text-tv-text">{template.name}</div>
-                    <div className="truncate text-[9px] text-tv-muted">
+                    <div className="truncate text-[11px] text-tv-text">{template.name}</div>
+                    <div className="truncate text-[11px] text-tv-faint">
                       保存于 {fmtDate(template.savedAt)} · 点击套用
                     </div>
                   </button>
                   <button
                     onClick={() => remove(template)}
                     title="删除模板"
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-tv-muted opacity-0 hover:bg-tv-down/15 hover:text-tv-down group-hover:opacity-100"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-tv-muted opacity-0 transition-colors hover:bg-tv-down-soft hover:text-tv-down group-hover:opacity-100"
                   >
-                    <Trash2 size={11} />
+                    <Trash2 size={13} strokeWidth={1.5} />
                   </button>
                 </div>
               ))
             )}
           </div>
 
-          <div className="mt-1.5 border-t border-tv-border/60 pt-1 text-[9px] leading-relaxed text-tv-muted">
+          <div className="mt-2 border-t border-tv-border pt-2 text-[11px] leading-relaxed text-tv-faint">
             指标会按图表自动保存在本机，重启后恢复；命名模板可以套用到任意品种和其他图表。
           </div>
         </div>

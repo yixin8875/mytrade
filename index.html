@@ -1,45 +1,41 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#131722" />
+    <meta name="theme-color" content="#eef1f5" />
     <title>MyTrade</title>
     <script>
-      // 在首屏绘制前恢复主题，避免深色应用先闪一下浅色
+      // 在首屏绘制前恢复主题，避免启动页闪一下另一种底色
       (function () {
         try {
-          var stored = JSON.parse(localStorage.getItem('mytrade.theme') || '"dark"');
-          document.documentElement.dataset.theme = stored === 'light' ? 'light' : 'dark';
+          var stored = JSON.parse(localStorage.getItem('mytrade.theme') || '"light"');
+          document.documentElement.dataset.theme = stored === 'dark' ? 'dark' : 'light';
         } catch (_) {
-          document.documentElement.dataset.theme = 'dark';
+          document.documentElement.dataset.theme = 'light';
         }
       })();
     </script>
     <style>
       :root {
-        --boot-bg: #131722;
-        --boot-panel: #1e222d;
-        --boot-text: #d1d4dc;
-        --boot-muted: #787b86;
-        --boot-accent: #2962ff;
-        --boot-up: #26a69a;
-        --boot-down: #ef5350;
-        --boot-line: rgba(42, 46, 57, 0.9);
-        --boot-grid: rgba(209, 212, 220, 0.045);
-        --boot-shadow: rgba(0, 0, 0, 0.32);
+        --boot-bg: #eef1f5;
+        --boot-card: #ffffff;
+        --boot-text: #1a222c;
+        --boot-muted: #64707f;
+        --boot-line: #e3e8ee;
+        --boot-accent: #1f5fd6;
+        --boot-up: #0f7a55;
+        --boot-down: #c2413a;
       }
-      html[data-theme='light'] {
-        --boot-bg: #f3f5f8;
-        --boot-panel: #ffffff;
-        --boot-text: #1f2937;
-        --boot-muted: #6e6e73;
-        --boot-accent: #0b6cf0;
-        --boot-up: #12805c;
-        --boot-down: #c7443e;
-        --boot-line: rgba(215, 221, 229, 0.95);
-        --boot-grid: rgba(31, 41, 55, 0.05);
-        --boot-shadow: rgba(31, 41, 55, 0.12);
+      html[data-theme='dark'] {
+        --boot-bg: #14161b;
+        --boot-card: #1a1d23;
+        --boot-text: #e7eaef;
+        --boot-muted: #98a2b0;
+        --boot-line: #2a2f38;
+        --boot-accent: #7ba1ff;
+        --boot-up: #3ecf9a;
+        --boot-down: #ff7b73;
       }
       html,
       body {
@@ -54,165 +50,86 @@
         z-index: 9999;
         display: grid;
         place-items: center;
-        overflow: hidden;
-        background:
-          radial-gradient(circle at 50% 42%, rgba(41, 98, 255, 0.12), transparent 46%),
-          var(--boot-bg);
+        background: var(--boot-bg);
         opacity: 1;
-        transition: opacity 0.45s ease;
+        transition: opacity 0.4s cubic-bezier(0.22, 1, 0.36, 1);
       }
       #boot.boot-hide {
         opacity: 0;
         pointer-events: none;
       }
-      .boot-grid {
-        position: absolute;
-        inset: -20%;
-        background-image:
-          linear-gradient(var(--boot-grid) 1px, transparent 1px),
-          linear-gradient(90deg, var(--boot-grid) 1px, transparent 1px);
-        background-size: 48px 48px;
-        -webkit-mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 68%);
-        mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 68%);
-        animation: boot-drift 22s linear infinite;
-      }
-      .boot-aura {
-        position: absolute;
-        width: 520px;
-        height: 520px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(41, 98, 255, 0.16), transparent 66%);
-        filter: blur(18px);
-        animation: boot-breathe 4.2s ease-in-out infinite;
-      }
       .boot-card {
-        position: relative;
         display: flex;
+        width: 296px;
         flex-direction: column;
         align-items: center;
-        padding: 34px 42px 30px;
+        padding: 32px 28px 26px;
         border: 1px solid var(--boot-line);
-        border-radius: 20px;
-        background: var(--boot-panel);
-        box-shadow: 0 24px 80px var(--boot-shadow);
-        opacity: 0.96;
-        -webkit-backdrop-filter: blur(14px);
-        backdrop-filter: blur(14px);
-      }
-      .boot-logo {
-        display: grid;
-        place-items: center;
-        width: 62px;
-        height: 62px;
-        border: 1px solid rgba(41, 98, 255, 0.28);
         border-radius: 16px;
-        background: linear-gradient(145deg, rgba(41, 98, 255, 0.16), rgba(38, 166, 154, 0.07));
-        box-shadow:
-          inset 0 0 22px rgba(41, 98, 255, 0.08),
-          0 8px 24px rgba(0, 0, 0, 0.16);
-        animation: boot-lift 2.8s ease-in-out infinite;
+        background: var(--boot-card);
       }
-      .boot-logo svg {
-        width: 36px;
-        height: 36px;
-      }
-      .boot-candles {
+      .boot-mark {
         display: flex;
         align-items: flex-end;
-        gap: 5px;
-        height: 26px;
-        margin-top: 18px;
+        gap: 3px;
+        height: 22px;
       }
-      .boot-candles span {
-        width: 5px;
-        height: var(--h);
-        border-radius: 2px;
+      .boot-mark span {
+        width: 3px;
+        border-radius: 1px;
+        background: var(--boot-muted);
+      }
+      .boot-mark span:nth-child(1) {
+        height: 8px;
+      }
+      .boot-mark span:nth-child(2) {
+        height: 14px;
         background: var(--boot-up);
-        transform-origin: bottom;
-        animation: boot-candle 1.15s ease-in-out infinite;
-        animation-delay: var(--d);
       }
-      .boot-candles span:nth-child(2n) {
+      .boot-mark span:nth-child(3) {
+        height: 11px;
+      }
+      .boot-mark span:nth-child(4) {
+        height: 18px;
         background: var(--boot-down);
+      }
+      .boot-mark span:nth-child(5) {
+        height: 15px;
+        background: var(--boot-up);
       }
       .boot-title {
         margin-top: 14px;
-        font: 600 20px/1.2 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-        letter-spacing: 0.16em;
+        font: 500 17px/1.2 "Segoe UI", -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif;
         color: var(--boot-text);
       }
       .boot-sub {
         min-height: 16px;
-        margin-top: 7px;
-        font-size: 11.5px;
-        letter-spacing: 0.08em;
+        margin-top: 6px;
+        font-size: 12px;
         color: var(--boot-muted);
       }
       .boot-bar {
-        width: 190px;
+        width: 100%;
         height: 2px;
-        margin-top: 22px;
+        margin-top: 24px;
         overflow: hidden;
-        border-radius: 999px;
+        border-radius: 1px;
         background: var(--boot-line);
       }
       .boot-bar i {
         display: block;
-        width: 45%;
+        width: 36%;
         height: 100%;
         border-radius: inherit;
-        background: linear-gradient(90deg, transparent, var(--boot-accent), transparent);
-        animation: boot-sweep 1.4s ease-in-out infinite;
-      }
-      @keyframes boot-lift {
-        0%,
-        100% {
-          transform: translateY(0);
-        }
-        50% {
-          transform: translateY(-3px);
-        }
-      }
-      @keyframes boot-candle {
-        0%,
-        100% {
-          transform: scaleY(0.45);
-          opacity: 0.35;
-        }
-        50% {
-          transform: scaleY(1);
-          opacity: 1;
-        }
+        background: var(--boot-accent);
+        animation: boot-sweep 1.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
       }
       @keyframes boot-sweep {
         0% {
           transform: translateX(-110%);
         }
         100% {
-          transform: translateX(250%);
-        }
-      }
-      @keyframes boot-breathe {
-        0%,
-        100% {
-          opacity: 0.55;
-          transform: scale(0.96);
-        }
-        50% {
-          opacity: 1;
-          transform: scale(1.04);
-        }
-      }
-      @keyframes boot-drift {
-        0% {
-          background-position:
-            0 0,
-            0 0;
-        }
-        100% {
-          background-position:
-            48px 48px,
-            48px 48px;
+          transform: translateX(310%);
         }
       }
       @media (prefers-reduced-motion: reduce) {
@@ -228,46 +145,9 @@
   </head>
   <body>
     <div id="boot" role="status" aria-live="polite">
-      <div class="boot-grid" aria-hidden="true"></div>
-      <div class="boot-aura" aria-hidden="true"></div>
       <div class="boot-card">
-        <div class="boot-logo" aria-hidden="true">
-          <svg viewBox="0 0 40 40" fill="none">
-            <path
-              d="M5 29.5 14.5 19l7 6.5L35 10"
-              stroke="url(#bootGrad)"
-              stroke-width="3"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M5 35h30"
-              stroke="currentColor"
-              stroke-opacity=".18"
-              stroke-width="1.5"
-              stroke-linecap="round"
-            />
-            <defs>
-              <linearGradient
-                id="bootGrad"
-                x1="5"
-                y1="30"
-                x2="35"
-                y2="10"
-                gradientUnits="userSpaceOnUse"
-              >
-                <stop stop-color="#26a69a" />
-                <stop offset="1" stop-color="#2962ff" />
-              </linearGradient>
-            </defs>
-          </svg>
-        </div>
-        <div class="boot-candles" aria-hidden="true">
-          <span style="--h: 14px; --d: 0ms"></span>
-          <span style="--h: 22px; --d: 120ms"></span>
-          <span style="--h: 17px; --d: 240ms"></span>
-          <span style="--h: 26px; --d: 360ms"></span>
-          <span style="--h: 20px; --d: 480ms"></span>
+        <div class="boot-mark" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
         </div>
         <div class="boot-title">MyTrade</div>
         <div class="boot-sub" id="boot-sub">正在启动本地网关…</div>

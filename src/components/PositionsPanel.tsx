@@ -128,15 +128,18 @@ export function PositionsPanel() {
 
   return (
     <section className="border-b border-tv-border">
-      <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-[11px] font-semibold tracking-wide text-tv-muted">
-          持仓 <span className="ml-1 text-tv-text">{positions.length}</span>
+      <div className="flex h-10 items-center justify-between px-4">
+        <span className="text-[12px] font-semibold text-tv-text">
+          持仓
+          <span className="num ml-1.5 font-mono text-[11px] font-normal text-tv-muted">
+            {positions.length}
+          </span>
         </span>
         {positions.length > 0 && (
           <button
             onClick={closeAll}
             className={clsx(
-              'rounded px-1.5 py-0.5 text-[10px]',
+              'rounded-md px-1.5 py-0.5 text-[11px] transition-colors',
               confirmAll ? 'bg-tv-down text-white' : 'text-tv-muted hover:text-tv-text',
             )}
           >
@@ -146,40 +149,46 @@ export function PositionsPanel() {
       </div>
       <div className="max-h-[240px] overflow-auto">
         {positions.length === 0 && (
-          <div className="px-3 pb-3 text-[11px] text-tv-muted">暂无持仓</div>
+          <div className="px-4 pb-4 text-[12px] text-tv-muted">暂无持仓</div>
         )}
         {positions.map((position) => {
           const info = symbols.find((item) => item.name === position.symbol);
           const digits = info?.digits ?? 5;
           return (
             <div key={position.ticket} className="border-t border-tv-border/60">
-              <div className="px-3 py-1.5 text-[11px]">
+              <div className="px-4 py-2.5 text-[12px]">
                 <div className="flex items-center gap-2">
                   <span
                     className={clsx(
-                      'w-7 shrink-0 rounded px-1 py-0.5 text-center text-[9px] font-semibold text-white',
-                      position.side === 'buy' ? 'bg-tv-up' : 'bg-tv-down',
+                      'flex w-8 shrink-0 items-center gap-1 text-[11px]',
+                      position.side === 'buy' ? 'text-tv-up' : 'text-tv-down',
                     )}
                   >
+                    <span
+                      className={clsx(
+                        'h-1.5 w-1.5 rounded-full',
+                        position.side === 'buy' ? 'bg-tv-up' : 'bg-tv-down',
+                      )}
+                    />
                     {position.side === 'buy' ? '多' : '空'}
                   </span>
-                  <span className="truncate text-tv-text">
+                  <span className="truncate font-medium text-tv-text">
                     {position.symbol}
-                    <span className="ml-1 text-tv-muted">
+                    <span className="num ml-1.5 font-mono text-[11px] font-normal text-tv-muted">
                       {fmtVolume(position.volume, info?.volumeStep)}
                     </span>
                     {position.trailing && (
-                      <span className="ml-1 rounded bg-tv-accent/20 px-1 text-[9px] text-tv-accent">
-                        移损 {position.trailing.distancePoints}点
+                      <span className="ml-1.5 rounded bg-tv-accent-soft px-1 text-[11px] text-tv-accent">
+                        移损 {position.trailing.distancePoints} 点
                       </span>
                     )}
                   </span>
                   <span className="flex-1" />
-                  <span className={clsx('font-mono', signedClass(position.profit))}>
+                  <span className={clsx('num font-mono', signedClass(position.profit))}>
                     {fmtSigned(position.profit)}
                   </span>
                 </div>
-                <div className="mt-0.5 truncate text-[10px] text-tv-muted">
+                <div className="mt-1 truncate font-mono text-[11px] text-tv-muted">
                   开 {fmtPrice(position.openPrice, digits)}
                   {position.sl != null ? ` · SL ${fmtPrice(position.sl, digits)}` : ''}
                   {position.tp != null ? ` · TP ${fmtPrice(position.tp, digits)}` : ''}
@@ -187,12 +196,12 @@ export function PositionsPanel() {
                     ? ` · 强平 ${fmtPrice(position.stopOutPrice, digits)}`
                     : ''}
                 </div>
-                <div className="mt-1 flex items-center justify-end gap-1">
+                <div className="mt-2 flex items-center justify-end gap-1">
                   <button
                     onClick={() => breakeven(position.ticket, digits)}
                     disabled={busy === position.ticket}
                     title="把止损移到开仓价（保本）"
-                    className="h-5 rounded border border-tv-border px-1.5 text-[10px] text-tv-text hover:bg-tv-hover"
+                    className="h-6 rounded-md border border-tv-border px-2 text-[11px] text-tv-text transition-colors hover:bg-tv-hover"
                   >
                     保本
                   </button>
@@ -203,9 +212,9 @@ export function PositionsPanel() {
                     }
                     title="平掉一半仓位，止损同时移到保本"
                     className={clsx(
-                      'h-5 rounded border px-1.5 text-[10px]',
+                      'h-6 rounded-md border px-2 text-[11px] transition-colors',
                       confirmHalf === position.ticket
-                        ? 'border-amber-500 bg-amber-500 text-black'
+                        ? 'border-tv-warn bg-tv-warn text-white'
                         : 'border-tv-border text-tv-text hover:bg-tv-hover',
                       position.volume <= (info?.minVolume ?? 0.01) &&
                         'cursor-not-allowed opacity-40',
@@ -224,9 +233,9 @@ export function PositionsPanel() {
                       position.trailing ? '点击取消移动止损' : '启动移动止损（止损跟随价格）'
                     }
                     className={clsx(
-                      'h-5 rounded border px-1.5 text-[10px]',
+                      'h-6 rounded-md border px-2 text-[11px] transition-colors',
                       position.trailing
-                        ? 'border-tv-accent/40 bg-tv-accent/20 text-tv-accent'
+                        ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
                         : 'border-tv-border text-tv-text hover:bg-tv-hover',
                     )}
                   >
@@ -240,45 +249,45 @@ export function PositionsPanel() {
                     }
                     disabled={busy === position.ticket}
                     className={clsx(
-                      'h-5 rounded px-1.5 text-[10px]',
+                      'h-6 rounded-md px-2 text-[11px] transition-colors',
                       confirmTicket === position.ticket
                         ? 'bg-tv-down text-white'
-                        : 'bg-tv-border text-tv-text hover:bg-tv-hover',
+                        : 'bg-tv-raised text-tv-text hover:bg-tv-hover',
                     )}
                   >
                     {busy === position.ticket
                       ? '…'
                       : confirmTicket === position.ticket
                         ? '确认平仓'
-                        : '平'}
+                        : '平仓'}
                   </button>
                 </div>
               </div>
               {trailFor === position.ticket && (
-                <div className="flex items-center gap-1 border-t border-tv-border/40 bg-tv-bg/40 px-3 py-1 text-[10px] text-tv-muted">
+                <div className="flex items-center gap-1.5 border-t border-tv-border/60 bg-tv-raised px-4 py-2 text-[11px] text-tv-muted">
                   距离
                   <input
                     type="number"
                     min={1}
                     value={trailDist}
                     onChange={(event) => setTrailDist(event.target.value)}
-                    className="h-5 w-14 rounded border border-tv-border bg-tv-bg px-1 text-right font-mono text-[10px] text-tv-text outline-none focus:border-tv-accent"
+                    className="h-6 w-16 rounded-md border border-tv-border bg-tv-panel px-1.5 text-right font-mono text-[11px] text-tv-text outline-none focus:border-tv-accent"
                   />
                   点
-                  <span className="ml-1 opacity-60">
+                  <span className="ml-1 truncate">
                     （价格{position.side === 'buy' ? '下方' : '上方'}，只朝有利方向移动）
                   </span>
                   <span className="flex-1" />
                   <button
                     onClick={() => applyTrailing(position.ticket)}
                     disabled={busy === position.ticket}
-                    className="h-5 rounded bg-tv-accent px-1.5 text-[10px] text-white hover:opacity-90"
+                    className="h-6 rounded-md bg-tv-text px-2 text-[11px] font-medium text-tv-panel transition-opacity hover:opacity-90"
                   >
                     启动
                   </button>
                   <button
                     onClick={() => setTrailFor(null)}
-                    className="h-5 rounded px-1.5 text-[10px] text-tv-muted hover:text-tv-text"
+                    className="h-6 rounded-md px-1.5 text-[11px] text-tv-muted transition-colors hover:text-tv-text"
                   >
                     取消
                   </button>

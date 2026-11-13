@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
+import { X } from 'lucide-react';
 import { requestSymbol } from '../chart/tv/registry';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
@@ -67,15 +68,18 @@ export function WatchlistPanel() {
 
   return (
     <section data-panel="watchlist">
-      <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-[11px] font-semibold tracking-wide text-tv-muted">
-          自选 <span className="ml-1 text-tv-text">{watchlist.length}</span>
+      <div className="flex h-10 items-center justify-between px-4">
+        <span className="text-[12px] font-semibold text-tv-text">
+          自选
+          <span className="num ml-1.5 font-mono text-[11px] font-normal text-tv-muted">
+            {watchlist.length}
+          </span>
         </span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <select
             value={pick}
             onChange={(event) => setPick(event.target.value)}
-            className="h-6 w-[92px] rounded border border-tv-border bg-tv-bg px-1 text-[10px] text-tv-text outline-none focus:border-tv-accent"
+            className="h-7 w-[104px] rounded-lg border border-tv-border bg-tv-raised px-1.5 text-[11px] text-tv-text outline-none focus:border-tv-accent"
           >
             <option value="">添加品种…</option>
             {candidates.map((item) => (
@@ -92,18 +96,18 @@ export function WatchlistPanel() {
             }}
             disabled={!pick}
             className={clsx(
-              'h-6 rounded bg-tv-border px-1.5 text-[10px] text-tv-text hover:bg-tv-hover',
+              'h-7 rounded-md bg-tv-raised px-2 text-[11px] text-tv-text transition-colors hover:bg-tv-hover',
               !pick && 'cursor-not-allowed opacity-40',
             )}
           >
-            加
+            添加
           </button>
         </div>
       </div>
 
       <div className="max-h-[320px] overflow-auto">
         {watchlist.length === 0 && (
-          <div className="px-3 pb-3 text-[11px] text-tv-muted">
+          <div className="px-4 pb-4 text-[12px] text-tv-muted">
             {conn === 'open' ? '还没有自选品种，从右上角添加' : '等待网关连接…'}
           </div>
         )}
@@ -118,27 +122,27 @@ export function WatchlistPanel() {
                 if (!requestSymbol(name)) setSymbol(name);
               }}
               className={clsx(
-                'group flex cursor-pointer items-center gap-2 border-t border-tv-border/60 px-3 py-1.5 text-[11px]',
-                active ? 'bg-tv-accent/10' : 'hover:bg-tv-hover/40',
+                'group flex cursor-pointer items-center gap-2 border-t border-tv-border/60 px-4 py-2.5 text-[12px] transition-colors',
+                active ? 'bg-tv-accent-soft' : 'hover:bg-tv-hover',
               )}
             >
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1 truncate text-tv-text">
+                <div className="flex items-center gap-1.5 truncate text-tv-text">
                   {row?.hasPosition && (
                     <span
                       className="h-1.5 w-1.5 shrink-0 rounded-full bg-tv-accent"
                       title="有持仓"
                     />
                   )}
-                  <span className="truncate">{name}</span>
+                  <span className="truncate font-medium">{name}</span>
                 </div>
-                <div className="truncate text-[10px] text-tv-muted">
+                <div className="truncate font-mono text-[11px] text-tv-muted">
                   {row
                     ? `点差 ${row.spreadPoints.toFixed(0)} · Bid ${fmtPrice(row.bid, row.digits)}`
                     : '—'}
                 </div>
               </div>
-              <span className={clsx('font-mono text-[11px]', signedClass(row?.changePct))}>
+              <span className={clsx('num font-mono text-[11px]', signedClass(row?.changePct))}>
                 {row?.changePct != null
                   ? `${row.changePct >= 0 ? '+' : ''}${row.changePct.toFixed(2)}%`
                   : '—'}
@@ -149,15 +153,16 @@ export function WatchlistPanel() {
                   save(watchlist.filter((item) => item !== name));
                 }}
                 title="从自选里移除"
-                className="h-5 w-5 shrink-0 rounded text-[10px] text-tv-muted opacity-0 hover:bg-tv-border hover:text-tv-text group-hover:opacity-100"
+                aria-label={`从自选移除 ${name}`}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-tv-muted opacity-0 transition-colors hover:bg-tv-raised hover:text-tv-text group-hover:opacity-100"
               >
-                ✕
+                <X size={13} strokeWidth={1.5} />
               </button>
             </div>
           );
         })}
       </div>
-      <div className="px-3 py-2 text-[9px] text-tv-muted">
+      <div className="px-4 py-2 text-[11px] text-tv-muted">
         点差单位为「点」，涨跌幅按 D1 开盘价计算；圆点表示该品种有持仓。
       </div>
     </section>

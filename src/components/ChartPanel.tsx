@@ -24,12 +24,12 @@ import type {
 } from '../../public/charting_library/charting_library';
 import type { SymbolInfo } from '../gateway/types';
 
-const SIDE_BUY = '#26a69a';
-const SIDE_SELL = '#ef5350';
-const ENTRY_COLOR = '#2962ff';
-const STOP_OUT_COLOR = '#f59e0b';
-const RISK_FILL = 'rgba(239, 83, 80, 0.10)';
-const REWARD_FILL = 'rgba(38, 166, 154, 0.10)';
+const SIDE_BUY = '#0f7a55';
+const SIDE_SELL = '#c2413a';
+const ENTRY_COLOR = '#1f5fd6';
+const STOP_OUT_COLOR = '#a9691a';
+const RISK_FILL = 'rgba(194, 65, 58, 0.08)';
+const REWARD_FILL = 'rgba(15, 122, 85, 0.08)';
 
 /**
  * 背景、网格、坐标文字由应用主题决定。库恢复的旧图表属性优先级高于 overrides，
@@ -72,12 +72,12 @@ function dropSavedThemeColors(theme: Theme): void {
 function chartOverrides(theme: Theme): Partial<ChartPropertiesOverrides> {
   const light = theme === 'light';
   return {
-    'paneProperties.background': light ? '#ffffff' : '#131722',
+    'paneProperties.background': light ? '#ffffff' : '#14161b',
     'paneProperties.backgroundType': 'solid',
-    'paneProperties.vertGridProperties.color': light ? '#e6e9ef' : '#1e222d',
-    'paneProperties.horzGridProperties.color': light ? '#e6e9ef' : '#1e222d',
-    'scalesProperties.textColor': light ? '#131722' : '#d1d4dc',
-    'scalesProperties.lineColor': light ? '#d1d4dc' : '#2a2e39',
+    'paneProperties.vertGridProperties.color': light ? '#edf0f4' : '#22262e',
+    'paneProperties.horzGridProperties.color': light ? '#edf0f4' : '#22262e',
+    'scalesProperties.textColor': light ? '#64707f' : '#98a2b0',
+    'scalesProperties.lineColor': light ? '#e3e8ee' : '#2a2f38',
     'mainSeriesProperties.candleStyle.upColor': SIDE_BUY,
     'mainSeriesProperties.candleStyle.downColor': SIDE_SELL,
     'mainSeriesProperties.candleStyle.borderUpColor': SIDE_BUY,
@@ -659,8 +659,8 @@ export function ChartPanel({
         autosize: true,
         fullscreen: false,
         loading_screen: {
-          backgroundColor: initialTheme === 'light' ? '#ffffff' : '#131722',
-          foregroundColor: '#2962ff',
+          backgroundColor: initialTheme === 'light' ? '#ffffff' : '#14161b',
+          foregroundColor: initialTheme === 'light' ? '#1f5fd6' : '#7ba1ff',
         },
         overrides: chartOverrides(initialTheme),
         // 收藏画线工具：左侧工具栏里点星标即可收藏，收藏的工具会浮在图上快捷调用
@@ -1060,7 +1060,7 @@ export function ChartPanel({
       {draft.active && (
         <button
           onClick={() => patchDraft({ active: false })}
-          className="absolute right-3 top-14 z-30 rounded bg-tv-panel/90 px-2 py-1 text-[10px] text-tv-text shadow hover:bg-tv-hover"
+          className="absolute right-3 top-14 z-30 rounded-lg border border-tv-border bg-tv-panel/95 px-2.5 py-1.5 text-[11px] text-tv-text shadow-[0_6px_16px_-8px_rgba(0,0,0,0.3)] transition-colors hover:bg-tv-hover"
         >
           清除划线
         </button>

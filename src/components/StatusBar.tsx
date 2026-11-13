@@ -13,12 +13,12 @@ export function StatusBar() {
   const halted = !!riskStatus?.halted;
 
   return (
-    <footer className="flex h-6 shrink-0 items-center gap-3 border-t border-tv-border bg-tv-panel px-3 text-[10px] text-tv-muted">
+    <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-tv-border bg-tv-panel px-3 text-[11px] text-tv-muted">
       <span className="flex items-center gap-1.5">
         <span
           className={clsx(
             'h-1.5 w-1.5 rounded-full',
-            conn === 'open' ? 'bg-tv-up' : conn === 'connecting' ? 'bg-amber-400' : 'bg-tv-down',
+            conn === 'open' ? 'bg-tv-up' : conn === 'connecting' ? 'bg-tv-warn' : 'bg-tv-down',
           )}
         />
         {conn === 'open'
@@ -28,44 +28,47 @@ export function StatusBar() {
             : '网关未连接 · 自动重连中'}
       </span>
 
+      <span className="h-3 w-px bg-tv-border" />
+
       <span>
-        MT5：
         {health?.connected
-          ? `${health.terminal?.name ?? '已连接'} (build ${health.terminal?.build ?? '—'})`
-          : '等待终端'}
+          ? `${health.terminal?.name ?? 'MT5'} · build ${health.terminal?.build ?? '—'}`
+          : 'MT5 等待终端'}
       </span>
 
       {account && (
-        <span>
-          {account.login}@{account.server} · {account.accountType} · {account.marginMode}
-        </span>
+        <>
+          <span className="h-3 w-px bg-tv-border" />
+          <span className="num font-mono">
+            {account.login}@{account.server} · {account.accountType}
+          </span>
+        </>
       )}
 
       <span className="flex-1" />
 
       {halted ? (
-        <span className="rounded bg-tv-down/20 px-1.5 py-0.5 font-semibold text-tv-down">
+        <span className="flex items-center gap-1.5 font-medium text-tv-down">
+          <span className="h-1.5 w-1.5 rounded-full bg-tv-down" />
           已停机：{riskStatus?.haltReason || '手动停机'}
           {positions.length > 0 ? ` · ${positions.length} 个仓位未平` : ''}
         </span>
       ) : (
-        riskStatus?.blockReason && (
-          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-400">
-            {riskStatus.blockReason}
-          </span>
-        )
+        riskStatus?.blockReason && <span className="text-tv-warn">{riskStatus.blockReason}</span>
       )}
+
+      <span className="h-3 w-px bg-tv-border" />
 
       {mode === 'readonly' && <span>只读</span>}
       {mode === 'demo' && <span className="text-tv-up">模拟可交易</span>}
-      {mode === 'live' && <span className="text-tv-down">实盘交易</span>}
+      {mode === 'live' && <span className="font-medium text-tv-down">实盘交易</span>}
 
       {health?.terminal && !health.terminal.tradeAllowed && (
-        <span className="text-amber-400">MT5 未开启 Algo Trading</span>
+        <span className="text-tv-warn">Algo Trading 未开启</span>
       )}
 
-      <span>延迟 {latency != null ? `${latency}ms` : '—'}</span>
-      <span>v{health?.version ?? '0.1.0'}</span>
+      <span className="num font-mono">延迟 {latency != null ? `${latency}ms` : '—'}</span>
+      <span className="num font-mono text-tv-faint">v{health?.version ?? '0.1.0'}</span>
     </footer>
   );
 }

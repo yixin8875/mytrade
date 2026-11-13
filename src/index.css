@@ -1,97 +1,175 @@
 @import "tailwindcss";
 
+/*
+ * 两套介质，一个系统：
+ * - 实时台（浅色冷光）：仪器面、报价、下单、持仓
+ * - 复盘页（暖纸）：日志、报表、执行质量、设置
+ * 同一套字号、间距、圆角和一个强调色。涨跌绿红只做语义，强调蓝只做选中与焦点。
+ */
 @theme {
-  --color-tv-bg: #131722;
-  --color-tv-panel: #1e222d;
-  --color-tv-border: #2a2e39;
-  --color-tv-text: #d1d4dc;
-  --color-tv-muted: #787b86;
-  --color-tv-up: #26a69a;
-  --color-tv-down: #ef5350;
-  --color-tv-accent: #2962ff;
-  --color-tv-hover: #2a2e39;
-
-  /* 控制台：参考 MERIDIAN 的暖灰纸张感，始终浅色 */
-  --color-console-canvas: #f5f4f1;
-  --color-console-sidebar: #f7f6f3;
-  --color-console-card: #fcfbf9;
-  --color-console-ink: #1d1d1f;
-  --color-console-ink-2: #45454a;
-  --color-console-muted: #6e6e73;
-  --color-console-faint: #98989e;
-  --color-console-line: #e7e5e0;
-  --color-console-line-2: #d8d6d0;
-  --color-console-hover: #efeeea;
-  --color-console-selected: #eae9e5;
-  --color-console-accent: #0b6cf0;
-  --color-console-gain: #12805c;
-  --color-console-loss: #c7443e;
-  --color-console-warn: #a9691a;
-  --color-console-gain-soft: #e9f6f0;
-  --color-console-loss-soft: #fcefee;
-  --color-console-warn-soft: #fbf3e6;
-}
-
-/* 浅色主题：只覆盖变量，所有 Tailwind 的 tv-* 工具类会自动跟着变 */
-html[data-theme="light"] {
-  --color-tv-bg: #f3f5f8;
+  /* 实时台：冷光仪器面 */
+  --color-tv-bg: #eef1f5;
   --color-tv-panel: #ffffff;
-  --color-tv-border: #d7dde5;
-  --color-tv-text: #1f2937;
-  --color-tv-muted: #6b7280;
-  --color-tv-up: #089981;
-  --color-tv-down: #f23645;
-  --color-tv-accent: #2962ff;
+  --color-tv-raised: #f4f6f9;
+  --color-tv-border: #e3e8ee;
+  --color-tv-text: #1a222c;
+  --color-tv-muted: #64707f;
+  --color-tv-faint: #8b96a5;
+  --color-tv-up: #0f7a55;
+  --color-tv-down: #c2413a;
+  --color-tv-warn: #a9691a;
+  --color-tv-accent: #1f5fd6;
+  --color-tv-accent-soft: #e9effc;
+  --color-tv-up-soft: #e7f4ee;
+  --color-tv-down-soft: #fbecea;
+  --color-tv-warn-soft: #fbf3e6;
   --color-tv-hover: #eef2f6;
+
+  /* 复盘页：暖纸 */
+  --color-console-canvas: #f6f3ec;
+  --color-console-sidebar: #f1ece2;
+  --color-console-card: #fffdf8;
+  --color-console-ink: #211c16;
+  --color-console-ink-2: #4e473d;
+  --color-console-muted: #6f675b;
+  --color-console-faint: #9a9183;
+  --color-console-line: #e5dfd4;
+  --color-console-line-2: #d5cec0;
+  --color-console-hover: #eee8dd;
+  --color-console-selected: #e9e1d3;
+  --color-console-accent: #1f5fd6;
+  --color-console-accent-soft: #e9effc;
+  --color-console-gain: #0f7a55;
+  --color-console-loss: #c2413a;
+  --color-console-warn: #a9691a;
+  --color-console-gain-soft: #e7f4ee;
+  --color-console-loss-soft: #fbecea;
+  --color-console-warn-soft: #fbf3e6;
+
+  --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, "Microsoft YaHei", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Cascadia Mono", ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
 }
 
-html[data-theme="light"] ::-webkit-scrollbar-thumb {
-  background: #c3ccd7;
+/* 深色仍是可选项：同一套角色，换成墨色阶梯，不改变任何布局 */
+html[data-theme="dark"] {
+  --color-tv-bg: #14161b;
+  --color-tv-panel: #1a1d23;
+  --color-tv-raised: #22262e;
+  --color-tv-border: #2a2f38;
+  --color-tv-text: #e7eaef;
+  --color-tv-muted: #98a2b0;
+  --color-tv-faint: #6d7787;
+  --color-tv-up: #3ecf9a;
+  --color-tv-down: #ff7b73;
+  --color-tv-warn: #e0a94a;
+  --color-tv-accent: #7ba1ff;
+  --color-tv-accent-soft: #1e2a45;
+  --color-tv-up-soft: #17312a;
+  --color-tv-down-soft: #37201f;
+  --color-tv-warn-soft: #362b18;
+  --color-tv-hover: #232833;
+
+  /* 复盘页在深色下换成暖石墨，而不是把纸面反相 */
+  --color-console-canvas: #16130f;
+  --color-console-sidebar: #1b1712;
+  --color-console-card: #211c16;
+  --color-console-ink: #f2ede3;
+  --color-console-ink-2: #cfc6b6;
+  --color-console-muted: #a29888;
+  --color-console-faint: #7c7365;
+  --color-console-line: #332c23;
+  --color-console-line-2: #463d31;
+  --color-console-hover: #2a241c;
+  --color-console-selected: #332b21;
+  --color-console-accent: #7ba1ff;
+  --color-console-accent-soft: #1e2638;
+  --color-console-gain: #4cc79a;
+  --color-console-loss: #f07d74;
+  --color-console-warn: #d9a24a;
+  --color-console-gain-soft: #1a2e26;
+  --color-console-loss-soft: #33201d;
+  --color-console-warn-soft: #322818;
 }
 
-html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
-  background: #aeb9c6;
+html[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #3a404c;
+}
+
+html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #4a515e;
 }
 
 /*
- * 控制台页面统一使用暖灰浅色，不跟随图表的深色主题。
- * 这里把旧的 tv-* 变量在局部重映射，设置页等已有组件无需逐个改类名。
+ * 复盘页有自己的暖色底材：浅色是纸，深色是暖石墨。
+ * 局部重映射 tv-*，设置页等沿用旧类名的组件不必逐个改。
  */
 .console-scope {
-  --color-tv-bg: #f5f4f1;
-  --color-tv-panel: #ffffff;
-  --color-tv-border: #e7e5e0;
-  --color-tv-text: #1d1d1f;
-  --color-tv-muted: #6e6e73;
-  --color-tv-up: #12805c;
-  --color-tv-down: #c7443e;
-  --color-tv-accent: #0b6cf0;
-  --color-tv-hover: #efeeea;
+  --color-tv-bg: var(--color-console-canvas);
+  --color-tv-panel: var(--color-console-card);
+  --color-tv-raised: var(--color-console-sidebar);
+  --color-tv-border: var(--color-console-line);
+  --color-tv-text: var(--color-console-ink);
+  --color-tv-muted: var(--color-console-muted);
+  --color-tv-faint: var(--color-console-faint);
+  --color-tv-up: var(--color-console-gain);
+  --color-tv-down: var(--color-console-loss);
+  --color-tv-warn: var(--color-console-warn);
+  --color-tv-accent: var(--color-console-accent);
+  --color-tv-accent-soft: var(--color-console-accent-soft);
+  --color-tv-up-soft: var(--color-console-gain-soft);
+  --color-tv-down-soft: var(--color-console-loss-soft);
+  --color-tv-warn-soft: var(--color-console-warn-soft);
+  --color-tv-hover: var(--color-console-hover);
   color: var(--color-console-ink);
 }
 
 .console-scope ::-webkit-scrollbar-thumb {
-  background: #d2cfc9;
+  background: var(--color-console-line-2);
+}
+
+.console-scope ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-console-faint);
 }
 
 .console-card {
   border: 1px solid var(--color-console-line);
-  border-radius: 12px;
-  background: #ffffff;
+  border-radius: var(--radius-card);
+  background: var(--color-console-card);
+}
+
+/* 读数条：一组同级数字，用发丝线分隔，而不是一叠同宽卡片 */
+.readout {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--color-console-line);
+  border-radius: var(--radius-card);
+  background: var(--color-console-line);
+}
+
+.readout-cell {
+  background: var(--color-console-card);
+  padding: 16px 20px;
 }
 
 .console-nav {
   display: flex;
-  height: 32px;
   width: 100%;
+  height: 34px;
   align-items: center;
-  gap: 9px;
-  border-radius: 7px;
-  padding: 0 8px;
+  gap: 10px;
+  border-radius: var(--radius-control);
+  padding: 0 10px;
   text-align: left;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--color-console-ink-2);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .console-nav:hover {
@@ -110,27 +188,28 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: 7px;
-  padding: 0 12px;
-  font-size: 12px;
+  border-radius: var(--radius-control);
+  padding: 0 14px;
+  font-size: 12.5px;
   font-weight: 500;
   white-space: nowrap;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .console-btn-primary {
-  background: var(--color-console-accent);
-  color: #ffffff;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.14);
+  background: var(--color-console-ink);
+  color: var(--color-console-card);
 }
 
 .console-btn-primary:hover {
-  background: #075dcc;
+  opacity: 0.9;
 }
 
 .console-btn-secondary {
   border: 1px solid var(--color-console-line);
-  background: #ffffff;
+  background: var(--color-console-card);
   color: var(--color-console-ink);
 }
 
@@ -140,16 +219,18 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
 
 .console-chip {
   display: inline-flex;
-  height: 24px;
+  height: 28px;
   align-items: center;
   gap: 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--color-console-line);
-  background: #ffffff;
+  background: var(--color-console-card);
   padding: 0 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-console-muted);
-  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  transition: color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .console-chip:hover {
@@ -160,40 +241,52 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
 .console-chip-active {
   border-color: var(--color-console-ink);
   background: var(--color-console-ink);
-  color: #ffffff;
+  color: var(--color-console-card);
 }
 
 .console-chip-active:hover {
   border-color: var(--color-console-ink);
-  color: #ffffff;
+  color: var(--color-console-card);
 }
 
 .console-input {
-  height: 30px;
-  border-radius: 7px;
+  height: 32px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--color-console-line);
-  background: #ffffff;
-  padding: 0 9px;
-  font-size: 12px;
+  background: var(--color-console-card);
+  padding: 0 10px;
+  font-size: 12.5px;
   color: var(--color-console-ink);
   outline: none;
+  transition: border-color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .console-input:focus {
-  border-color: color-mix(in srgb, var(--color-console-accent) 55%, transparent);
-  box-shadow: 0 0 0 3px rgba(11, 108, 240, 0.1);
+  border-color: var(--color-console-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-console-accent) 14%, transparent);
 }
 
+/* 分组标签：句首大写，不做宽字距全大写 */
 .console-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-console-faint);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-console-muted);
 }
 
 .num {
   font-variant-numeric: tabular-nums;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* 键盘焦点：一个环，一种颜色 */
+:where(button, a, input, select, textarea, summary):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-tv-accent) 55%, transparent);
+  outline-offset: 2px;
 }
 
 html,
@@ -206,7 +299,7 @@ body {
   margin: 0;
   background: var(--color-tv-bg);
   color: var(--color-tv-text);
-  font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+  font-family: var(--font-sans);
   font-size: 12px;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
@@ -217,22 +310,40 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #363a45;
-  border-radius: 4px;
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background-clip: content-box;
+  background-color: #c3cbd6;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4a4e59;
+  background-color: #aab4c1;
 }
 
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+/* 图表顶部的自绘小块：只做表面和发丝线 */
+.chart-chip {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--color-tv-border);
+  border-radius: 6px;
+  background: var(--color-tv-panel);
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-tv-text);
 }

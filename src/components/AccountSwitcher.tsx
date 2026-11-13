@@ -86,33 +86,35 @@ export function AccountSwitcher() {
             : `${active.label} · ${active.login || '未指定登录号'}`
         }
         className={clsx(
-          'flex h-7 items-center gap-1.5 rounded-md border border-tv-border bg-tv-bg px-2 text-[10.5px] text-tv-text transition-colors',
+          'flex h-7 items-center gap-2 rounded-lg border border-tv-border bg-tv-raised px-2 text-[12px] text-tv-text transition-colors',
           busy ? 'cursor-wait opacity-70' : 'hover:bg-tv-hover',
         )}
       >
         <span
           className={clsx(
             'h-1.5 w-1.5 rounded-full',
-            connected && active.connected ? 'bg-tv-up' : 'bg-tv-muted/50',
+            connected && active.connected ? 'bg-tv-up' : 'bg-tv-faint',
           )}
         />
-        <span className="max-w-[96px] truncate">{active.label}</span>
-        <span className="font-mono text-[9.5px] text-tv-muted">
-          {active.login || '—'}
-        </span>
+        <span className="max-w-[104px] truncate">{active.label}</span>
+        <span className="num font-mono text-[11px] text-tv-muted">{active.login || '—'}</span>
         {busy ? (
-          <Loader2 size={11} className="animate-spin text-tv-muted" />
+          <Loader2 size={14} className="animate-spin text-tv-muted" />
         ) : (
           <ChevronDown
-            size={11}
-            className={clsx('text-tv-muted transition-transform', open && 'rotate-180')}
+            size={14}
+            strokeWidth={1.5}
+            className={clsx(
+              'text-tv-muted transition-transform duration-150',
+              open && 'rotate-180',
+            )}
           />
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 top-8 z-50 w-64 overflow-hidden rounded-lg border border-tv-border bg-tv-panel shadow-2xl">
-          <div className="border-b border-tv-border px-3 py-2 text-[9.5px] text-tv-muted">
+        <div className="absolute right-0 top-9 z-50 w-72 overflow-hidden rounded-xl border border-tv-border bg-tv-panel shadow-[0_12px_32px_rgba(20,30,45,0.12)]">
+          <div className="border-b border-tv-border px-3 py-2.5 text-[11px] text-tv-muted">
             切换 MT5 账户
           </div>
           <div className="max-h-72 overflow-auto p-1">
@@ -125,30 +127,30 @@ export function AccountSwitcher() {
                   onClick={() => void switchTo(item)}
                   disabled={busy}
                   className={clsx(
-                    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
-                    current ? 'bg-tv-bg' : 'hover:bg-tv-hover',
+                    'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors',
+                    current ? 'bg-tv-raised' : 'hover:bg-tv-hover',
                     busy && 'cursor-wait',
                   )}
                 >
                   <span
                     className={clsx(
                       'h-1.5 w-1.5 shrink-0 rounded-full',
-                      item.active && item.connected ? 'bg-tv-up' : 'bg-tv-muted/40',
+                      item.active && item.connected ? 'bg-tv-up' : 'bg-tv-faint',
                     )}
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[11px] text-tv-text">{item.label}</span>
-                    <span className="block truncate font-mono text-[9.5px] text-tv-muted">
+                    <span className="block truncate text-[12px] text-tv-text">{item.label}</span>
+                    <span className="block truncate font-mono text-[11px] text-tv-muted">
                       {item.login || '未指定登录号'}
                       {item.server ? ` · ${item.server}` : ''}
                     </span>
                   </span>
-                  {current && <Check size={12} className="shrink-0 text-tv-accent" />}
+                  {current && <Check size={14} strokeWidth={1.5} className="shrink-0 text-tv-accent" />}
                 </button>
               );
             })}
           </div>
-          <div className="border-t border-tv-border px-3 py-2 text-[9.5px] leading-relaxed text-tv-muted">
+          <div className="border-t border-tv-border px-3 py-2.5 text-[11px] leading-relaxed text-tv-muted">
             在「设置 → MT5 账户」里添加、修改或删除账户；保存后无需重启网关。
           </div>
         </div>

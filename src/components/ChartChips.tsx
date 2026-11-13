@@ -478,7 +478,7 @@ export function ChartChips({
           >
             {band.label && (
               <span
-                className="absolute left-2 top-1 whitespace-nowrap font-mono text-[9px]"
+                className="absolute left-2 top-1 whitespace-nowrap font-mono text-[11px]"
                 style={{ color: band.labelColor ?? 'rgba(209,212,220,0.75)' }}
               >
                 {band.label}
@@ -490,7 +490,7 @@ export function ChartChips({
                 className="absolute inset-x-0 border-t border-white/10"
                 style={{ top: mark.y - pos.top }}
               >
-                <span className="absolute left-2 -top-[7px] font-mono text-[8px] text-tv-muted">
+                <span className="absolute left-2 -top-[9px] font-mono text-[11px] text-tv-muted">
                   {mark.text}
                 </span>
               </div>
@@ -508,7 +508,7 @@ export function ChartChips({
           <div
             key={chip.key}
             data-chip={chip.key}
-            className="pointer-events-auto absolute flex h-[18px] -translate-y-1/2 select-none items-center rounded-sm pl-1.5 font-mono text-[10px] font-semibold text-white shadow-md"
+            className="pointer-events-auto absolute flex h-5 -translate-y-1/2 select-none items-center rounded pl-1.5 font-mono text-[11px] font-medium text-white shadow-sm"
             style={{
               top,
               right,

@@ -189,12 +189,12 @@ export function SettingsPanel() {
   return (
     <div
       data-page="settings"
-      className="console-scope flex h-full min-h-0 bg-console-canvas text-tv-text"
+      className="console-scope flex h-full min-h-0 bg-console-canvas text-console-ink"
     >
-      <aside className="flex w-[190px] shrink-0 flex-col border-r border-tv-border px-3 py-5">
-        <div className="px-2">
-          <div className="text-[13px] font-semibold">设置</div>
-          <div className="mt-0.5 text-[10px] text-tv-muted">MyTrade · MT5</div>
+      <aside className="flex w-[208px] shrink-0 flex-col border-r border-console-line bg-console-sidebar px-3 py-5">
+        <div className="px-2.5">
+          <div className="text-[13px] font-semibold text-console-ink">设置</div>
+          <div className="mt-0.5 text-[11px] text-console-muted">MyTrade · MT5</div>
         </div>
 
         <nav className="mt-5 space-y-0.5">
@@ -205,39 +205,43 @@ export function SettingsPanel() {
                 key={item.id}
                 onClick={() => setSection(item.id)}
                 className={clsx(
-                  'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors',
+                  'flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left transition-colors',
                   section === item.id
-                    ? 'bg-tv-panel font-medium text-tv-text shadow-sm'
-                    : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+                    ? 'bg-console-selected font-medium text-console-ink'
+                    : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
                 )}
               >
-                <Icon size={14} />
-                <span className="flex-1 text-[11px]">{item.label}</span>
-                {section === item.id && <span className="h-1 w-1 rounded-full bg-tv-accent" />}
+                <Icon size={16} strokeWidth={1.5} className="shrink-0" />
+                <span className="flex-1 truncate text-[13px]">{item.label}</span>
+                {section === item.id && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-console-accent" />
+                )}
               </button>
             );
           })}
         </nav>
 
         <div className="mt-auto space-y-2 px-1">
-          <div className="rounded-lg border border-tv-border bg-tv-panel p-2.5 text-[10px] leading-relaxed text-tv-muted">
+          <div className="rounded-lg border border-console-line bg-console-card px-3 py-2.5 text-[11px] leading-relaxed text-console-muted">
             设置保存在本机，不会上传。
           </div>
           <button
             onClick={() => setPage('overview')}
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-tv-border bg-tv-panel text-[11px] text-tv-text hover:bg-tv-hover"
+            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-console-line bg-console-card text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
           >
-            <X size={12} />
+            <X size={14} strokeWidth={1.5} />
             返回概览
           </button>
         </div>
       </aside>
 
       <main className="min-w-0 flex-1 overflow-auto">
-        <div className="mx-auto max-w-[780px] px-8 py-7">
-          <header className="mb-5">
-            <h1 className="text-[22px] font-semibold tracking-tight">{active.label}</h1>
-            <p className="mt-1 text-[11px] text-tv-muted">{active.hint}</p>
+        <div className="mx-auto max-w-[820px] px-8 py-8">
+          <header className="mb-6">
+            <h1 className="text-[24px] font-medium tracking-[-0.01em] text-console-ink">
+              {active.label}
+            </h1>
+            <p className="mt-1.5 text-[13px] text-console-muted">{active.hint}</p>
           </header>
 
           {section === 'appearance' && <AppearanceSection />}
@@ -266,13 +270,13 @@ function Card({
   footer?: ReactNode;
 }) {
   return (
-    <section className="mb-4 rounded-xl border border-tv-border bg-tv-panel p-5 shadow-sm">
-      <div className="text-[13px] font-semibold">{title}</div>
+    <section className="mb-4 rounded-xl border border-console-line bg-console-card p-5">
+      <div className="text-[13px] font-semibold text-console-ink">{title}</div>
       {description && (
-        <p className="mt-1 text-[11px] leading-relaxed text-tv-muted">{description}</p>
+        <p className="mt-1.5 text-[12px] leading-relaxed text-console-muted">{description}</p>
       )}
-      <div className="mt-4">{children}</div>
-      {footer && <div className="mt-4 border-t border-tv-border/60 pt-3">{footer}</div>}
+      <div className="mt-5">{children}</div>
+      {footer && <div className="mt-5 border-t border-console-line pt-4">{footer}</div>}
     </section>
   );
 }
@@ -287,10 +291,10 @@ function Row({
   children: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-6 border-t border-tv-border/50 py-3 first:border-t-0 first:pt-0 last:pb-0">
+    <div className="flex items-center justify-between gap-6 border-t border-console-line/70 py-3.5 first:border-t-0 first:pt-0 last:pb-0">
       <div className="min-w-0">
-        <div className="text-[11px] text-tv-text">{label}</div>
-        {hint && <div className="mt-0.5 text-[10px] leading-relaxed text-tv-muted">{hint}</div>}
+        <div className="text-[12px] text-console-ink">{label}</div>
+        {hint && <div className="mt-1 text-[11px] leading-relaxed text-console-muted">{hint}</div>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -307,16 +311,16 @@ function Segmented<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="flex rounded-lg border border-tv-border bg-tv-bg p-0.5">
+    <div className="flex rounded-lg border border-console-line bg-console-canvas p-0.5">
       {options.map((item) => (
         <button
           key={item.value}
           onClick={() => onChange(item.value)}
           className={clsx(
-            'h-6 rounded-md px-2.5 text-[10px] transition-colors',
+            'h-7 rounded-md px-3 text-[12px] transition-colors',
             value === item.value
-              ? 'bg-tv-panel text-tv-text shadow-sm'
-              : 'text-tv-muted hover:text-tv-text',
+              ? 'bg-console-card text-console-ink shadow-[0_1px_2px_rgba(33,28,22,0.06)]'
+              : 'text-console-muted hover:text-console-ink',
           )}
         >
           {item.label}
@@ -339,14 +343,14 @@ function Toggle({
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={clsx(
-        'relative h-5 w-9 rounded-full transition-colors',
-        checked ? 'bg-tv-accent' : 'bg-tv-border',
+        'relative h-[22px] w-10 rounded-full transition-colors duration-150',
+        checked ? 'bg-console-ink' : 'bg-console-line-2',
       )}
     >
       <span
         className={clsx(
-          'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
-          checked ? 'left-[18px]' : 'left-0.5',
+          'absolute left-0.5 top-0.5 h-[18px] w-[18px] rounded-full bg-console-card shadow-sm transition-transform duration-150',
+          checked && 'translate-x-[18px]',
         )}
       />
     </button>
@@ -357,11 +361,11 @@ function StatusPill({ ok, label }: { ok: boolean; label: string }) {
   return (
     <span
       className={clsx(
-        'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px]',
-        ok ? 'bg-tv-up/10 text-tv-up' : 'bg-tv-down/10 text-tv-down',
+        'inline-flex items-center gap-1.5 text-[12px]',
+        ok ? 'text-console-gain' : 'text-console-loss',
       )}
     >
-      <span className={clsx('h-1.5 w-1.5 rounded-full', ok ? 'bg-tv-up' : 'bg-tv-down')} />
+      <span className={clsx('h-1.5 w-1.5 rounded-full', ok ? 'bg-console-gain' : 'bg-console-loss')} />
       {label}
     </span>
   );
@@ -369,7 +373,7 @@ function StatusPill({ ok, label }: { ok: boolean; label: string }) {
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-tv-border bg-tv-bg px-1 font-mono text-[10px] text-tv-text">
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-console-line-2 bg-console-card px-1 font-mono text-[11px] text-console-ink-2">
       {children}
     </kbd>
   );
@@ -381,7 +385,10 @@ function AppearanceSection() {
 
   return (
     <>
-      <Card title="主题" description="设置保存在本机，重启后保留。">
+      <Card
+        title="主题"
+        description="交易台与复盘页共用一套字体、间距和语义色，只有底材不同。设置保存在本机，重启后保留。"
+      >
         <div className="grid grid-cols-2 gap-3">
           {(['light', 'dark'] as const).map((value) => (
             <button
@@ -390,42 +397,53 @@ function AppearanceSection() {
               className={clsx(
                 'rounded-xl border p-3 text-left transition-colors',
                 theme === value
-                  ? 'border-tv-accent ring-1 ring-tv-accent'
-                  : 'border-tv-border hover:border-tv-muted/50',
+                  ? 'border-console-accent ring-1 ring-console-accent'
+                  : 'border-console-line hover:border-console-line-2',
               )}
             >
               <div
                 className={clsx(
-                  'mb-2 h-16 rounded-lg border p-2',
+                  'mb-2.5 flex h-16 gap-1.5 rounded-lg border p-2',
                   value === 'light'
-                    ? 'border-[#e7e5df] bg-[#f6f6f3]'
-                    : 'border-[#2a2e39] bg-[#131722]',
+                    ? 'border-[#e3e8ee] bg-[#eef1f5]'
+                    : 'border-[#2a2f38] bg-[#14161b]',
                 )}
               >
                 <div
                   className={clsx(
-                    'h-2 w-12 rounded',
-                    value === 'light' ? 'bg-white' : 'bg-[#1e222d]',
+                    'w-6 rounded',
+                    value === 'light' ? 'bg-[#dde4ec]' : 'bg-[#1f232a]',
                   )}
                 />
-                <div
-                  className={clsx(
-                    'mt-1.5 h-1.5 w-20 rounded',
-                    value === 'light' ? 'bg-[#d7dde5]' : 'bg-[#2a2e39]',
-                  )}
-                />
-                <div
-                  className={clsx(
-                    'mt-1 h-1.5 w-14 rounded',
-                    value === 'light' ? 'bg-[#d7dde5]' : 'bg-[#2a2e39]',
-                  )}
-                />
+                <div className="flex-1 space-y-1.5">
+                  <div
+                    className={clsx(
+                      'h-2.5 rounded',
+                      value === 'light' ? 'bg-white' : 'bg-[#22262e]',
+                    )}
+                  />
+                  <div className="flex gap-1">
+                    <div
+                      className={clsx(
+                        'h-1.5 flex-1 rounded',
+                        value === 'light' ? 'bg-[#c9d3df]' : 'bg-[#39414d]',
+                      )}
+                    />
+                    <div className="h-1.5 w-4 rounded bg-[#1f5fd6]" />
+                  </div>
+                  <div
+                    className={clsx(
+                      'h-1.5 w-12 rounded',
+                      value === 'light' ? 'bg-[#d7dde5]' : 'bg-[#2a2f38]',
+                    )}
+                  />
+                </div>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium">
+                <span className="text-[12px] font-medium text-console-ink">
                   {value === 'light' ? '浅色' : '深色'}
                 </span>
-                {theme === value && <Check size={12} className="text-tv-accent" />}
+                {theme === value && <Check size={13} strokeWidth={1.5} className="text-console-accent" />}
               </div>
             </button>
           ))}
@@ -433,13 +451,13 @@ function AppearanceSection() {
       </Card>
 
       <Card
-        title="界面说明"
-        description="这一步先把设置从顶部工具栏和各个弹窗里收拢出来；日志、统计和复盘页会在后续继续拆分。"
+        title="双介质界面"
+        description="实时台用冷灰底和白色面板，复盘页用暖白纸面；字号、间距、语义色和标记保持一致。"
       >
-        <ul className="space-y-1.5 text-[11px] leading-relaxed text-tv-muted">
-          <li>· 顶部保留布局、账户、连接状态和急停等高频操作。</li>
-          <li>· 主题、风控、告警偏好、更新统一放在设置页。</li>
-          <li>· 画线模板和收藏仍在图表上操作，位置不变。</li>
+        <ul className="space-y-2 text-[12px] leading-relaxed text-console-muted">
+          <li>· 交易台：图表、下单、持仓与挂单，数字用等宽字体对齐。</li>
+          <li>· 复盘区：概览、日志、报表、执行、审计与设置，读起来像纸面记录。</li>
+          <li>· 深色主题只作用于实时台，复盘页始终是暖纸；语义色在两种底材上一致。</li>
         </ul>
       </Card>
     </>
@@ -458,10 +476,10 @@ function ChartSection() {
         title="图表布局"
         description="单图到 16 图都可选；多图时可让品种、周期、十字线和可视区间在所有图表间同步。"
       >
-        <div className="rounded-lg border border-tv-border bg-tv-bg/50 p-2">
+        <div className="rounded-lg border border-console-line bg-console-canvas/60 p-3">
           <LayoutGallery value={layout} onChange={setLayout} />
-          <div className="mt-2 border-t border-tv-border pt-2">
-            <div className="mb-1 text-[10px] font-medium text-tv-text">同步到所有图表</div>
+          <div className="mt-3 border-t border-console-line pt-3">
+            <div className="mb-2 text-[11px] font-medium text-console-muted">同步到所有图表</div>
             <SyncToggles />
           </div>
         </div>
@@ -469,7 +487,7 @@ function ChartSection() {
           <select
             value={resolution}
             onChange={(event) => setResolution(event.target.value)}
-            className="h-7 rounded-lg border border-tv-border bg-tv-bg px-2 text-[11px] text-tv-text outline-none focus:border-tv-accent"
+            className="h-8 rounded-lg border border-console-line bg-console-card px-2 text-[12px] text-console-ink outline-none focus:border-console-accent"
           >
             {FRAMES.map(([value, label]) => (
               <option key={value} value={value}>
@@ -484,7 +502,7 @@ function ChartSection() {
         title="画线工具"
         description="画线模板面板在图表左下角；收藏工具在左侧工具栏右键或展开工具组里设置。"
       >
-        <div className="text-[11px] leading-relaxed text-tv-muted">
+        <div className="text-[12px] leading-relaxed text-console-muted">
           这些内容仍保存在图表本地存储，不会上传。
         </div>
       </Card>
@@ -529,7 +547,7 @@ function RiskSection() {
   if (!config || !form) {
     return (
       <Card title="交易与风控" description="连接网关后可以在这里查看和修改风控参数。">
-        <div className="text-[11px] text-tv-muted">等待网关连接…</div>
+        <div className="text-[12px] text-console-muted">等待网关连接…</div>
       </Card>
     );
   }
@@ -661,11 +679,11 @@ function RiskSection() {
         }
         footer={
           <div className="flex items-center justify-between gap-3">
-            <div className="text-[10px] text-tv-muted">
+            <div className="text-[11px] text-console-muted">
               {error ? (
-                <span className="text-tv-down">{error}</span>
+                <span className="text-console-loss">{error}</span>
               ) : scope === 'account' && !canEditAccount ? (
-                <span className="text-tv-down">当前网关版本不支持账户级风控</span>
+                <span className="text-console-loss">当前网关版本不支持账户级风控</span>
               ) : dirty ? (
                 '有未保存的修改'
               ) : scope === 'account' && overrideKeys.length > 0 ? (
@@ -678,7 +696,7 @@ function RiskSection() {
               {scope === 'account' && overrideKeys.length > 0 && (
                 <button
                   onClick={resetAllToGlobal}
-                  className="h-7 rounded-md bg-tv-bg px-2.5 text-[10px] text-tv-muted hover:text-tv-text"
+                  className="h-8 rounded-lg px-2.5 text-[12px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
                 >
                   全部跟随全局
                 </button>
@@ -689,7 +707,7 @@ function RiskSection() {
                     setForm(base);
                     setCleared([]);
                   }}
-                  className="h-7 rounded-md bg-tv-bg px-2.5 text-[10px] text-tv-muted hover:text-tv-text"
+                  className="h-8 rounded-lg px-2.5 text-[12px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
                 >
                   撤销
                 </button>
@@ -698,13 +716,13 @@ function RiskSection() {
                 onClick={() => setConfirm(true)}
                 disabled={!dirty || !!error || saving || (scope === 'account' && !canEditAccount)}
                 className={clsx(
-                  'flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[10px] font-semibold transition-colors',
+                  'flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-colors',
                   dirty && !error && (scope !== 'account' || canEditAccount)
-                    ? 'bg-tv-accent text-white hover:opacity-90'
-                    : 'cursor-not-allowed bg-tv-bg text-tv-muted',
+                    ? 'bg-console-ink text-console-card hover:opacity-90'
+                    : 'cursor-not-allowed bg-console-hover text-console-faint',
                 )}
               >
-                <Save size={11} />
+                <Save size={14} strokeWidth={1.5} />
                 保存风控
               </button>
             </div>
@@ -733,21 +751,21 @@ function RiskSection() {
                 value={form[field.key]}
                 disabled={scope === 'account' && !canEditAccount}
                 onChange={(event) => setValue(field.key, Number(event.target.value))}
-                className="h-7 w-24 rounded-md border border-tv-border bg-tv-bg px-2 text-right font-mono text-[11px] text-tv-text outline-none focus:border-tv-accent disabled:opacity-50"
+                className="h-8 w-24 rounded-lg border border-console-line bg-console-canvas px-2 text-right font-mono text-[12px] text-console-ink outline-none focus:border-console-accent disabled:opacity-50"
               />
-              {field.suffix && <span className="text-[10px] text-tv-muted">{field.suffix}</span>}
+              {field.suffix && <span className="text-[11px] text-console-muted">{field.suffix}</span>}
               {scope === 'account' &&
                 canEditAccount &&
                 (overrideKeys.includes(field.key) && !cleared.includes(field.key) ? (
                   <button
                     onClick={() => useGlobal(field.key)}
                     title={`恢复跟随全局：${config[field.key]}${field.suffix ?? ''}`}
-                    className="h-7 rounded-md bg-tv-bg px-2 text-[10px] text-tv-muted hover:text-tv-text"
+                    className="h-8 rounded-lg px-2 text-[11px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
                   >
                     用全局
                   </button>
                 ) : (
-                  <span className="text-[9px] text-tv-muted">
+                  <span className="text-[11px] text-console-faint">
                     {cleared.includes(field.key) ? '恢复全局' : '跟随全局'}
                   </span>
                 ))}
@@ -755,8 +773,8 @@ function RiskSection() {
           </Row>
         ))}
 
-        <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] leading-relaxed text-tv-text">
-          <Info size={12} className="mt-0.5 shrink-0 text-amber-500" />
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-console-warn/30 bg-console-warn-soft px-3 py-2.5 text-[11px] leading-relaxed text-console-ink-2">
+          <Info size={14} strokeWidth={1.5} className="mt-0.5 shrink-0 text-console-warn" />
           <span>
             当前生效：单笔上限 {base.max_lot} 手、单笔风险 {base.max_risk_pct}%。这些是 MyTrade
             的风控值，不是券商限制；自动手数会被截到上限，手动超过会被网关拒绝。
@@ -769,7 +787,7 @@ function RiskSection() {
         description="交易模式由顶部按钮切换；实盘开关打开后，实盘/美分账户才能从只读切到实盘交易。"
       >
         <Row label="当前模式">
-          <span className="text-[11px]">
+          <span className="text-[12px] text-console-ink">
             {health?.tradeMode === 'readonly'
               ? '只读'
               : health?.tradeMode === 'demo'
@@ -780,7 +798,10 @@ function RiskSection() {
         <Row label="实盘开关" hint="只影响实盘账户，模拟账户仍走「模拟可交易」；打开后下单使用真实资金。">
           <div className="flex items-center gap-2">
             <span
-              className={clsx('text-[11px]', config.allow_live ? 'text-tv-down' : 'text-tv-muted')}
+              className={clsx(
+                'text-[12px]',
+                config.allow_live ? 'text-console-loss' : 'text-console-muted',
+              )}
             >
               {config.allow_live ? '已允许' : '关闭'}
             </span>
@@ -788,10 +809,10 @@ function RiskSection() {
               onClick={() => (config.allow_live ? void setAllowLive(false) : setLiveConfirm(true))}
               disabled={liveSaving}
               className={clsx(
-                'h-7 rounded-md px-2.5 text-[10px] font-semibold transition-colors',
+                'h-8 rounded-lg border px-3 text-[12px] font-medium transition-colors',
                 config.allow_live
-                  ? 'bg-tv-bg text-tv-text hover:bg-tv-border'
-                  : 'bg-tv-down/15 text-tv-down hover:bg-tv-down hover:text-white',
+                  ? 'border-console-line bg-console-card text-console-ink-2 hover:bg-console-hover'
+                  : 'border-console-loss/35 text-console-loss hover:bg-console-loss-soft',
                 liveSaving && 'cursor-wait opacity-50',
               )}
             >
@@ -800,7 +821,7 @@ function RiskSection() {
           </div>
         </Row>
         <Row label="告警通道">
-          <span className="text-[11px] text-tv-muted">
+          <span className="text-[12px] text-console-muted">
             {config.alert_channel_names?.length
               ? config.alert_channel_names.join('、')
               : '未配置第三方通道'}
@@ -809,32 +830,32 @@ function RiskSection() {
       </Card>
 
       {confirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-[420px] max-w-full rounded-xl border border-tv-border bg-tv-panel p-5 shadow-2xl">
-            <div className="text-[13px] font-semibold">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-[420px] max-w-full rounded-xl border border-console-line bg-console-card p-5 shadow-[0_24px_60px_-12px_rgba(33,28,22,0.28)]">
+            <div className="text-[14px] font-medium text-console-ink">
               {scope === 'account' ? `确认修改「${accountLabel}」的风控？` : '确认修改全局风控默认值？'}
             </div>
-            <div className="mt-1.5 text-[11px] leading-relaxed text-tv-muted">
+            <div className="mt-1.5 text-[12px] leading-relaxed text-console-muted">
               {scope === 'account'
                 ? '保存后只对当前账户立即生效；标为「恢复跟随全局」的项会删除账户覆盖。'
                 : '保存后立即生效，所有未单独覆盖的账户都会使用新的默认值。'}
             </div>
-            <div className="mt-3 max-h-40 space-y-1 overflow-auto rounded-lg bg-tv-bg p-3 text-[10px]">
+            <div className="mt-4 max-h-40 space-y-1.5 overflow-auto rounded-lg border border-console-line bg-console-canvas p-3 text-[11px] leading-relaxed text-console-ink-2">
               {changes.map((line) => (
                 <div key={line}>{line}</div>
               ))}
             </div>
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-5 flex justify-end gap-2">
               <button
                 onClick={() => setConfirm(false)}
-                className="h-7 rounded-md bg-tv-bg px-3 text-[10px] text-tv-muted hover:text-tv-text"
+                className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
               >
                 取消
               </button>
               <button
                 onClick={() => void save()}
                 disabled={saving}
-                className="h-7 rounded-md bg-tv-accent px-3 text-[10px] font-semibold text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
+                className="h-8 rounded-lg bg-console-ink px-3 text-[12px] font-medium text-console-card transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
               >
                 {saving ? '保存中…' : '确认保存'}
               </button>
@@ -844,17 +865,17 @@ function RiskSection() {
       )}
 
       {liveConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-[420px] max-w-full rounded-xl border border-tv-border bg-tv-panel p-5 shadow-2xl">
-            <div className="text-[13px] font-semibold">打开实盘交易开关？</div>
-            <div className="mt-1.5 text-[11px] leading-relaxed text-tv-muted">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-[420px] max-w-full rounded-xl border border-console-line bg-console-card p-5 shadow-[0_24px_60px_-12px_rgba(33,28,22,0.28)]">
+            <div className="text-[14px] font-medium text-console-ink">打开实盘交易开关？</div>
+            <div className="mt-1.5 text-[12px] leading-relaxed text-console-muted">
               打开后，顶部可以把实盘（含美分）账户从「只读」切到「实盘交易」，下单将使用真实资金。
               风控上限、日亏限制和急停仍然生效。
             </div>
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-5 flex justify-end gap-2">
               <button
                 onClick={() => setLiveConfirm(false)}
-                className="h-7 rounded-md bg-tv-bg px-3 text-[10px] text-tv-muted hover:text-tv-text"
+                className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
               >
                 取消
               </button>
@@ -863,7 +884,7 @@ function RiskSection() {
                   setLiveConfirm(false);
                   void setAllowLive(true);
                 }}
-                className="h-7 rounded-md bg-tv-down px-3 text-[10px] font-semibold text-white hover:opacity-90"
+                className="h-8 rounded-lg bg-console-loss px-3 text-[12px] font-medium text-console-card transition-opacity hover:opacity-90"
               >
                 确认打开
               </button>
@@ -899,7 +920,7 @@ function AlertsSection() {
         title="第三方通道"
         description="Webhook / Discord / Telegram / 企业微信在 gateway/config.json 的 alert_channels 里配置，密钥不会下发到前端。"
       >
-        <div className="text-[11px] text-tv-muted">
+        <div className="text-[12px] text-console-muted">
           {config?.alert_channel_names?.length
             ? `已配置：${config.alert_channel_names.join('、')}`
             : '未配置第三方通道'}
@@ -917,23 +938,23 @@ function UpdatesSection() {
     <>
       <Card title="版本" description="桌面版通过 GitHub Releases 检查更新。">
         <Row label="网关版本">
-          <span className="font-mono text-[11px]">v{health?.version ?? '—'}</span>
+          <span className="font-mono text-[12px] text-console-ink-2">v{health?.version ?? '—'}</span>
         </Row>
         <Row label="自动检查" hint="桌面版启动约 6 秒后静默检查一次，失败不会打扰。">
-          <span className="text-[10px] text-tv-muted">已启用</span>
+          <span className="text-[12px] text-console-muted">已启用</span>
         </Row>
         <Row label="手动检查">
           <button
             onClick={() => void checkForUpdates(true)}
             disabled={!available}
             className={clsx(
-              'flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[10px]',
+              'flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[12px] transition-colors',
               available
-                ? 'bg-tv-bg text-tv-text hover:bg-tv-border'
-                : 'cursor-not-allowed bg-tv-bg text-tv-muted',
+                ? 'border-console-line bg-console-card text-console-ink-2 hover:bg-console-hover'
+                : 'cursor-not-allowed border-console-line bg-console-canvas text-console-faint',
             )}
           >
-            <RefreshCw size={11} />
+            <RefreshCw size={14} strokeWidth={1.5} />
             检查更新
           </button>
         </Row>
@@ -944,7 +965,7 @@ function UpdatesSection() {
           title="开发模式"
           description="当前在浏览器里运行，更新功能只在 Tauri 桌面版可用。"
         >
-          <div className="text-[11px] text-tv-muted">打包后的桌面版会自动显示更新提示。</div>
+          <div className="text-[12px] text-console-muted">打包后的桌面版会自动显示更新提示。</div>
         </Card>
       )}
     </>
@@ -963,12 +984,12 @@ function AboutSection() {
           <StatusPill ok={!!health?.connected} label={health?.connected ? '已连接' : '未连接'} />
         </Row>
         <Row label="终端">
-          <span className="text-[11px] text-tv-muted">
+          <span className="text-[12px] text-console-muted">
             {terminal ? `${terminal.company} · ${terminal.name} (build ${terminal.build})` : '未连接'}
           </span>
         </Row>
         <Row label="账户类型">
-          <span className="text-[11px]">
+          <span className="text-[12px] text-console-ink">
             {account?.accountType === 'real'
               ? '实盘'
               : account?.accountType === 'demo'
@@ -977,7 +998,7 @@ function AboutSection() {
           </span>
         </Row>
         <Row label="交易模式">
-          <span className="text-[11px]">
+          <span className="text-[12px] text-console-ink">
             {health?.tradeMode === 'readonly'
               ? '只读'
               : health?.tradeMode === 'demo'
@@ -989,31 +1010,31 @@ function AboutSection() {
 
       <Card title="本机数据" description="以下内容只保存在本机，不会上传。">
         <Row label="交易日志与截图">
-          <span className="font-mono text-[10px] text-tv-muted">gateway/data（截图按账户号分目录）</span>
+          <span className="font-mono text-[11px] text-console-muted">gateway/data（截图按账户号分目录）</span>
         </Row>
         <Row label="账户凭据">
-          <span className="font-mono text-[10px] text-tv-muted">
+          <span className="font-mono text-[11px] text-console-muted">
             gateway/data/credentials.json（DPAPI）
           </span>
         </Row>
         <Row label="审计日志">
-          <span className="font-mono text-[10px] text-tv-muted">gateway/audit</span>
+          <span className="font-mono text-[11px] text-console-muted">gateway/audit</span>
         </Row>
         <Row label="风控配置">
-          <span className="font-mono text-[10px] text-tv-muted">gateway/config.json</span>
+          <span className="font-mono text-[11px] text-console-muted">gateway/config.json</span>
         </Row>
       </Card>
 
       <Card title="快捷键">
-        <div className="grid grid-cols-[64px_1fr] gap-x-3 gap-y-2 text-[11px]">
+        <div className="grid grid-cols-[64px_1fr] gap-x-3 gap-y-2.5 text-[12px]">
           <Kbd>B</Kbd>
-          <span className="text-tv-muted">建立买入市价草稿</span>
+          <span className="text-console-muted">建立买入市价草稿</span>
           <Kbd>S</Kbd>
-          <span className="text-tv-muted">建立卖出市价草稿</span>
+          <span className="text-console-muted">建立卖出市价草稿</span>
           <Kbd>Esc</Kbd>
-          <span className="text-tv-muted">关闭弹窗 / 清除划线草稿</span>
+          <span className="text-console-muted">关闭弹窗 / 清除划线草稿</span>
           <Kbd>Shift</Kbd>
-          <span className="text-tv-muted">拖动价格时吸附整数点位</span>
+          <span className="text-console-muted">拖动价格时吸附整数点位</span>
         </div>
       </Card>
     </>
@@ -1066,7 +1087,7 @@ function PineSection() {
         title="Pine 脚本（实验）"
         description="在本地运行原生 Pine v5/v6 indicator 脚本，行情只来自当前 MT5 网关。"
       >
-        <div className="space-y-2 text-[11px] leading-relaxed text-tv-muted">
+        <div className="space-y-2 text-[12px] leading-relaxed text-console-muted">
           <p>
             支持 plot / hline 折线、ta.*、input.* 和常用逻辑；暂不支持 plotshape、bgcolor、
             绘图对象（box/line/label）、strategy 和外部数据源，计算结果也不保证与
@@ -1079,41 +1100,43 @@ function PineSection() {
           onChange={(event) => setSource(event.target.value)}
           spellCheck={false}
           placeholder={'//@version=6\nindicator("EMA 示例", overlay=true)\nlen = input.int(20, "长度")\nplot(ta.ema(close, len), "EMA", color=color.orange)'}
-          className="mt-3 h-52 w-full resize-y rounded-lg border border-tv-border bg-tv-bg p-3 font-mono text-[11px] leading-relaxed text-tv-text outline-none placeholder:text-tv-muted/60 focus:border-tv-accent"
+          className="mt-4 h-56 w-full resize-y rounded-lg border border-console-line bg-console-canvas p-3 font-mono text-[12px] leading-relaxed text-console-ink outline-none placeholder:text-console-faint focus:border-console-accent"
         />
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             onClick={() => void save()}
             disabled={busy || !source.trim()}
-            className="h-7 rounded-md bg-tv-accent px-3 text-[10px] font-semibold text-white hover:opacity-90 disabled:opacity-40"
+            className="h-8 rounded-lg bg-console-ink px-3 text-[12px] font-medium text-console-card transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             {busy ? '解析中…' : '保存脚本'}
           </button>
           <button
             onClick={() => setSource('')}
-            className="h-7 rounded-md bg-tv-bg px-2.5 text-[10px] text-tv-muted hover:text-tv-text"
+            className="h-8 rounded-lg px-2.5 text-[12px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
           >
             清空
           </button>
           <button
             onClick={() => window.location.reload()}
-            className="ml-auto flex h-7 items-center gap-1 rounded-md bg-tv-bg px-2.5 text-[10px] text-tv-text hover:bg-tv-border"
+            className="ml-auto flex h-8 items-center gap-1.5 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
           >
-            <RefreshCw size={12} />
+            <RefreshCw size={14} strokeWidth={1.5} />
             刷新图表
           </button>
         </div>
         {message && (
           <div
             className={clsx(
-              'mt-2 rounded-md px-2.5 py-2 text-[10px] leading-relaxed',
-              message.ok ? 'bg-tv-up/10 text-tv-up' : 'bg-tv-down/10 text-tv-down',
+              'mt-3 rounded-lg px-3 py-2 text-[11px] leading-relaxed',
+              message.ok
+                ? 'bg-console-gain-soft text-console-gain'
+                : 'bg-console-loss-soft text-console-loss',
             )}
           >
             {message.text}
           </div>
         )}
-        <p className="mt-3 text-[10px] leading-relaxed text-tv-muted">
+        <p className="mt-4 text-[11px] leading-relaxed text-console-faint">
           PineTS 是独立的第三方运行时（AGPL-3.0 / 商业授权），与 TradingView 无关联；
           对外分发此功能前需要确认授权方式。
         </p>
@@ -1124,14 +1147,14 @@ function PineSection() {
         description="在图表「指标」窗口搜索脚本名称即可添加；删除后已添加的指标会失效。"
       >
         {scripts.length === 0 ? (
-          <p className="text-[11px] text-tv-muted">还没有保存的脚本。</p>
+          <p className="text-[12px] text-console-muted">还没有保存的脚本。</p>
         ) : (
-          <div className="divide-y divide-tv-border/60">
+          <div className="divide-y divide-console-line/70">
             {scripts.map((script) => (
-              <div key={script.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+              <div key={script.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[11px] text-tv-text">{script.title}</div>
-                  <div className="mt-0.5 text-[10px] text-tv-muted">
+                  <div className="truncate text-[12px] text-console-ink">{script.title}</div>
+                  <div className="mt-1 text-[11px] text-console-muted">
                     {script.plots.length} 条曲线 · {script.inputs.length} 个参数
                     {script.warning ? ` · ${script.warning}` : ''}
                   </div>
@@ -1142,9 +1165,9 @@ function PineSection() {
                     notify('success', `已删除「${script.title}」，刷新图表后生效`);
                   }}
                   title="删除脚本"
-                  className="rounded-md p-1.5 text-tv-muted hover:bg-tv-bg hover:text-tv-down"
+                  className="rounded-lg p-2 text-console-muted transition-colors hover:bg-console-hover hover:text-console-loss"
                 >
-                  <Trash2 size={13} />
+                  <Trash2 size={14} strokeWidth={1.5} />
                 </button>
               </div>
             ))}

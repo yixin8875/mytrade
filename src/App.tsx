@@ -331,27 +331,31 @@ export default function App() {
               {/* 价格告警覆盖在图表右侧，不挤压图表也不另开弹窗 */}
               {alertsOpen && <AlertsPanel />}
             </main>
-            <aside className="flex w-[320px] shrink-0 flex-col border-l border-tv-border bg-tv-panel">
+            <aside className="flex w-[336px] shrink-0 flex-col border-l border-tv-border bg-tv-panel">
               <OrderTicket />
-              <div className="flex shrink-0 border-y border-tv-border bg-tv-bg/40">
+              <div className="flex h-9 shrink-0 items-stretch border-y border-tv-border bg-tv-raised px-1">
                 {(
                   [
-                    ['positions', `持仓 ${positionsCount}`],
-                    ['orders', `挂单 ${ordersCount}`],
-                    ['watchlist', `自选 ${watchCount}`],
-                  ] as [SidebarTab, string][]
-                ).map(([value, label]) => (
+                    ['positions', '持仓', positionsCount],
+                    ['orders', '挂单', ordersCount],
+                    ['watchlist', '自选', watchCount],
+                  ] as [SidebarTab, string, number][]
+                ).map(([value, label, count]) => (
                   <button
                     key={value}
                     onClick={() => setSidebarTab(value)}
                     className={clsx(
-                      'h-7 flex-1 text-[10px] transition-colors',
+                      'relative flex flex-1 items-center justify-center gap-1.5 text-[12px] transition-colors',
                       sidebarTab === value
-                        ? 'bg-tv-panel text-tv-text'
+                        ? 'font-medium text-tv-text'
                         : 'text-tv-muted hover:text-tv-text',
                     )}
                   >
                     {label}
+                    <span className="num font-mono text-[11px] text-tv-faint">{count}</span>
+                    {sidebarTab === value && (
+                      <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-tv-accent" />
+                    )}
                   </button>
                 ))}
               </div>

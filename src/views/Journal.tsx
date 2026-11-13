@@ -146,14 +146,13 @@ export function JournalView() {
 
   return (
     <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
-      <div className="mx-auto w-full max-w-[1240px] px-8 py-7">
+      <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-[24px] font-semibold tracking-tight">交易日志</h1>
-            <p className="mt-1 text-[11.5px] text-console-muted">
+            <h1 className="text-[24px] font-medium tracking-[-0.01em]">交易日志</h1>
+            <p className="mt-1.5 text-[13px] text-console-muted">
               已平仓交易自动记录
-              {activeLogin ? ` · 当前账户 ${activeLogin}` : ''}
-              {' · '}点击标签可修改策略 · 截图随成交自动保存，查看时可标出入场/出场
+              {activeLogin ? ` · 账户 ${activeLogin}` : ''} · 点击标签可修改策略
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -173,19 +172,19 @@ export function JournalView() {
               disabled={loading}
               className="console-btn console-btn-secondary"
             >
-              <RefreshCw size={13} className={clsx(loading && 'animate-spin')} />
+              <RefreshCw size={14} strokeWidth={1.5} className={clsx(loading && 'animate-spin')} />
               {loading ? '读取中…' : '同步刷新'}
             </button>
           </div>
         </header>
 
         {error && (
-          <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[11px] text-console-loss">
+          <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
             读取日志失败：{error}
           </div>
         )}
 
-        <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="readout mt-6 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
           <StatCard label="交易笔数" value={summary ? String(summary.trades) : '—'} />
           <StatCard
             label="胜率"
@@ -232,7 +231,7 @@ export function JournalView() {
                   key={item.id}
                   onClick={() => setTab(item.id)}
                   className={clsx(
-                    'h-6 rounded-md px-2 text-[10.5px] transition-colors',
+                    'h-7 rounded-md px-2.5 text-[12px] transition-colors',
                     tab === item.id
                       ? 'bg-console-selected font-medium text-console-ink'
                       : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
@@ -245,12 +244,12 @@ export function JournalView() {
 
             <div className="min-h-[120px] flex-1 overflow-auto p-2">
               {breakdown.length === 0 && (
-                <div className="px-2 py-8 text-center text-[11px] text-console-faint">
+                <div className="px-2 py-8 text-center text-[12px] text-console-faint">
                   {loading ? '读取中…' : '暂无数据'}
                 </div>
               )}
               {breakdown.map((row) => (
-                <div key={row.key} className="relative rounded-md px-2 py-1.5">
+                <div key={row.key} className="relative rounded-md px-2 py-2">
                   <div
                     className={clsx(
                       'absolute inset-y-1 left-0 rounded-sm opacity-70',
@@ -261,18 +260,18 @@ export function JournalView() {
                         breakdownMax > 0 ? `${(Math.abs(row.pnl) / breakdownMax) * 100}%` : '0%',
                     }}
                   />
-                  <div className="relative flex items-center gap-2 text-[10.5px]">
+                  <div className="relative flex items-center gap-2 text-[12px]">
                     <span className="w-16 shrink-0 truncate font-medium text-console-ink">
                       {row.key}
                     </span>
-                    <span className="num w-12 shrink-0 text-right text-console-muted">
+                    <span className="num w-12 shrink-0 text-right font-mono text-[11px] text-console-muted">
                       {row.trades} 笔
                     </span>
-                    <span className="num w-10 shrink-0 text-right text-console-muted">
+                    <span className="num w-10 shrink-0 text-right font-mono text-[11px] text-console-muted">
                       {row.winRate.toFixed(0)}%
                     </span>
                     <span
-                      className={clsx('num flex-1 text-right font-medium', signedClass(row.pnl))}
+                      className={clsx('num flex-1 text-right font-mono font-medium', signedClass(row.pnl))}
                     >
                       {fmtSigned(row.pnl)}
                     </span>
@@ -284,9 +283,9 @@ export function JournalView() {
 
           <section className="console-card min-w-0 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[880px] border-collapse text-[11.5px]">
+              <table className="w-full min-w-[880px] border-collapse text-[12px]">
                 <thead>
-                  <tr className="border-b border-console-line text-left text-[10px] text-console-faint">
+                  <tr className="border-b border-console-line text-left text-[11px] text-console-faint">
                     <th className="px-4 py-2 font-normal">平仓时间</th>
                     <th className="px-2 py-2 font-normal">品种 / 方向</th>
                     <th className="px-2 py-2 text-right font-normal">手数</th>
@@ -302,7 +301,7 @@ export function JournalView() {
                 <tbody>
                   {records.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="px-4 py-14 text-center text-console-faint">
+                      <td colSpan={10} className="px-4 py-14 text-center text-[12px] text-console-faint">
                         {loading ? '读取中…' : '这段时间还没有已平仓交易'}
                       </td>
                     </tr>
@@ -312,40 +311,44 @@ export function JournalView() {
                       key={`${record.login}-${record.position_id}`}
                       className="border-t border-console-line/70 transition-colors hover:bg-console-hover/50"
                     >
-                      <td className="num whitespace-nowrap px-4 py-2.5 text-console-muted">
+                      <td className="num whitespace-nowrap px-4 py-2.5 font-mono text-[11px] text-console-muted">
                         {fmtTime(record.close_time)}
                       </td>
                       <td className="whitespace-nowrap px-2 py-2.5">
                         <span className="font-medium text-console-ink">{record.symbol}</span>
                         <span
                           className={clsx(
-                            'ml-1.5 rounded px-1 py-0.5 text-[9.5px] font-semibold',
-                            record.side === 'buy'
-                              ? 'bg-console-gain-soft text-console-gain'
-                              : 'bg-console-loss-soft text-console-loss',
+                            'ml-1.5 inline-flex items-center gap-1 text-[11px]',
+                            record.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
                           )}
                         >
+                          <span
+                            className={clsx(
+                              'h-1.5 w-1.5 rounded-full',
+                              record.side === 'buy' ? 'bg-console-gain' : 'bg-console-loss',
+                            )}
+                          />
                           {record.side === 'buy' ? '多' : '空'}
                         </span>
                       </td>
-                      <td className="num px-2 py-2.5 text-right text-console-ink-2">
+                      <td className="num px-2 py-2.5 text-right font-mono text-[11px] text-console-ink-2">
                         {fmtVolume(record.volume)}
                       </td>
-                      <td className="num whitespace-nowrap px-3 py-2.5 text-right text-console-muted">
+                      <td className="num whitespace-nowrap px-3 py-2.5 text-right font-mono text-[11px] text-console-muted">
                         {fmtPrice(record.entry_price)} → {fmtPrice(record.exit_price)}
                       </td>
                       <td
                         className={clsx(
-                          'num px-3 py-2.5 text-right font-medium',
+                          'num px-3 py-2.5 text-right font-mono font-medium',
                           signedClass(record.profit),
                         )}
                       >
                         {fmtSigned(record.profit)}
                       </td>
-                      <td className="num whitespace-nowrap px-2 py-2.5 text-right text-console-muted">
+                      <td className="num whitespace-nowrap px-2 py-2.5 text-right font-mono text-[11px] text-console-muted">
                         {fmtDuration(record.duration_sec)}
                       </td>
-                      <td className="num whitespace-nowrap px-3 py-2.5 text-right">
+                      <td className="num whitespace-nowrap px-3 py-2.5 text-right font-mono text-[11px]">
                         <span className="text-console-gain">
                           {record.mfe != null ? fmtSigned(record.mfe) : '—'}
                         </span>
@@ -354,7 +357,7 @@ export function JournalView() {
                           {record.mae != null ? fmtSigned(record.mae) : '—'}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-2 py-2.5 text-console-muted">
+                      <td className="whitespace-nowrap px-2 py-2.5 text-[11px] text-console-muted">
                         {CLOSED_BY[String(record.closed_by)] ?? record.closed_by ?? '—'}
                       </td>
                       <td className="px-2 py-2.5">
@@ -371,14 +374,14 @@ export function JournalView() {
                               if (event.key === 'Enter') void saveTag(record, editing.value);
                               if (event.key === 'Escape') setEditing(null);
                             }}
-                            className="console-input h-6 w-24 px-1.5 text-[10.5px]"
+                            className="console-input h-7 w-24 px-1.5 text-[12px]"
                           />
                         ) : (
                           <button
                             onClick={() =>
                               setEditing({ id: record.position_id, value: record.tag ?? '' })
                             }
-                            className="h-6 rounded px-1.5 text-left text-[10.5px] text-console-ink-2 hover:bg-console-hover"
+                            className="h-7 rounded-md px-1.5 text-left text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
                             title="点击修改策略标签"
                           >
                             {record.tag || <span className="text-console-faint">未标记</span>}
@@ -389,7 +392,7 @@ export function JournalView() {
                         {record.has_shot ? (
                           <button
                             onClick={() => setShot(record)}
-                            className="h-6 rounded border border-console-line bg-white px-1.5 text-[10px] text-console-ink-2 hover:bg-console-hover"
+                            className="h-7 rounded-md border border-console-line bg-console-card px-2 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover"
                           >
                             查看
                           </button>
@@ -424,7 +427,7 @@ export function JournalView() {
               入场 <span className="num">{fmtPrice(shot.entry_price, shotDigits)}</span>
               <span className="mx-1.5 text-white/40">·</span>
               出场 <span className="num">{fmtPrice(shot.exit_price, shotDigits)}</span>
-              <span className="ml-2 text-[10px] text-white/50">旧截图无坐标信息，无法在图上定位</span>
+              <span className="ml-2 text-[11px] text-white/60">旧截图无坐标信息，无法在图上定位</span>
             </div>
           )}
         </div>
@@ -444,14 +447,14 @@ function ShotAnnotations({ meta, record }: { meta: ShotMeta; record: JournalReco
       <PriceMarker
         y={entry.y}
         edge={entry.edge}
-        color="#2962ff"
+        color="#1f5fd6"
         side="left"
         label={`入场 ${fmtPrice(record.entry_price, meta.digits)}`}
       />
       <PriceMarker
         y={exit.y}
         edge={exit.edge}
-        color={record.profit >= 0 ? '#26a69a' : '#ef5350'}
+        color={record.profit >= 0 ? '#0f7a55' : '#c2413a'}
         side="right"
         label={`出场 ${fmtPrice(record.exit_price, meta.digits)}`}
       />
@@ -476,8 +479,8 @@ function PriceMarker({
   const tag = (
     <span
       className={clsx(
-        'shrink-0 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-md',
-        side === 'left' ? 'rounded-r' : 'rounded-l',
+        'shrink-0 px-2 py-0.5 text-[11px] font-medium text-white shadow-sm',
+        side === 'left' ? 'rounded-r-md' : 'rounded-l-md',
       )}
       style={{ backgroundColor: color }}
       title={edge ? '该价格在截图可视区间之外' : undefined}
@@ -522,10 +525,12 @@ function StatCard({
   tone?: string;
 }) {
   return (
-    <div className="console-card px-4 py-3">
-      <div className="text-[10.5px] text-console-muted">{label}</div>
-      <div className={clsx('num mt-1 text-[17px] font-semibold tracking-tight', tone)}>{value}</div>
-      <div className="mt-0.5 truncate text-[9.5px] text-console-faint">{hint ?? ' '}</div>
+    <div className="readout-cell">
+      <div className="text-[12px] text-console-muted">{label}</div>
+      <div className={clsx('num mt-1.5 font-mono text-[20px] font-medium leading-none tracking-[-0.01em]', tone)}>
+        {value}
+      </div>
+      <div className="mt-2 truncate text-[11px] text-console-faint">{hint ?? ' '}</div>
     </div>
   );
 }

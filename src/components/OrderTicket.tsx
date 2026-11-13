@@ -32,7 +32,7 @@ const ORDER_TYPES: { value: OrderType; label: string }[] = [
 ];
 
 const inputClass =
-  'h-7 w-full rounded border border-tv-border bg-tv-bg px-2 font-mono text-[11px] text-tv-text outline-none focus:border-tv-accent';
+  'h-8 w-full rounded-lg border border-tv-border bg-tv-raised px-2 font-mono text-[12px] text-tv-text outline-none transition-colors focus:border-tv-accent focus:bg-tv-panel';
 
 export function OrderTicket() {
   const conn = useApp((s) => s.conn);
@@ -274,16 +274,24 @@ export function OrderTicket() {
         ? '只读模式 · 不会下单'
         : `${draft.side === 'buy' ? '买入' : '卖出'} ${fmtVolume(draft.volume, step)}`;
 
+  // R 标尺的入场价：市价单跟随当前报价，挂单用草稿价
+  const rulerEntry =
+    draft.type === 'market'
+      ? ((draft.side === 'buy' ? quote?.ask : quote?.bid) ?? 0)
+      : draft.price;
+
   return (
     <section className="shrink-0 border-b border-tv-border">
-      <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-[11px] font-semibold tracking-wide text-tv-muted">下单</span>
+      <div className="flex h-12 items-center justify-between px-4">
+        <span className="text-[13px] font-semibold text-tv-text">下单</span>
         <button
           onClick={activate}
           disabled={!ready || !info}
           className={clsx(
-            'h-6 rounded px-2 text-[10px] transition-colors',
-            draft.active ? 'bg-tv-accent text-white' : 'bg-tv-border text-tv-text hover:bg-tv-hover',
+            'h-7 rounded-lg border px-2.5 text-[12px] transition-colors',
+            draft.active
+              ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
+              : 'border-tv-border bg-tv-panel text-tv-muted hover:bg-tv-hover hover:text-tv-text',
             (!ready || !info) && 'cursor-not-allowed opacity-40',
           )}
         >
@@ -291,15 +299,15 @@ export function OrderTicket() {
         </button>
       </div>
 
-      <div className="space-y-2 px-3 pb-3">
-        <div className="grid grid-cols-2 gap-1">
+      <div className="space-y-4 px-4 pb-4">
+        <div className="grid grid-cols-2 gap-2">
           <button
             onClick={() => setSide('buy')}
             className={clsx(
-              'h-8 rounded text-xs font-semibold transition-colors',
+              'h-9 rounded-lg text-[13px] font-medium transition-colors',
               draft.side === 'buy'
                 ? 'bg-tv-up text-white'
-                : 'bg-tv-bg text-tv-muted hover:text-tv-text',
+                : 'bg-tv-raised text-tv-muted hover:text-tv-text',
             )}
           >
             买入
@@ -307,26 +315,26 @@ export function OrderTicket() {
           <button
             onClick={() => setSide('sell')}
             className={clsx(
-              'h-8 rounded text-xs font-semibold transition-colors',
+              'h-9 rounded-lg text-[13px] font-medium transition-colors',
               draft.side === 'sell'
                 ? 'bg-tv-down text-white'
-                : 'bg-tv-bg text-tv-muted hover:text-tv-text',
+                : 'bg-tv-raised text-tv-muted hover:text-tv-text',
             )}
           >
             卖出
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-1">
+        <div className="flex rounded-lg border border-tv-border bg-tv-raised p-0.5">
           {ORDER_TYPES.map((item) => (
             <button
               key={item.value}
               onClick={() => setType(item.value)}
               className={clsx(
-                'h-6 rounded text-[10px] transition-colors',
+                'h-7 flex-1 rounded-md text-[12px] transition-colors',
                 draft.type === item.value
-                  ? 'bg-tv-border text-tv-text'
-                  : 'bg-tv-bg text-tv-muted hover:text-tv-text',
+                  ? 'bg-tv-panel text-tv-text shadow-[0_1px_2px_rgba(20,30,45,0.06)]'
+                  : 'text-tv-muted hover:text-tv-text',
               )}
             >
               {item.label}
@@ -338,42 +346,39 @@ export function OrderTicket() {
           onClick={applyTemplate}
           title="0.5% 风险 + 止盈 2R + 浮盈 1R 自动保本；先设置止损后会自动算止盈"
           className={clsx(
-            'h-6 w-full rounded border text-[10px] transition-colors',
+            'h-8 w-full rounded-lg border text-[12px] transition-colors',
             templateArmed
-              ? 'border-tv-accent bg-tv-accent/20 text-tv-accent'
-              : 'border-tv-border bg-tv-bg text-tv-muted hover:text-tv-text',
+              ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
+              : 'border-tv-border bg-tv-panel text-tv-muted hover:text-tv-text',
           )}
         >
           {templateArmed ? '模板已启用 · 0.5% / 2R / 保本' : '模板 · 0.5% 风险 + 2R + 保本'}
         </button>
 
         <Field label="风险开仓">
-          <div className="space-y-1">
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                onClick={() => patchRisk({ mode: 'amount' })}
-                className={clsx(
-                  'h-6 rounded text-[10px] transition-colors',
-                  risk.mode === 'amount'
-                    ? 'bg-tv-border text-tv-text'
-                    : 'bg-tv-bg text-tv-muted hover:text-tv-text',
-                )}
-              >
-                固定金额
-              </button>
-              <button
-                onClick={() => patchRisk({ mode: 'percent' })}
-                className={clsx(
-                  'h-6 rounded text-[10px] transition-colors',
-                  risk.mode === 'percent'
-                    ? 'bg-tv-border text-tv-text'
-                    : 'bg-tv-bg text-tv-muted hover:text-tv-text',
-                )}
-              >
-                余额 %
-              </button>
+          <div className="space-y-2">
+            <div className="flex rounded-lg border border-tv-border bg-tv-raised p-0.5">
+              {(
+                [
+                  ['amount', '固定金额'],
+                  ['percent', '余额 %'],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => patchRisk({ mode: value })}
+                  className={clsx(
+                    'h-7 flex-1 rounded-md text-[12px] transition-colors',
+                    risk.mode === value
+                      ? 'bg-tv-panel text-tv-text shadow-[0_1px_2px_rgba(20,30,45,0.06)]'
+                      : 'text-tv-muted hover:text-tv-text',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2">
               <input
                 type="number"
                 min={0}
@@ -388,16 +393,16 @@ export function OrderTicket() {
               <button
                 onClick={() => patchRisk({ auto: !risk.auto })}
                 className={clsx(
-                  'h-7 shrink-0 rounded px-2 text-[10px] transition-colors',
+                  'h-8 w-[92px] shrink-0 rounded-lg border text-[12px] transition-colors',
                   risk.auto
-                    ? 'bg-tv-accent text-white'
-                    : 'bg-tv-bg text-tv-muted hover:text-tv-text',
+                    ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
+                    : 'border-tv-border bg-tv-panel text-tv-muted hover:text-tv-text',
                 )}
               >
                 {risk.auto ? '自动手数' : '手动手数'}
               </button>
             </div>
-            <div className="text-[10px] text-tv-muted">
+            <div className="text-[11px] leading-relaxed text-tv-muted">
               {!draft.sl
                 ? '设置止损后自动算手数'
                 : sizing
@@ -408,16 +413,17 @@ export function OrderTicket() {
                   : '计算中…'}
             </div>
             {sizing?.warnings?.length ? (
-              <div className="text-[10px] text-tv-down">{sizing.warnings.join('；')}</div>
+              <div className="text-[11px] text-tv-down">{sizing.warnings.join('；')}</div>
             ) : null}
           </div>
         </Field>
 
         <Field label="手数">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => changeVolume(-1)}
-              className="h-7 w-7 rounded bg-tv-bg text-tv-muted hover:text-tv-text"
+              className="h-8 w-8 shrink-0 rounded-lg bg-tv-raised text-[14px] text-tv-muted transition-colors hover:text-tv-text"
+              aria-label="减少手数"
             >
               −
             </button>
@@ -436,7 +442,8 @@ export function OrderTicket() {
             />
             <button
               onClick={() => changeVolume(1)}
-              className="h-7 w-7 rounded bg-tv-bg text-tv-muted hover:text-tv-text"
+              className="h-8 w-8 shrink-0 rounded-lg bg-tv-raised text-[14px] text-tv-muted transition-colors hover:text-tv-text"
+              aria-label="增加手数"
             >
               +
             </button>
@@ -448,14 +455,14 @@ export function OrderTicket() {
             type="text"
             maxLength={40}
             value={orderTag}
-            placeholder="可选，例如：突破 / 回踩"
+            placeholder="例如：突破 / 回踩"
             onChange={(event) => setOrderTag(event.target.value)}
             className={inputClass}
           />
         </Field>
 
         {draft.type !== 'market' && (
-          <Field label="价格">
+          <Field label="委托价格">
             <input
               type="number"
               step={info?.tickSize ?? 0.00001}
@@ -495,11 +502,12 @@ export function OrderTicket() {
             />
           </Field>
         </div>
-        <p className="text-[10px] text-tv-muted">
-          图表上的红色/绿色参考线可直接上下拖动，拖过之后才会写入止损/止盈，并自动计算手数。
+
+        <p className="text-[11px] leading-relaxed text-tv-muted">
+          图表上的止损 / 止盈参考线可直接拖动；拖动后才写入，并自动计算手数。
         </p>
 
-        <div className="space-y-1 rounded bg-tv-bg p-2 text-[10px] text-tv-muted">
+        <div className="space-y-1.5 rounded-lg bg-tv-raised px-3 py-2.5 text-[12px]">
           <PreviewRow label="保证金" value={fmtMoney(preview?.margin)} />
           <PreviewRow
             label="风险"
@@ -511,42 +519,64 @@ export function OrderTicket() {
                 : '—'
             }
           />
-          <PreviewRow label="R:R" value={preview?.rr != null ? preview.rr.toFixed(2) : '—'} />
+          <PreviewRow label="盈亏比" value={preview?.rr != null ? preview.rr.toFixed(2) : '—'} />
           <PreviewRow label="点差" value={preview ? `${preview.spreadPoints.toFixed(0)} 点` : '—'} />
-          {previewError && <div className="text-amber-400">{previewError}</div>}
+          {previewError && <div className="text-tv-warn">{previewError}</div>}
           {preview?.warnings.map((warning) => (
-            <div key={warning} className="text-amber-400">
+            <div key={warning} className="text-tv-warn">
               {warning}
             </div>
           ))}
         </div>
 
+        <RiskRuler
+          entry={rulerEntry}
+          sl={draft.sl}
+          tp={draft.tp}
+          digits={digits}
+          active={draft.active}
+        />
+
         <button
           onClick={handlePlace}
           disabled={!ready || !info}
           className={clsx(
-            'h-9 w-full rounded text-xs font-semibold text-white transition-all',
-            draft.side === 'buy' ? 'bg-tv-up hover:brightness-110' : 'bg-tv-down hover:brightness-110',
+            'h-9 w-full rounded-lg text-[13px] font-medium text-white transition-colors',
+            draft.side === 'buy' ? 'bg-tv-up hover:bg-[#0c6a49]' : 'bg-tv-down hover:bg-[#a93831]',
             (!ready || !info) && 'cursor-not-allowed opacity-40',
           )}
         >
           {buttonText}
         </button>
-        <div className="text-center text-[9px] leading-relaxed text-tv-muted">
-          {mode === 'readonly'
-            ? '只读模式不会发送任何订单'
-            : '订单将发送到本机 MT5，请核对后在确认窗确认'}
-          <br />
-          B / S 市价 · Esc 取消草稿 · 拖动时按住 Shift 吸附整数位
+
+        <div className="text-center text-[11px] leading-relaxed text-tv-muted">
+          {mode === 'readonly' ? '只读模式不会发送任何订单' : '订单发送到本机 MT5，确认后成交'}
+          <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1 text-tv-faint">
+            <Kbd>B</Kbd>
+            <span>/</span>
+            <Kbd>S</Kbd>
+            <span>市价</span>
+            <span className="px-1">·</span>
+            <Kbd>Esc</Kbd>
+            <span>取消草稿</span>
+            <span className="px-1">·</span>
+            <Kbd>Shift</Kbd>
+            <span>吸附整数位</span>
+          </div>
         </div>
       </div>
 
       {confirm && (
-        <div data-confirm="order" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="w-[320px] rounded border border-tv-border bg-tv-panel p-4 shadow-2xl">
-            <div className="mb-3 text-sm font-medium text-tv-text">确认下单</div>
-            <dl className="space-y-1.5 text-[11px]">
-              <ConfirmRow label="品种" value={symbol} />
+        <div
+          data-confirm="order"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6"
+        >
+          <div className="w-[340px] rounded-xl border border-tv-border bg-tv-panel p-5 shadow-[0_16px_48px_rgba(20,30,45,0.18)]">
+            <div className="flex items-baseline justify-between">
+              <span className="text-[14px] font-semibold text-tv-text">确认下单</span>
+              <span className="num font-mono text-[11px] text-tv-muted">{symbol}</span>
+            </div>
+            <dl className="mt-4 space-y-2 text-[12px]">
               <ConfirmRow
                 label="方向"
                 value={draft.side === 'buy' ? '买入' : '卖出'}
@@ -564,16 +594,16 @@ export function OrderTicket() {
               <ConfirmRow label="止损" value={fmtPrice(draft.sl, digits)} />
               <ConfirmRow label="止盈" value={fmtPrice(draft.tp, digits)} />
               <ConfirmRow label="预估风险" value={fmtMoney(preview?.riskAmount)} />
-              <ConfirmRow label="标签" value={orderTag.trim() || '—'} />
+              <ConfirmRow label="策略标签" value={orderTag.trim() || '—'} />
               <ConfirmRow
                 label="自动保本"
                 value={templateArmed && draft.sl ? '浮盈 1R 移到开仓价' : '—'}
               />
             </dl>
-            <div className="mt-4 flex gap-2">
+            <div className="mt-5 flex gap-2">
               <button
                 onClick={() => setConfirm(false)}
-                className="h-8 flex-1 rounded border border-tv-border text-[11px] text-tv-text hover:bg-tv-hover"
+                className="h-9 flex-1 rounded-lg border border-tv-border text-[12px] text-tv-text transition-colors hover:bg-tv-hover"
               >
                 取消
               </button>
@@ -581,7 +611,7 @@ export function OrderTicket() {
                 onClick={send}
                 disabled={busy}
                 className={clsx(
-                  'h-8 flex-1 rounded text-[11px] font-semibold text-white',
+                  'h-9 flex-1 rounded-lg text-[12px] font-medium text-white transition-colors',
                   draft.side === 'buy' ? 'bg-tv-up' : 'bg-tv-down',
                   busy && 'opacity-50',
                 )}
@@ -599,7 +629,7 @@ export function OrderTicket() {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[10px] text-tv-muted">{label}</span>
+      <span className="mb-1.5 block text-[11px] text-tv-muted">{label}</span>
       {children}
     </label>
   );
@@ -607,9 +637,9 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function PreviewRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between">
-      <span>{label}</span>
-      <span className="font-mono text-tv-text">{value}</span>
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-tv-muted">{label}</span>
+      <span className="num font-mono text-tv-text">{value}</span>
     </div>
   );
 }
@@ -624,9 +654,93 @@ function ConfirmRow({
   accent?: string;
 }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-baseline justify-between gap-3">
       <dt className="text-tv-muted">{label}</dt>
-      <dd className={clsx('font-mono', accent ?? 'text-tv-text')}>{value}</dd>
+      <dd className={clsx('num font-mono', accent ?? 'text-tv-text')}>{value}</dd>
+    </div>
+  );
+}
+
+function Kbd({ children }: { children: ReactNode }) {
+  return (
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-tv-border bg-tv-panel px-1 font-mono text-[11px] text-tv-muted">
+      {children}
+    </kbd>
+  );
+}
+
+/**
+ * 风险尺：把入场、止损、止盈按 R 排成一条细尺。
+ * 止损永远是 −1R，止盈按实际距离换算；只读展示，不改任何下单字段。
+ */
+function RiskRuler({
+  entry,
+  sl,
+  tp,
+  digits,
+  active,
+}: {
+  entry: number;
+  sl: number | null;
+  tp: number | null;
+  digits: number;
+  active: boolean;
+}) {
+  if (!active || !(entry > 0) || sl == null) {
+    return (
+      <div className="rounded-lg border border-dashed border-tv-border px-3 py-2.5 text-[11px] leading-relaxed text-tv-muted">
+        风险尺：设置止损后，这里显示 −1R / 入场 / 止盈 的位置
+      </div>
+    );
+  }
+  const risk = Math.abs(entry - sl);
+  if (!(risk > 0)) return null;
+
+  const low = Math.min(entry, sl, tp ?? entry);
+  const high = Math.max(entry, sl, tp ?? entry);
+  const span = high - low || 1;
+  const pct = (price: number) => ((price - low) / span) * 100;
+  const entryPct = pct(entry);
+  const slPct = pct(sl);
+  const tpPct = tp != null ? pct(tp) : null;
+  const tpR = tp != null ? Math.abs(tp - entry) / risk : null;
+
+  return (
+    <div aria-label="风险尺">
+      <div className="flex items-baseline justify-between text-[11px]">
+        <span className="text-tv-muted">风险尺 · 止损为 1R</span>
+        <span className="num font-mono text-tv-faint">入场 {fmtPrice(entry, digits)}</span>
+      </div>
+      <div className="relative mt-2 h-1.5 rounded-full bg-tv-raised">
+        <span
+          className="absolute inset-y-0 rounded-full bg-tv-down/70"
+          style={{
+            left: `${Math.min(entryPct, slPct)}%`,
+            width: `${Math.abs(entryPct - slPct)}%`,
+          }}
+        />
+        {tpPct != null && (
+          <span
+            className="absolute inset-y-0 rounded-full bg-tv-up/70"
+            style={{
+              left: `${Math.min(entryPct, tpPct)}%`,
+              width: `${Math.abs(entryPct - tpPct)}%`,
+            }}
+          />
+        )}
+        <span
+          className="absolute -top-1 h-3.5 w-px bg-tv-text"
+          style={{ left: `${entryPct}%` }}
+        />
+      </div>
+      <div className="mt-1.5 flex items-baseline justify-between gap-3 text-[11px]">
+        <span className="num font-mono text-tv-down">
+          止损 {fmtPrice(sl, digits)} · -1.0R
+        </span>
+        <span className="num font-mono text-tv-up">
+          {tp != null ? `止盈 ${fmtPrice(tp, digits)} · +${tpR?.toFixed(1)}R` : '未设止盈'}
+        </span>
+      </div>
     </div>
   );
 }

@@ -7,17 +7,20 @@ export function Toast() {
   if (!toast) return null;
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-9 z-[60] flex justify-center">
+    <div className="pointer-events-none fixed inset-x-0 bottom-10 z-[60] flex justify-center px-4">
       <button
         onClick={clear}
-        className={clsx(
-          'pointer-events-auto max-w-lg rounded px-3 py-2 text-left text-[11px] text-white shadow-lg',
-          toast.kind === 'error' && 'bg-tv-down',
-          toast.kind === 'success' && 'bg-emerald-600',
-          toast.kind === 'info' && 'bg-tv-accent',
-        )}
+        className="pointer-events-auto flex max-w-lg items-start gap-2.5 rounded-lg border border-tv-border bg-tv-panel px-3.5 py-2.5 text-left text-[12px] leading-relaxed text-tv-text shadow-[0_12px_32px_-12px_rgba(0,0,0,0.35)]"
       >
-        {toast.text}
+        <span
+          className={clsx(
+            'mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
+            toast.kind === 'error' && 'bg-tv-down',
+            toast.kind === 'success' && 'bg-tv-up',
+            toast.kind === 'info' && 'bg-tv-accent',
+          )}
+        />
+        <span className="break-words">{toast.text}</span>
       </button>
     </div>
   );
