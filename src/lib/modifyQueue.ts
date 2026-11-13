@@ -65,8 +65,9 @@ export function requestModify(
   job.send = send;
   job.onError = onError ?? null;
 
-  // 已经发过同一个价格（拖动又拖回原处）就不用再发
-  if (job.lastSent != null && Math.abs(price - job.lastSent) <= tolerance) {
+  // 已经发过同一个价格（拖动又拖回原处）就不用再发。
+  // 但如果还有请求在飞，那个价格落地后会把单子改走，这里必须补发一次。
+  if (!job.inFlight && job.lastSent != null && Math.abs(price - job.lastSent) <= tolerance) {
     job.pending = null;
     if (job.timer) {
       window.clearTimeout(job.timer);
@@ -81,6 +82,31 @@ export function requestModify(
     job.timer = 0;
     drain(job);
   }, DELAY_MS);
+}
+
+/**
+ * 用户把标尺拖回券商当前价：撤掉还没发出的目标；
+ * 已经发出去的没法撤销，等它落地后再补一次原价，把单子改回来。
+ * 从未改过的通道直接忽略，按一下没拖动不会白发请求。
+ */
+export function revertModify(
+  key: string,
+  price: number,
+  send: (price: number) => Promise<unknown>,
+  onError?: (error: Error) => void,
+  tolerance = 0,
+): void {
+  if (!Number.isFinite(price)) return;
+  const job = jobs.get(key);
+  if (!job) return;
+  if (job.timer) {
+    window.clearTimeout(job.timer);
+    job.timer = 0;
+  }
+  job.pending = null;
+  const settled = !job.inFlight && (job.lastSent == null || Math.abs(job.lastSent - price) <= tolerance);
+  if (settled) return;
+  requestModify(key, price, send, onError, tolerance);
 }
 
 function drain(job: Job): void {

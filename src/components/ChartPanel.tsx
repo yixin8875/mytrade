@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 
 import { gateway } from '../gateway/client';
 import { handleGlobalShortcut, useApp, type Theme } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, snapToLevel } from '../lib/format';
-import { requestModify } from '../lib/modifyQueue';
+import { requestModify, revertModify } from '../lib/modifyQueue';
 import { GatewayDatafeed } from '../chart/tv/datafeed';
 import { PineRunner } from '../chart/tv/pineRunner';
 import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
@@ -195,13 +195,10 @@ function estimateProfit(
  * 拖动松手到券商回执之间，先用本地目标价顶着显示。
  * 改单是停手 320ms 后才发的，如果直接按持仓里的旧 sl/tp 画，
  * 标签会先弹回旧价格、等回报再跳一次；这里让显示先停在用户放下的位置。
- * 收到一致的价格、或超过 4 秒没等到（可能被券商拒绝）就清掉。
+ * 收到一致的价格就清掉；改单被拒会立刻清（见 clearOptimistic）。
+ * 这里的 12 秒只是兜底（比 8 秒的请求超时更长，慢回执时界面不会先弹回去）。
  */
 const optimisticPrices = new Map<string, { price: number; at: number }>();
-
-function markOptimistic(key: string, price: number): void {
-  optimisticPrices.set(key, { price, at: Date.now() });
-}
 
 function resolvePrice(
   key: string,
@@ -210,7 +207,7 @@ function resolvePrice(
 ): { price: number | null; pending: boolean } {
   const item = optimisticPrices.get(key);
   if (!item) return { price: actual ?? null, pending: false };
-  if (Date.now() - item.at > 4000) {
+  if (Date.now() - item.at > 12000) {
     optimisticPrices.delete(key);
     return { price: actual ?? null, pending: false };
   }
@@ -287,6 +284,21 @@ export function ChartPanel({
   const [chart, setChart] = useState<IChartWidgetApi | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * 拖动落点要先体现在界面上，必须触发一次重渲染：
+   * 只改模块里的 optimisticPrices 的话，标签要等下一份持仓/行情推送
+   * （最多几百毫秒，行情不动时更久）才会从旧位置跳过去，看起来就像拖不动。
+   */
+  const [, setOptimisticTick] = useState(0);
+  const markOptimistic = (key: string, price: number) => {
+    optimisticPrices.set(key, { price, at: Date.now() });
+    setOptimisticTick((tick) => tick + 1);
+  };
+  /** 改单被券商拒绝时立刻退回真实价格，别让界面继续停在不可能成交的价位 */
+  const clearOptimistic = (key: string) => {
+    if (optimisticPrices.delete(key)) setOptimisticTick((tick) => tick + 1);
+  };
+
   // 图表事件订阅只建立一次，回调通过 ref 拿最新值
   const onSymbolChangeRef = useRef(onSymbolChange);
   onSymbolChangeRef.current = onSymbolChange;
@@ -354,6 +366,31 @@ export function ChartPanel({
   /** 拖动图上标签用的价格对齐：按住 Shift 吸附整数位 */
   const roundPrice = (price: number) =>
     shiftRef.current ? snapLevel(price, info) : roundToTick(price, info);
+
+  /**
+   * 拖动止盈/止损/挂单价：先按本地目标价显示，停手后才真正改单。
+   * 拖回券商当前价时不算一次新改动，只把没发出去的撤掉、在飞的补回原价。
+   */
+  const moveTo = (
+    key: string,
+    actual: number | null | undefined,
+    raw: number,
+    send: (price: number) => Promise<unknown>,
+  ) => {
+    const next = roundPrice(raw);
+    const base = actual ?? 0;
+    const fail = (err: Error) => {
+      clearOptimistic(key);
+      notify('error', err.message);
+    };
+    if (Math.abs(next - base) <= tol) {
+      clearOptimistic(key);
+      revertModify(key, base, send, fail, tol);
+      return;
+    }
+    markOptimistic(key, next);
+    requestModify(key, next, send, fail, tol);
+  };
 
   const chips: ChartChip[] = [];
   // 市价单的入场价取对手价；限价/停损单用草稿价格。本地估算金额时要有个有效入场价
@@ -496,19 +533,10 @@ export function ChartPanel({
       price: shown,
       color: sideColor(order.side),
       text: `${kind}${side} ${volume(order.volume)} @ ${fmtPrice(shown, digits)}`,
-      onMove: (price) => {
-        const next = roundPrice(price);
-        if (Math.abs(next - order.price) <= tol) return;
-        markOptimistic(key, next);
-        // 拖动中不发请求，停手后只发最后一次（见 lib/modifyQueue）
-        requestModify(
-          key,
-          next,
-          (value) => gateway.call('order.modify', { ticket: order.ticket, price: value }),
-          (err) => notify('error', err.message),
-          tol,
-        );
-      },
+      onMove: (price) =>
+        moveTo(key, order.price, price, (value) =>
+          gateway.call('order.modify', { ticket: order.ticket, price: value }),
+        ),
       onRemove: () => {
         gateway.call('order.cancel', { ticket: order.ticket }).catch((err: Error) => notify('error', err.message));
       },
@@ -574,18 +602,10 @@ export function ChartPanel({
         price: slShown.price ?? position.sl,
         color: SIDE_SELL,
         text: `${volume(position.volume)}${signedMoney(slAmount, currency, slApprox)}`,
-        onMove: (price) => {
-          const next = roundPrice(price);
-          if (Math.abs(next - (position.sl ?? 0)) <= tol) return;
-          markOptimistic(slKey, next);
-          requestModify(
-            slKey,
-            next,
-            (value) => gateway.call('position.modify', { ticket: position.ticket, sl: value }),
-            (err) => notify('error', err.message),
-            tol,
-          );
-        },
+        onMove: (price) =>
+          moveTo(slKey, position.sl, price, (value) =>
+            gateway.call('position.modify', { ticket: position.ticket, sl: value }),
+          ),
         onRemove: () => {
           gateway
             .call('position.modify', { ticket: position.ticket, sl: 0 })
@@ -599,18 +619,10 @@ export function ChartPanel({
         price: tpShown.price ?? position.tp,
         color: SIDE_BUY,
         text: `${volume(position.volume)}${signedMoney(tpAmount, currency, tpApprox)}`,
-        onMove: (price) => {
-          const next = roundPrice(price);
-          if (Math.abs(next - (position.tp ?? 0)) <= tol) return;
-          markOptimistic(tpKey, next);
-          requestModify(
-            tpKey,
-            next,
-            (value) => gateway.call('position.modify', { ticket: position.ticket, tp: value }),
-            (err) => notify('error', err.message),
-            tol,
-          );
-        },
+        onMove: (price) =>
+          moveTo(tpKey, position.tp, price, (value) =>
+            gateway.call('position.modify', { ticket: position.ticket, tp: value }),
+          ),
         onRemove: () => {
           gateway
             .call('position.modify', { ticket: position.ticket, tp: 0 })
@@ -954,17 +966,10 @@ export function ChartPanel({
         price: resolvePrice(key, order.price, tol).price ?? order.price,
         color: sideColor(order.side),
         text: '',
-        onMove: (price) => {
-          if (Math.abs(price - order.price) <= tol) return;
-          markOptimistic(key, price);
-          requestModify(
-            key,
-            price,
-            (value) => gateway.call('order.modify', { ticket: order.ticket, price: value }),
-            (err) => notify('error', err.message),
-            tol,
-          );
-        },
+        onMove: (price) =>
+          moveTo(key, order.price, price, (value) =>
+            gateway.call('order.modify', { ticket: order.ticket, price: value }),
+          ),
       });
     }
 
@@ -981,17 +986,10 @@ export function ChartPanel({
           price: resolvePrice(key, position.sl, tol).price ?? position.sl,
           color: SIDE_SELL,
           text: '',
-          onMove: (price) => {
-            if (Math.abs(price - (position.sl ?? 0)) <= tol) return;
-            markOptimistic(key, price);
-            requestModify(
-              key,
-              price,
-              (value) => gateway.call('position.modify', { ticket: position.ticket, sl: value }),
-              (err) => notify('error', err.message),
-              tol,
-            );
-          },
+          onMove: (price) =>
+            moveTo(key, position.sl, price, (value) =>
+              gateway.call('position.modify', { ticket: position.ticket, sl: value }),
+            ),
         });
       }
       if (position.tp) {
@@ -1000,17 +998,10 @@ export function ChartPanel({
           price: resolvePrice(key, position.tp, tol).price ?? position.tp,
           color: SIDE_BUY,
           text: '',
-          onMove: (price) => {
-            if (Math.abs(price - (position.tp ?? 0)) <= tol) return;
-            markOptimistic(key, price);
-            requestModify(
-              key,
-              price,
-              (value) => gateway.call('position.modify', { ticket: position.ticket, tp: value }),
-              (err) => notify('error', err.message),
-              tol,
-            );
-          },
+          onMove: (price) =>
+            moveTo(key, position.tp, price, (value) =>
+              gateway.call('position.modify', { ticket: position.ticket, tp: value }),
+            ),
         });
       }
     }
