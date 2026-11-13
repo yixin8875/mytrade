@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 
 import { gateway } from '../gateway/client';
 import { handleGlobalShortcut, useApp, type Theme } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, snapToLevel } from '../lib/format';
+import { requestModify } from '../lib/modifyQueue';
 import { GatewayDatafeed } from '../chart/tv/datafeed';
 import { PineRunner } from '../chart/tv/pineRunner';
 import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
@@ -173,16 +174,72 @@ function guidePrice(
   return roundToTick(below ? entry - dist : entry + dist, info);
 }
 
+/**
+ * 预览还没回来（或拖动中预览必然过期）时，用券商的 tick 价值和手数估算金额。
+ * 只是显示用：和真实盈亏可能有极小差异，所以界面上会带「≈」。
+ */
+function estimateProfit(
+  info: SymbolInfo | undefined,
+  volume: number,
+  from: number,
+  to: number,
+): number | null {
+  if (!info || !(volume > 0) || !(from > 0) || !(to > 0)) return null;
+  const tickSize = info.tickSize || info.point || 0;
+  const tickValue = info.tickValue || 0;
+  if (!(tickSize > 0) || !(tickValue > 0)) return null;
+  return (Math.abs(to - from) / tickSize) * tickValue * volume;
+}
+
+/**
+ * 拖动松手到券商回执之间，先用本地目标价顶着显示。
+ * 改单是停手 320ms 后才发的，如果直接按持仓里的旧 sl/tp 画，
+ * 标签会先弹回旧价格、等回报再跳一次；这里让显示先停在用户放下的位置。
+ * 收到一致的价格、或超过 4 秒没等到（可能被券商拒绝）就清掉。
+ */
+const optimisticPrices = new Map<string, { price: number; at: number }>();
+
+function markOptimistic(key: string, price: number): void {
+  optimisticPrices.set(key, { price, at: Date.now() });
+}
+
+function resolvePrice(
+  key: string,
+  actual: number | null | undefined,
+  tolerance: number,
+): { price: number | null; pending: boolean } {
+  const item = optimisticPrices.get(key);
+  if (!item) return { price: actual ?? null, pending: false };
+  if (Date.now() - item.at > 4000) {
+    optimisticPrices.delete(key);
+    return { price: actual ?? null, pending: false };
+  }
+  if (actual != null && Math.abs(actual - item.price) <= tolerance) {
+    optimisticPrices.delete(key);
+    return { price: actual, pending: false };
+  }
+  return { price: item.price, pending: true };
+}
+
 /** 「  -100.00 USD」这种金额后缀，没有数值就返回空串 */
-function moneySuffix(amount: number | null | undefined, sign: '-' | '+', currency: string): string {
+function moneySuffix(
+  amount: number | null | undefined,
+  sign: '-' | '+',
+  currency: string,
+  approx = false,
+): string {
   if (amount == null || !Number.isFinite(amount)) return '';
-  return `  ${sign}${fmtMoney(amount)}${currency ? ` ${currency}` : ''}`;
+  return `  ${approx ? '≈' : ''}${sign}${fmtMoney(amount)}${currency ? ` ${currency}` : ''}`;
 }
 
 /** 持仓止损/止盈的金额是带符号的，直接按金额的正负显示 */
-function signedMoney(amount: number | null | undefined, currency: string): string {
+function signedMoney(
+  amount: number | null | undefined,
+  currency: string,
+  approx = false,
+): string {
   if (amount == null || !Number.isFinite(amount)) return '';
-  return `  ${fmtSigned(amount)}${currency ? ` ${currency}` : ''}`;
+  return `  ${approx ? '≈' : ''}${fmtSigned(amount)}${currency ? ` ${currency}` : ''}`;
 }
 
 export function ChartPanel({
@@ -299,6 +356,23 @@ export function ChartPanel({
     shiftRef.current ? snapLevel(price, info) : roundToTick(price, info);
 
   const chips: ChartChip[] = [];
+  // 市价单的入场价取对手价；限价/停损单用草稿价格。本地估算金额时要有个有效入场价
+  const marketEntry = previewMatched
+    ? (preview?.price ?? 0)
+    : draft.side === 'buy'
+      ? (quote?.ask ?? 0)
+      : (quote?.bid ?? 0);
+  const draftEntry = draft.type === 'market' ? marketEntry || draft.price : draft.price;
+  // 预览回来之前先用 tick 价值估算，拖动时金额不会凭空消失
+  const draftRiskEstimate = estimateProfit(info, draft.volume, draftEntry, draft.sl ?? 0);
+  const draftRewardEstimate = estimateProfit(info, draft.volume, draftEntry, draft.tp ?? 0);
+  const draftRisk = previewMatched ? (preview?.riskAmount ?? draftRiskEstimate) : draftRiskEstimate;
+  const draftReward = previewMatched
+    ? (preview?.rewardAmount ?? draftRewardEstimate)
+    : draftRewardEstimate;
+  const draftRiskApprox = !previewMatched || preview?.riskAmount == null;
+  const draftRewardApprox = !previewMatched || preview?.rewardAmount == null;
+
   if (draft.active && draft.price > 0) {
     const side = draft.side === 'buy' ? '买入' : '卖出';
     const kind = draft.type === 'limit' ? '限价' : draft.type === 'stop' ? '停损' : '市价';
@@ -315,11 +389,7 @@ export function ChartPanel({
         key: 'draft:sl',
         price: draft.sl,
         color: SIDE_SELL,
-        text: `${volume(draft.volume)}${moneySuffix(
-          previewMatched ? preview?.riskAmount : null,
-          '-',
-          currency,
-        )}`,
+        text: `${volume(draft.volume)}${moneySuffix(draftRisk, '-', currency, draftRiskApprox)}`,
         onMove: (price) => patchDraft({ sl: roundPrice(price) }),
         onRemove: () => patchDraft({ sl: null }),
       });
@@ -329,11 +399,7 @@ export function ChartPanel({
         key: 'draft:tp',
         price: draft.tp,
         color: SIDE_BUY,
-        text: `${volume(draft.volume)}${moneySuffix(
-          previewMatched ? preview?.rewardAmount : null,
-          '+',
-          currency,
-        )}`,
+        text: `${volume(draft.volume)}${moneySuffix(draftReward, '+', currency, draftRewardApprox)}`,
         onMove: (price) => patchDraft({ tp: roundPrice(price) }),
         onRemove: () => patchDraft({ tp: null }),
       });
@@ -342,8 +408,10 @@ export function ChartPanel({
 
   // ---- 图上风险区间：止损一侧红色、止盈一侧绿色，止盈一侧标 1R/2R… 刻度 ----
   const bands: ChartBand[] = [];
-  const amountText = (value: number | null | undefined) =>
-    value == null || !Number.isFinite(value) ? '' : `${fmtMoney(Math.abs(value))}${currency ? ` ${currency}` : ''}`;
+  const amountText = (value: number | null | undefined, approx = false) =>
+    value == null || !Number.isFinite(value)
+      ? ''
+      : `${approx ? '≈' : ''}${fmtMoney(Math.abs(value))}${currency ? ` ${currency}` : ''}`;
 
   const addBands = (
     prefix: string,
@@ -352,12 +420,14 @@ export function ChartPanel({
     tp: number | null | undefined,
     riskAmount?: number | null,
     rewardAmount?: number | null,
+    riskApprox = false,
+    rewardApprox = false,
   ) => {
     const hasSl = sl != null && sl > 0 && Math.abs(entry - sl) > 0;
     const hasTp = tp != null && tp > 0 && Math.abs(tp - entry) > 0;
     const risk = hasSl ? Math.abs(entry - (sl as number)) : 0;
     if (hasSl) {
-      const text = amountText(riskAmount);
+      const text = amountText(riskAmount, riskApprox);
       bands.push({
         key: `${prefix}:risk`,
         from: entry,
@@ -381,7 +451,7 @@ export function ChartPanel({
               }),
             )
           : [];
-      const text = amountText(rewardAmount);
+      const text = amountText(rewardAmount, rewardApprox);
       bands.push({
         key: `${prefix}:reward`,
         from: entry,
@@ -399,13 +469,16 @@ export function ChartPanel({
   };
 
   if (draft.active && draft.price > 0) {
+    // 区间仍按图上入场线绘制，金额用对手价估算（市价单两者可能差一个点差）
     addBands(
       'draft',
       draft.price,
       draft.sl,
       draft.tp,
-      previewMatched ? preview?.riskAmount : null,
-      previewMatched ? preview?.rewardAmount : null,
+      draftRisk,
+      draftReward,
+      draftRiskApprox,
+      draftRewardApprox,
     );
   }
 
@@ -416,15 +489,25 @@ export function ChartPanel({
   for (const order of orders) {
     const kind = order.type === 'limit' ? '限价' : '停损';
     const side = order.side === 'buy' ? '买入' : '卖出';
+    const key = `order:${order.ticket}`;
+    const shown = resolvePrice(key, order.price, tol).price ?? order.price;
     chips.push({
-      key: `order:${order.ticket}`,
-      price: order.price,
+      key,
+      price: shown,
       color: sideColor(order.side),
-      text: `${kind}${side} ${volume(order.volume)} @ ${fmtPrice(order.price, digits)}`,
+      text: `${kind}${side} ${volume(order.volume)} @ ${fmtPrice(shown, digits)}`,
       onMove: (price) => {
-        gateway
-          .call('order.modify', { ticket: order.ticket, price: roundPrice(price) })
-          .catch((err: Error) => notify('error', err.message));
+        const next = roundPrice(price);
+        if (Math.abs(next - order.price) <= tol) return;
+        markOptimistic(key, next);
+        // 拖动中不发请求，停手后只发最后一次（见 lib/modifyQueue）
+        requestModify(
+          key,
+          next,
+          (value) => gateway.call('order.modify', { ticket: order.ticket, price: value }),
+          (err) => notify('error', err.message),
+          tol,
+        );
       },
       onRemove: () => {
         gateway.call('order.cancel', { ticket: order.ticket }).catch((err: Error) => notify('error', err.message));
@@ -434,13 +517,39 @@ export function ChartPanel({
 
   for (const position of positions) {
     const side = position.side === 'buy' ? '多' : '空';
+    const slKey = `position:${position.ticket}:sl`;
+    const tpKey = `position:${position.ticket}:tp`;
+    // 松手到回执之间先按本地目标价显示，否则标签会先弹回旧价、回报到了再跳
+    const slShown = resolvePrice(slKey, position.sl, tol);
+    const tpShown = resolvePrice(tpKey, position.tp, tol);
+    // 网关偶尔算不出打到止损/止盈的金额；改单未回执时也先用 tick 价值估算
+    const slEstimate = slShown.price
+      ? estimateProfit(info, position.volume, position.openPrice, slShown.price)
+      : null;
+    const tpEstimate = tpShown.price
+      ? estimateProfit(info, position.volume, position.openPrice, tpShown.price)
+      : null;
+    const slAmount = slShown.pending
+      ? (slEstimate ?? position.slProfit)
+      : (position.slProfit ?? slEstimate);
+    const tpAmount = tpShown.pending
+      ? (tpEstimate ?? position.tpProfit)
+      : (position.tpProfit ?? tpEstimate);
+    const slApprox = slShown.pending
+      ? slEstimate != null
+      : position.slProfit == null && slEstimate != null;
+    const tpApprox = tpShown.pending
+      ? tpEstimate != null
+      : position.tpProfit == null && tpEstimate != null;
     addBands(
       `position:${position.ticket}`,
       position.openPrice,
-      position.sl,
-      position.tp,
-      position.slProfit,
-      position.tpProfit,
+      slShown.price,
+      tpShown.price,
+      slAmount,
+      tpAmount,
+      slApprox,
+      tpApprox,
     );
     if (position.stopOutPrice != null && position.stopOutPrice > 0) {
       chips.push({
@@ -462,13 +571,20 @@ export function ChartPanel({
     if (position.sl) {
       chips.push({
         key: `protect:${position.ticket}:sl`,
-        price: position.sl,
+        price: slShown.price ?? position.sl,
         color: SIDE_SELL,
-        text: `${volume(position.volume)}${signedMoney(position.slProfit, currency)}`,
+        text: `${volume(position.volume)}${signedMoney(slAmount, currency, slApprox)}`,
         onMove: (price) => {
-          gateway
-            .call('position.modify', { ticket: position.ticket, sl: roundPrice(price) })
-            .catch((err: Error) => notify('error', err.message));
+          const next = roundPrice(price);
+          if (Math.abs(next - (position.sl ?? 0)) <= tol) return;
+          markOptimistic(slKey, next);
+          requestModify(
+            slKey,
+            next,
+            (value) => gateway.call('position.modify', { ticket: position.ticket, sl: value }),
+            (err) => notify('error', err.message),
+            tol,
+          );
         },
         onRemove: () => {
           gateway
@@ -480,13 +596,20 @@ export function ChartPanel({
     if (position.tp) {
       chips.push({
         key: `protect:${position.ticket}:tp`,
-        price: position.tp,
+        price: tpShown.price ?? position.tp,
         color: SIDE_BUY,
-        text: `${volume(position.volume)}${signedMoney(position.tpProfit, currency)}`,
+        text: `${volume(position.volume)}${signedMoney(tpAmount, currency, tpApprox)}`,
         onMove: (price) => {
-          gateway
-            .call('position.modify', { ticket: position.ticket, tp: roundPrice(price) })
-            .catch((err: Error) => notify('error', err.message));
+          const next = roundPrice(price);
+          if (Math.abs(next - (position.tp ?? 0)) <= tol) return;
+          markOptimistic(tpKey, next);
+          requestModify(
+            tpKey,
+            next,
+            (value) => gateway.call('position.modify', { ticket: position.ticket, tp: value }),
+            (err) => notify('error', err.message),
+            tol,
+          );
         },
         onRemove: () => {
           gateway
@@ -826,16 +949,21 @@ export function ChartPanel({
     }
 
     for (const order of orders) {
-      specs.set(`order:${order.ticket}`, {
-        price: order.price,
+      const key = `order:${order.ticket}`;
+      specs.set(key, {
+        price: resolvePrice(key, order.price, tol).price ?? order.price,
         color: sideColor(order.side),
         text: '',
         onMove: (price) => {
-          if (Math.abs(price - order.price) > 1e-9) {
-            gateway
-              .call('order.modify', { ticket: order.ticket, price })
-              .catch((err: Error) => notify('error', err.message));
-          }
+          if (Math.abs(price - order.price) <= tol) return;
+          markOptimistic(key, price);
+          requestModify(
+            key,
+            price,
+            (value) => gateway.call('order.modify', { ticket: order.ticket, price: value }),
+            (err) => notify('error', err.message),
+            tol,
+          );
         },
       });
     }
@@ -848,26 +976,40 @@ export function ChartPanel({
         editable: false,
       });
       if (position.sl) {
+        const key = `position:${position.ticket}:sl`;
         specs.set(`protect:${position.ticket}:sl`, {
-          price: position.sl,
+          price: resolvePrice(key, position.sl, tol).price ?? position.sl,
           color: SIDE_SELL,
           text: '',
           onMove: (price) => {
-            gateway
-              .call('position.modify', { ticket: position.ticket, sl: price })
-              .catch((err: Error) => notify('error', err.message));
+            if (Math.abs(price - (position.sl ?? 0)) <= tol) return;
+            markOptimistic(key, price);
+            requestModify(
+              key,
+              price,
+              (value) => gateway.call('position.modify', { ticket: position.ticket, sl: value }),
+              (err) => notify('error', err.message),
+              tol,
+            );
           },
         });
       }
       if (position.tp) {
+        const key = `position:${position.ticket}:tp`;
         specs.set(`protect:${position.ticket}:tp`, {
-          price: position.tp,
+          price: resolvePrice(key, position.tp, tol).price ?? position.tp,
           color: SIDE_BUY,
           text: '',
           onMove: (price) => {
-            gateway
-              .call('position.modify', { ticket: position.ticket, tp: price })
-              .catch((err: Error) => notify('error', err.message));
+            if (Math.abs(price - (position.tp ?? 0)) <= tol) return;
+            markOptimistic(key, price);
+            requestModify(
+              key,
+              price,
+              (value) => gateway.call('position.modify', { ticket: position.ticket, tp: value }),
+              (err) => notify('error', err.message),
+              tol,
+            );
           },
         });
       }
