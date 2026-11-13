@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "MyTrade",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "identifier": "com.mytrade.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -18,7 +18,7 @@
         "minWidth": 1100,
         "minHeight": 700,
         "center": true,
-        "backgroundColor": "#131722",
+        "backgroundColor": "#eef1f5",
         "resizable": true,
         "fullscreen": false
       }
