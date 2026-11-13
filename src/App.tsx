@@ -22,6 +22,7 @@ import { buildShotMeta } from './chart/tv/shotMeta';
 import { gateway } from './gateway/client';
 import { applyAccent } from './lib/accent';
 import { beep, desktopNotify } from './lib/alert';
+import { mountBootProgress } from './lib/boot';
 import { handleGlobalShortcut, routeFromHash, useApp, type SidebarTab } from './store/useApp';
 import type {
   Account,
@@ -102,65 +103,9 @@ async function captureTradeShot(ticket: number): Promise<void> {
 }
 
 export default function App() {
-  // 启动动画一直保留到网关连上、且拿到第一份品种/持仓数据后再淡出，
-  // 避免先闪一屏余额为 0、列表为空的数据。连接慢或 MT5 未登录时给出提示，
-  // 并有超时兜底，不会把用户一直挡在启动页。
-  useEffect(() => {
-    const boot = document.getElementById('boot');
-    if (!boot) return;
-    const sub = document.getElementById('boot-sub');
-    let hidden = false;
-    let removeTimer = 0;
-    let disconnectedTimer = 0;
-
-    const hide = () => {
-      if (hidden) return;
-      hidden = true;
-      window.clearTimeout(disconnectedTimer);
-      boot.classList.add('boot-hide');
-      removeTimer = window.setTimeout(() => boot.remove(), 520);
-    };
-
-    const update = () => {
-      if (hidden) return;
-      const state = useApp.getState();
-      if (state.conn === 'open' && state.health) {
-        if (state.health.connected) {
-          if (state.symbols.length > 0) {
-            hide();
-            return;
-          }
-          if (sub) sub.textContent = '正在加载品种与持仓…';
-          return;
-        }
-        // MT5 终端可能还在启动/登录：先提示，8 秒仍未连上就放行到应用内
-        if (sub) sub.textContent = '等待 MT5 终端登录…';
-        if (disconnectedTimer === 0) {
-          disconnectedTimer = window.setTimeout(hide, 8000);
-        }
-        return;
-      }
-      if (sub) {
-        sub.textContent =
-          state.conn === 'connecting' ? '正在连接本地网关…' : '正在启动本地网关…';
-      }
-    };
-
-    update();
-    const unsubscribe = useApp.subscribe(update);
-    const slow = window.setTimeout(() => {
-      if (!hidden && sub) sub.textContent = '本地网关启动较慢，正在重试…';
-    }, 8000);
-    const watchdog = window.setTimeout(hide, 25000);
-
-    return () => {
-      unsubscribe();
-      window.clearTimeout(slow);
-      window.clearTimeout(watchdog);
-      window.clearTimeout(removeTimer);
-      window.clearTimeout(disconnectedTimer);
-    };
-  }, []);
+  // 启动页按「本地网关 → MT5 终端 → 账户同步」分阶段提示，
+  // 连上并拿到第一份品种/持仓数据后再淡出，避免先闪一屏空数据。
+  useEffect(() => mountBootProgress(), []);
 
   useEffect(() => {
     gateway.start();

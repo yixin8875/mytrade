@@ -351,6 +351,46 @@ export interface JournalBreakdown {
   wins: number;
   pnl: number;
   winRate: number;
+  /** 每笔平均盈亏 */
+  expectancy?: number;
+  /** 按初始风险折算的平均 R；没有带止损的交易时为空 */
+  avgR?: number | null;
+}
+
+export interface JournalRStats {
+  /** 能折算 R 的交易数（下单时带止损） */
+  trades: number;
+  /** 占区间全部交易的比例 */
+  coverage: number | null;
+  avgR: number | null;
+  totalR: number;
+  bestR: number | null;
+  worstR: number | null;
+  maxDrawdownR: number;
+  /** 最高浮盈达到 1R 的交易占比 */
+  hit1R: number | null;
+}
+
+export interface JournalTemplateStats {
+  planned: number;
+  reached1R: number;
+  breakeven: number;
+  held: number;
+  breakevenRate: number | null;
+  heldRate: number | null;
+  avgR: number | null;
+}
+
+export interface JournalExecutionSide {
+  trades: number;
+  avgSlippage: number | null;
+  avgSpread: number | null;
+}
+
+export interface JournalExecutionCross {
+  matched: number;
+  wins: JournalExecutionSide;
+  losses: JournalExecutionSide;
 }
 
 export interface JournalStats {
@@ -372,10 +412,18 @@ export interface JournalStats {
     bestTrade: number | null;
     worstTrade: number | null;
   };
+  /** R 口径的汇总与曲线 */
+  r: JournalRStats;
+  /** 模板分批止盈的执行情况 */
+  template: JournalTemplateStats;
+  /** 入场执行成本与输赢的交叉 */
+  execution: JournalExecutionCross;
   bySymbol: JournalBreakdown[];
   byHour: JournalBreakdown[];
   byTag: JournalBreakdown[];
+  byDuration: JournalBreakdown[];
   curve: { t: number; pnl: number; cum: number }[];
+  rCurve: { t: number; r: number; cum: number }[];
 }
 
 export interface PriceAlert {

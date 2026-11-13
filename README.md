@@ -72,7 +72,7 @@ python -m pip install -r gateway/requirements-dev.txt
 npm run check
 ```
 
-`npm run check` 先跑 TypeScript 类型检查，再跑 `gateway/tests` 下的 pytest：下单计划清洗与旧格式迁移、风控字段校验、日志分类与截图标注。
+`npm run check` 先跑 TypeScript 类型检查，再跑 `gateway/tests` 下的 pytest：下单计划清洗与旧格式迁移、风控字段校验、日志分类与截图标注、R 折算与模板执行统计。
 
 产物：
 
@@ -83,6 +83,8 @@ npm run check
 安装包未签名，首次运行 Windows 可能弹 SmartScreen，选「更多信息 → 仍要运行」。安装包已包含网关 sidecar，启动应用时会在后台自动拉起，退出应用时自动关闭，不需要另开终端运行 Python。
 
 > 品牌已改名为 Tally，但数据目录仍沿用 `MyTrade`，避免旧安装的数据和凭据需要迁移。
+
+启动页按「本地网关 → MT5 终端 → 账户同步」三阶段提示：网关起不来时显示 `gateway.log` 的最近一行，账户登录失败时显示具体原因和修正入口；终端长时间未连上会在 10 秒后放行到应用内，错误继续显示在底部状态栏。
 
 网关数据统一保存在 `%LOCALAPPDATA%\MyTrade\gateway\`：`config.json`（账户与风控）、`data\`（交易库、凭据、截图）、`audit\`（审计日志）和 `gateway.log`。从源码目录第一次运行新版网关时，会把旧的 `gateway/config.json`、`gateway/data/`、`gateway/audit/` 复制到这个目录一次；之后桌面版和手动启动共用同一份数据。
 
@@ -104,14 +106,19 @@ git commit -am "chore: 发布 v0.5.8"
 git push origin main
 ```
 
-3. 确认本机 `public/charting_library/` 存在，设置一个有 `contents: write` 权限的 GitHub token，然后打包并上传：
+3. 确认本机 `public/charting_library/` 存在，然后打包并上传。token 优先读 `GITHUB_TOKEN` / `GH_TOKEN`；都没设时会静默调用 `git credential fill` 从已保存的凭据里取，不会打印：
 
 ```bash
-export GITHUB_TOKEN=github_pat_xxx
 npm run release -- --notes "这一版改了什么"
 ```
 
-脚本会先构建网关 sidecar，再构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.5.8` 的 tag 与 release、上传安装包与清单。只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`（此时 sidecar 也必须已经构建好）。
+需要走代理时用 `RELEASE_PROXY`（也认 `HTTPS_PROXY`）：
+
+```bash
+RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了什么"
+```
+
+脚本会先构建网关 sidecar，再构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.5.8` 的 tag 与 release、上传安装包与清单。`--upload` 表示必须上传（拿不到 token 直接失败）；只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`（此时 sidecar 也必须已经构建好）。同名资产会先删除再上传，网络失败自动重试，重复执行是安全的。
 
 > 更新签名私钥在 `~/.tauri/mytrade.key`（已被 `.gitignore` 排除，**不要提交**），公钥写在 `tauri.conf.json` 的 `plugins.updater.pubkey`。私钥丢失后，已安装的旧版本将无法再自动更新。第一次需要手动安装一次带 updater 的版本（v0.2.0），之后才能自动更新。
 

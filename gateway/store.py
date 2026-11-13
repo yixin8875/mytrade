@@ -430,6 +430,27 @@ class Store:
             ).fetchone()
         return str(row["tag"]) if row else None
 
+    def intent_sl_map(self, login: int, tickets: list[int]) -> dict[int, float]:
+        """每笔持仓最初下单时带的止损价，用来把盈亏折算成 R。
+
+        同一 ticket 可能有多条意图（重试/改单），按时间取最早一条非空止损。
+        """
+        unique = sorted({int(ticket) for ticket in tickets if ticket})
+        out: dict[int, float] = {}
+        with self._lock:
+            for start in range(0, len(unique), 500):
+                chunk = unique[start : start + 500]
+                marks = ",".join("?" * len(chunk))
+                rows = self._db.execute(
+                    f"""SELECT ticket, sl FROM intents
+                        WHERE login=? AND sl IS NOT NULL AND ticket IN ({marks})
+                        ORDER BY created_at ASC""",
+                    (int(login), *chunk),
+                ).fetchall()
+                for row in rows:
+                    out.setdefault(int(row["ticket"]), float(row["sl"]))
+        return out
+
     # ---------- alerts ----------
 
     def alerts_list(self, login: int = 0) -> list[dict[str, Any]]:
@@ -674,6 +695,30 @@ class Store:
             "rejectReasons": reject_reasons,
             "rows": list(reversed(rows))[: int(200)],
         }
+
+    def execution_entry_map(self, login: int, since: int) -> dict[int, dict[str, float | None]]:
+        """每笔成交的入场执行成本（点差 / 滑点），每个 ticket 取第一条记录。"""
+        with self._lock:
+            rows = self._db.execute(
+                """SELECT ticket, spread_points, slippage_points FROM executions
+                   WHERE login=? AND created_at>=? AND ticket IS NOT NULL
+                   ORDER BY id ASC""",
+                (int(login), int(since)),
+            ).fetchall()
+        out: dict[int, dict[str, float | None]] = {}
+        for row in rows:
+            ticket = int(row["ticket"])
+            if ticket in out:
+                continue
+            out[ticket] = {
+                "spread": float(row["spread_points"])
+                if row["spread_points"] is not None
+                else None,
+                "slippage": float(row["slippage_points"])
+                if row["slippage_points"] is not None
+                else None,
+            }
+        return out
 
     # ---------- audit ----------
 

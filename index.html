@@ -102,11 +102,71 @@
         font: 500 17px/1.2 "Segoe UI", -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif;
         color: var(--boot-text);
       }
+      .boot-steps {
+        display: flex;
+        align-items: center;
+        margin-top: 18px;
+        font-size: 10.5px;
+        line-height: 1;
+        color: var(--boot-muted);
+      }
+      .boot-steps span {
+        position: relative;
+        padding: 4px 8px;
+        border: 1px solid var(--boot-line);
+        border-radius: 999px;
+        white-space: nowrap;
+        transition:
+          color 0.2s ease,
+          border-color 0.2s ease,
+          background 0.2s ease;
+      }
+      .boot-steps span + span {
+        margin-left: 14px;
+      }
+      .boot-steps span + span::before {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: -15px;
+        width: 14px;
+        height: 1px;
+        background: var(--boot-line);
+      }
+      .boot-steps span[data-state="active"] {
+        color: var(--boot-text);
+        border-color: var(--boot-accent);
+        background: rgba(31, 95, 214, 0.08);
+      }
+      html[data-theme="dark"] .boot-steps span[data-state="active"] {
+        background: rgba(123, 161, 255, 0.14);
+      }
+      .boot-steps span[data-state="done"] {
+        color: var(--boot-up);
+        border-color: var(--boot-up);
+      }
+      .boot-steps span[data-state="failed"] {
+        color: var(--boot-down);
+        border-color: var(--boot-down);
+      }
       .boot-sub {
         min-height: 16px;
         margin-top: 6px;
         font-size: 12px;
         color: var(--boot-muted);
+      }
+      .boot-note {
+        width: 100%;
+        margin-top: 7px;
+        font-size: 11px;
+        line-height: 1.55;
+        color: var(--boot-muted);
+        text-align: center;
+        white-space: pre-line;
+        opacity: 0.92;
+      }
+      .boot-note:empty {
+        display: none;
       }
       .boot-bar {
         width: 100%;
@@ -150,7 +210,13 @@
           <span></span><span></span><span></span><span></span><span></span>
         </div>
         <div class="boot-title">Tally</div>
+        <div class="boot-steps" id="boot-steps" aria-hidden="true">
+          <span data-step="gateway" data-state="active">本地网关</span>
+          <span data-step="terminal">MT5 终端</span>
+          <span data-step="account">账户同步</span>
+        </div>
         <div class="boot-sub" id="boot-sub">正在启动本地网关…</div>
+        <div class="boot-note" id="boot-note"></div>
         <div class="boot-bar" aria-hidden="true"><i></i></div>
       </div>
     </div>

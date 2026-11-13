@@ -12,6 +12,12 @@ fn gateway_start(app: tauri::AppHandle) {
     gateway::start(&app);
 }
 
+/// 启动页诊断：网关是否已监听、sidecar 是否存在、最近日志
+#[tauri::command]
+fn gateway_status(app: tauri::AppHandle) -> gateway::GatewayStatus {
+    gateway::status(&app)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let app = tauri::Builder::default()
@@ -19,7 +25,8 @@ pub fn run() {
     .plugin(tauri_plugin_process::init())
     .invoke_handler(tauri::generate_handler![
       gateway_prepare_update,
-      gateway_start
+      gateway_start,
+      gateway_status
     ])
     .manage(gateway::GatewayState::default())
     .setup(|app| {

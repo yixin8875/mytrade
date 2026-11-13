@@ -30,10 +30,17 @@ export function StatusBar() {
 
       <span className="h-3 w-px bg-tv-border" />
 
-      <span>
-        {health?.connected
-          ? `${health.terminal?.name ?? 'MT5'} · build ${health.terminal?.build ?? '—'}`
-          : 'MT5 等待终端'}
+      <span
+        className={clsx('min-w-0', !health?.connected && 'max-w-[300px] truncate')}
+        title={!health?.connected ? (health?.lastError?.message ?? undefined) : undefined}
+      >
+        {health?.connected ? (
+          `${health.terminal?.name ?? 'MT5'} · build ${health.terminal?.build ?? '—'}`
+        ) : health?.lastError ? (
+          <span className="text-tv-warn">{health.lastError.message}</span>
+        ) : (
+          'MT5 等待终端'
+        )}
       </span>
 
       {account && (

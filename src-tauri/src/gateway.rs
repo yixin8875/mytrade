@@ -16,6 +16,15 @@ const TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
 #[derive(Default)]
 pub struct GatewayState(pub Mutex<Option<Child>>);
 
+/// 启动页用来区分「网关没起来」和「终端没连上」。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayStatus {
+    pub listening: bool,
+    pub sidecar: bool,
+    pub log_tail: Option<String>,
+}
+
 fn gateway_data_dir(app: &AppHandle) -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -69,6 +78,33 @@ fn sidecar_path(app: &AppHandle) -> Option<PathBuf> {
 fn gateway_listening() -> bool {
     let address: SocketAddr = GATEWAY_ADDR.parse().expect("valid gateway address");
     TcpStream::connect_timeout(&address, Duration::from_millis(300)).is_ok()
+}
+
+fn read_log_tail(app: &AppHandle, lines: usize) -> Option<String> {
+    let text = fs::read_to_string(gateway_data_dir(app).join("gateway.log")).ok()?;
+    let mut tail: Vec<&str> = text.lines().collect();
+    if tail.len() > lines {
+        tail = tail.split_off(tail.len() - lines);
+    }
+    let joined = tail
+        .into_iter()
+        .map(|line| line.chars().take(300).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if joined.is_empty() {
+        None
+    } else {
+        Some(joined)
+    }
+}
+
+/// 给启动页用：网关进程是否在监听、sidecar 是否存在、最近几行日志。
+pub fn status(app: &AppHandle) -> GatewayStatus {
+    GatewayStatus {
+        listening: gateway_listening(),
+        sidecar: sidecar_path(app).is_some(),
+        log_tail: read_log_tail(app, 6),
+    }
 }
 
 pub fn start(app: &AppHandle) {
