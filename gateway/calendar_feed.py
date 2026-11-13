@@ -78,7 +78,7 @@ def _normalize(raw: object) -> list[dict]:
 def _fetch() -> list[dict]:
     request = Request(
         FEED_URL,
-        headers={"User-Agent": "Tally/0.5.9 (Windows desktop; economic calendar)"},
+        headers={"User-Agent": "Tally/0.6.0 (Windows desktop; economic calendar)"},
     )
     with urlopen(request, timeout=15) as response:  # noqa: S310 - 固定的 https 地址
         raw = json.load(response)

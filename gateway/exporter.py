@@ -17,7 +17,7 @@ from typing import Any
 
 from store import Store
 
-APP_VERSION = "0.5.9"
+APP_VERSION = "0.6.0"
 JOURNAL_HEADER = [
     "登录",
     "持仓号",
