@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Bar } from '../gateway/types';
+import { useApp } from '../store/useApp';
 import { setReplayBars } from './source';
 import { useReplay, type OrderInput } from './store';
 import { makeBar, makeSession } from './testUtils';
+import type { ReplayPosition, ReplaySession } from './types';
 
 const START = Date.UTC(2024, 0, 1) / 1000;
 
@@ -319,5 +322,292 @@ describe('会话管理', () => {
     expect(copy.trades).toHaveLength(0);
     expect(copy.notes).toHaveLength(0);
     expect(copy.orders).toHaveLength(0);
+  });
+});
+
+function setupBars(bars: Bar[], cursorIndex = 1): ReplaySession {
+  const session = makeSession({
+    startTs: bars[0].time,
+    endTs: bars[bars.length - 1].time,
+    fetchStartTs: bars[0].time - 600,
+    startIndex: 0,
+    cursorIndex,
+    totalBars: bars.length,
+    cursorTs: bars[cursorIndex - 1]?.time ?? bars[0].time,
+  });
+  setReplayBars(session.id, bars);
+  useReplay.setState({ sessions: [session], activeId: session.id });
+  return session;
+}
+
+function pushPosition(session: ReplaySession, overrides: Partial<ReplayPosition> = {}): void {
+  session.positions.push({
+    id: 'pos-1',
+    side: 'buy',
+    volume: 1,
+    entry: 2000,
+    sl: null,
+    tp: null,
+    openTs: START,
+    initialRisk: null,
+    initialRiskPrice: null,
+    openCommission: 0,
+    tag: '',
+    mfe: 0,
+    mae: 0,
+    templateStep: 0,
+    ...overrides,
+  });
+}
+
+describe('下单校验的细节', () => {
+  it('限价/停损价格正好落在点差边界上会被拒绝', () => {
+    setup(); // bid 2000.5、ask 2000.7、半跳容差 0.005
+    expect(state().submitOrder(input({ type: 'limit', price: 2000.7 }))).toBe(
+      '买入限价需要低于当前卖出价',
+    );
+    expect(state().submitOrder(input({ type: 'limit', price: 2000.69 }))).toBeNull();
+
+    expect(state().submitOrder(input({ type: 'limit', side: 'sell', price: 2000.5 }))).toBe(
+      '卖出限价需要高于当前买入价',
+    );
+    expect(state().submitOrder(input({ type: 'limit', side: 'sell', price: 2000.51 }))).toBeNull();
+
+    expect(state().submitOrder(input({ type: 'stop', price: 2000.7 }))).toBe(
+      '买入停损需要高于当前卖出价',
+    );
+    expect(state().submitOrder(input({ type: 'stop', price: 2000.71 }))).toBeNull();
+
+    expect(state().submitOrder(input({ type: 'stop', side: 'sell', price: 2000.5 }))).toBe(
+      '卖出停损需要低于当前买入价',
+    );
+    expect(state().submitOrder(input({ type: 'stop', side: 'sell', price: 2000.49 }))).toBeNull();
+  });
+
+  it('市价单的止损止盈也按当前 ask/bid 校验', () => {
+    setup();
+    expect(state().submitOrder(input({ sl: 2000.7 }))).toBe('多头止损需要低于入场价');
+    expect(state().submitOrder(input({ tp: 2000.6 }))).toBe('多头止盈需要高于入场价');
+    expect(state().submitOrder(input({ side: 'sell', sl: 2000.5 }))).toBe(
+      '空头止损需要高于入场价',
+    );
+    expect(state().submitOrder(input({ side: 'sell', tp: 2000.5 }))).toBe(
+      '空头止盈需要低于入场价',
+    );
+  });
+
+  it('非法委托价直接拒绝', () => {
+    setup();
+    expect(state().submitOrder(input({ type: 'limit', price: 0 }))).toBe('请填写委托价');
+    expect(state().submitOrder(input({ type: 'limit', price: -5 }))).toBe('请填写委托价');
+  });
+
+  it('手数按步长取整，上限夹到最大手数', () => {
+    setup();
+    state().submitOrder(input({ volume: 0.004 }));
+    expect(activeSession().orders[0].volume).toBe(0.01);
+
+    state().submitOrder(input({ volume: 500 }));
+    expect(activeSession().orders[1].volume).toBe(100);
+  });
+
+  it('没有行情时拒绝下单', () => {
+    const session = setup();
+    setReplayBars(session.id, []);
+    expect(state().submitOrder(input())).toBe('还没有可用行情');
+  });
+
+  it('运行中的会话允许下单，已归档的拒绝', () => {
+    const session = setup();
+    session.status = 'running';
+    useReplay.setState({ sessions: [{ ...session }] });
+    expect(state().submitOrder(input())).toBeNull();
+
+    session.status = 'archived';
+    useReplay.setState({ sessions: [{ ...session }] });
+    expect(state().submitOrder(input())).toBe('复盘已结束');
+  });
+
+  it('模板阶段是深拷贝，提交后再改原数组不影响订单', () => {
+    setup();
+    const steps = [{ atR: 1, closePercent: 50, moveBreakeven: true }];
+    state().submitOrder(input({ steps }));
+
+    steps[0].atR = 9;
+    expect(activeSession().orders[0].steps?.[0].atR).toBe(1);
+  });
+
+  it('空头市价按当前 bid 记录委托价，并在下一根开盘按 bid 成交', () => {
+    setup();
+    state().submitOrder(input({ side: 'sell' }));
+    expect(activeSession().orders[0].price).toBe(2000.5);
+
+    state().step(1);
+
+    expect(activeSession().positions[0].entry).toBe(2001);
+    expect(activeSession().positions[0].side).toBe('sell');
+  });
+});
+
+describe('成交后的交易路径', () => {
+  it('市价成交的同一根 K 线就能触发止盈', () => {
+    setupBars([
+      makeBar(START, 2000, 2000.6, 1999.8, 2000.4),
+      makeBar(START + 60, 2000.5, 2005, 2000, 2004),
+      makeBar(START + 120, 2004, 2005, 2003, 2004),
+    ]);
+    state().submitOrder(input({ sl: 1998, tp: 2002 }));
+
+    state().step(1);
+
+    const session = activeSession();
+    expect(session.positions).toHaveLength(0);
+    expect(session.trades).toHaveLength(1);
+    expect(session.trades[0].closedBy).toBe('tp');
+    expect(session.trades[0].entry).toBeCloseTo(2000.7, 10);
+    expect(session.trades[0].exit).toBe(2002);
+    expect(session.trades[0].profit).toBeCloseTo(120, 8);
+    expect(session.balance).toBeCloseTo(10120, 8);
+  });
+
+  it('持仓浮亏计入净值和最大回撤，回升后回撤不减少', () => {
+    setupBars([
+      makeBar(START, 2000, 2000.6, 1999.8, 2000.4),
+      makeBar(START + 60, 2000.5, 2001, 1989, 1990),
+      makeBar(START + 120, 1990, 2006, 1989, 2005),
+      makeBar(START + 180, 2005, 2006, 2004, 2005),
+    ]);
+    state().submitOrder(input());
+
+    state().step(1);
+    let session = activeSession();
+    expect(session.positions[0].entry).toBeCloseTo(2000.7, 10);
+    expect(session.equity).toBeCloseTo(8925, 8);
+    expect(session.maxDrawdownPct).toBeCloseTo(10.75, 8);
+
+    state().step(1);
+    session = activeSession();
+    expect(session.equity).toBeCloseTo(10425, 8);
+    expect(session.peakEquity).toBeCloseTo(10425, 8);
+    expect(session.maxDrawdownPct).toBeCloseTo(10.75, 8);
+  });
+
+  it('净值归零时暂停回放并提示爆仓', () => {
+    const session = setupBars([
+      makeBar(START, 2000, 2000.6, 1999.8, 2000.4),
+      makeBar(START + 60, 2000.5, 2001, 1989, 1990),
+      makeBar(START + 120, 1990, 1991, 1989, 1990),
+    ]);
+    session.balance = 300;
+    session.equity = 300;
+    session.peakEquity = 300;
+    useReplay.setState({ sessions: [{ ...session }], activeId: session.id });
+    useApp.getState().clearToast();
+
+    state().submitOrder(input());
+    state().step(1);
+
+    expect(activeSession().status).toBe('paused');
+    expect(state().playing).toBe(false);
+    expect(activeSession().positions).toHaveLength(1);
+    expect(useApp.getState().toast).toMatchObject({
+      kind: 'error',
+      text: '模拟账户已爆仓，回放已暂停',
+    });
+    useApp.getState().clearToast();
+  });
+
+  it('结束复盘按最后价格平掉持仓并撤掉挂单', () => {
+    setup();
+    state().submitOrder(input());
+    state().submitOrder(input({ type: 'limit', price: 1990 }));
+    state().step(1);
+
+    state().finish();
+
+    const session = activeSession();
+    expect(session.status).toBe('finished');
+    expect(session.orders).toHaveLength(0);
+    expect(session.positions).toHaveLength(0);
+    expect(session.trades).toHaveLength(1);
+    expect(session.trades[0].closedBy).toBe('finish');
+    expect(session.trades[0].exit).toBeCloseTo(2001.5, 10);
+    expect(session.equity).toBeCloseTo(session.balance, 10);
+  });
+
+  it('部分平仓由 store 透传给引擎', () => {
+    setup();
+    state().submitOrder(input());
+    state().step(1);
+    const position = activeSession().positions[0];
+
+    state().closePosition(position.id, 0.4);
+
+    const session = activeSession();
+    expect(session.trades[0].volume).toBe(0.4);
+    expect(session.positions[0].volume).toBe(0.6);
+  });
+
+  it('改止损止盈支持清空，未知仓位/挂单不会报错', () => {
+    setup();
+    state().submitOrder(input());
+    state().step(1);
+    const position = activeSession().positions[0];
+
+    state().modifyStops(position.id, { sl: 1990, tp: 2020 });
+    expect(activeSession().positions[0].sl).toBe(1990);
+
+    state().modifyStops(position.id, { sl: null, tp: null });
+    expect(activeSession().positions[0].sl).toBeNull();
+    expect(activeSession().positions[0].tp).toBeNull();
+
+    expect(() => state().modifyStops('missing', { sl: 1 })).not.toThrow();
+    expect(() => state().modifyOrder('missing', 1234.567)).not.toThrow();
+    expect(() => state().cancelOrder('missing')).not.toThrow();
+  });
+
+  it('没有当前 K 线时手动平仓不动仓位', () => {
+    const session = setup();
+    pushPosition(session);
+    setReplayBars(session.id, []);
+    useReplay.setState({ sessions: [{ ...session }], activeId: session.id });
+
+    state().closePosition('pos-1');
+
+    expect(activeSession().positions).toHaveLength(1);
+    expect(activeSession().trades).toHaveLength(0);
+  });
+
+  it('下单模板跟随成交单在回放里执行', () => {
+    setupBars([
+      makeBar(START, 2000, 2000.4, 1999.6, 2000),
+      makeBar(START + 60, 2000, 2002, 1999.8, 2001),
+      makeBar(START + 120, 2001, 2015, 2000.5, 2014),
+      makeBar(START + 180, 2014, 2015, 2010, 2012),
+      makeBar(START + 240, 2012, 2013, 2010, 2011),
+    ]);
+    state().submitOrder(
+      input({
+        sl: 1990,
+        steps: [{ atR: 1, closePercent: 50, moveBreakeven: true }],
+        templateName: '日内',
+      }),
+    );
+
+    state().step(1);
+    expect(activeSession().positions[0].entry).toBeCloseTo(2000.2, 10);
+    expect(activeSession().positions[0].templateName).toBe('日内');
+
+    state().step(2);
+
+    const session = activeSession();
+    expect(session.trades).toHaveLength(1);
+    expect(session.trades[0].closedBy).toBe('template');
+    expect(session.trades[0].volume).toBe(0.5);
+    expect(session.trades[0].exit).toBeCloseTo(2010.4, 10);
+    expect(session.positions).toHaveLength(1);
+    expect(session.positions[0].volume).toBe(0.5);
+    expect(session.positions[0].sl).toBeCloseTo(2000.2, 10);
+    expect(session.positions[0].templateStep).toBe(1);
   });
 });

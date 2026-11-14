@@ -144,3 +144,57 @@ describe('模板摘要', () => {
     ).toBe('1% · 1R 平50%→保本');
   });
 });
+
+describe('模板清洗的边界', () => {
+  it('数字字符串按数字处理', () => {
+    expect(
+      normalizeTemplateSteps([{ atR: '1.5', closePercent: '50', moveBreakeven: true }]),
+    ).toEqual([{ atR: 1.5, closePercent: 50, moveBreakeven: true }]);
+  });
+
+  it('atR 正好 100 保留，超过 100 丢弃', () => {
+    expect(normalizeTemplateSteps([{ atR: 100 }])).toHaveLength(1);
+    expect(normalizeTemplateSteps([{ atR: 100.001 }])).toHaveLength(0);
+  });
+
+  it('平仓比例必须大于 0 且小于 100', () => {
+    expect(normalizeTemplateSteps([{ atR: 1, closePercent: 0 }])[0].closePercent).toBeNull();
+    expect(normalizeTemplateSteps([{ atR: 1, closePercent: 100 }])[0].closePercent).toBeNull();
+    expect(normalizeTemplateSteps([{ atR: 1, closePercent: 0.5 }])[0].closePercent).toBe(0.5);
+    expect(normalizeTemplateSteps([{ atR: 1, closePercent: 99 }])[0].closePercent).toBe(99);
+  });
+
+  it('缺 atR 的条目直接丢弃', () => {
+    expect(normalizeTemplateSteps([{ closePercent: 50 }, { atR: 1, closePercent: 50 }])).toEqual([
+      { atR: 1, closePercent: 50, moveBreakeven: false },
+    ]);
+  });
+});
+
+describe('templateTpTarget 的取整边界', () => {
+  it('没有 tick 时返回原始价位', () => {
+    expect(
+      templateTpTarget({
+        side: 'buy',
+        price: 2000,
+        sl: 1990.123,
+        rewardR: 2,
+        tick: 0,
+        digits: 5,
+      }),
+    ).toBeCloseTo(2019.754, 8);
+  });
+
+  it('止损在反方向时按距离计算 R', () => {
+    expect(
+      templateTpTarget({ side: 'buy', price: 2000, sl: 2010, rewardR: 1.5, tick: 0.01, digits: 2 }),
+    ).toBe(2015);
+  });
+});
+
+describe('isRiskDeviated 的容差', () => {
+  it('1e-9 以内不算偏离，超过则算', () => {
+    expect(isRiskDeviated(DEFAULT_TEMPLATE, risk({ value: 0.5 + 5e-10 }))).toBe(false);
+    expect(isRiskDeviated(DEFAULT_TEMPLATE, risk({ value: 0.5 + 5e-9 }))).toBe(true);
+  });
+});

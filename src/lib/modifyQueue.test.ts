@@ -148,4 +148,104 @@ describe('revertModify', () => {
     expect(send).toHaveBeenCalledTimes(2);
     expect(send).toHaveBeenLastCalledWith(100);
   });
+
+  it('请求在飞时拖回原价：落地后补发原价', async () => {
+    vi.useFakeTimers();
+    let finish: (() => void) | null = null;
+    const send = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    requestModify('revert-flight', 110, send);
+    await vi.advanceTimersByTimeAsync(320);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    revertModify('revert-flight', 100, send);
+    finish!();
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenLastCalledWith(100);
+  });
+
+  it('拖回的价格与上次发送价在容差内时什么都不发', async () => {
+    vi.useFakeTimers();
+    const send = vi.fn(() => Promise.resolve());
+
+    requestModify('revert-tol', 100, send, undefined, 0.5);
+    await vi.advanceTimersByTimeAsync(320);
+    revertModify('revert-tol', 100.4, send, undefined, 0.5);
+    await vi.advanceTimersByTimeAsync(320);
+
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('多通道与回调更新', () => {
+  it('不同通道互不影响，各自节流', async () => {
+    vi.useFakeTimers();
+    const slSend = vi.fn(() => Promise.resolve());
+    const tpSend = vi.fn(() => Promise.resolve());
+
+    requestModify('position:1:sl', 1990, slSend);
+    requestModify('position:1:tp', 2050, tpSend);
+    await vi.advanceTimersByTimeAsync(320);
+
+    expect(slSend).toHaveBeenCalledWith(1990);
+    expect(tpSend).toHaveBeenCalledWith(2050);
+  });
+
+  it('同一通道以最后一次传入的发送函数与错误回调为准', async () => {
+    vi.useFakeTimers();
+    const firstSend = vi.fn(() => Promise.reject(new Error('旧连接')));
+    const secondSend = vi.fn(() => Promise.resolve());
+    const firstError = vi.fn();
+    const secondError = vi.fn();
+
+    requestModify('swap', 100, firstSend, firstError);
+    requestModify('swap', 101, secondSend, secondError);
+    await vi.advanceTimersByTimeAsync(320);
+
+    expect(firstSend).not.toHaveBeenCalled();
+    expect(secondSend).toHaveBeenCalledWith(101);
+    expect(firstError).not.toHaveBeenCalled();
+    expect(secondError).not.toHaveBeenCalled();
+  });
+
+  it('请求在飞时又请求同一价格，落地后仍会补发一次', async () => {
+    vi.useFakeTimers();
+    let finish: (() => void) | null = null;
+    const send = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    requestModify('dup-flight', 100, send);
+    await vi.advanceTimersByTimeAsync(320);
+    requestModify('dup-flight', 100, send);
+
+    finish!();
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenLastCalledWith(100);
+  });
+
+  it('发送函数返回非 Promise 时通道不会卡死', async () => {
+    vi.useFakeTimers();
+    const send = vi.fn(() => undefined as unknown as Promise<unknown>);
+
+    requestModify('non-promise', 100, send);
+    await vi.advanceTimersByTimeAsync(320);
+    requestModify('non-promise', 101, send);
+    await vi.advanceTimersByTimeAsync(320);
+
+    expect(send).toHaveBeenLastCalledWith(101);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
 });

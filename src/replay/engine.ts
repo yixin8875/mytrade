@@ -139,6 +139,8 @@ function closePosition(
   closedBy: ReplayTrade['closedBy'],
 ): void {
   const info = session.symbolInfo;
+  // 0/负数会被 roundVolume 抬到最小手数，等于悄悄平掉一点仓位
+  if (!(volume > 0)) return;
   const index = session.positions.findIndex((item) => item.id === positionId);
   if (index < 0) return;
   const position = session.positions[index];

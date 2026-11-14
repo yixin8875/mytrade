@@ -39,7 +39,8 @@ export function templateSummary(template: TradeTemplate): string {
 }
 
 /**
- * 阶段清洗：R 必须为正、平仓比例留空或 1–99、按 R 升序、最多 MAX_TEMPLATE_STEPS 条。
+ * 阶段清洗：R 必须为正、平仓比例留空或 0–100 之间（不含端点）、
+ * 按 R 升序、最多 MAX_TEMPLATE_STEPS 条。
  * 存储层和编辑器都走同一份规则，避免设置页与下单票算出不同的结果。
  */
 export function normalizeTemplateSteps(raw: unknown): TemplateStep[] {
