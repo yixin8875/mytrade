@@ -316,7 +316,7 @@ def test_未连接时健康状态没有终端信息(worker):
     assert data["config"] == worker.cfg.public()
     assert data["lastError"] is None
     assert data["serverOffset"] == 0
-    assert data["version"] == "0.7.0"
+    assert data["version"] == "0.7.1"
     assert isinstance(data["serverTime"], int)
 
 
