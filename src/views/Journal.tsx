@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { RefreshCw } from 'lucide-react';
 import { gateway } from '../gateway/client';
+import { TradeReviewDrawer } from '../components/TradeReviewDrawer';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
+import { usePrivacyMask } from '../lib/privacy';
 import type { JournalBreakdown, JournalRecord, JournalStats } from '../gateway/types';
 import { isShotMeta, shotY, type ShotMeta } from '../chart/tv/shotMeta';
 
@@ -54,6 +56,7 @@ function fmtDuration(sec: number): string {
 export function JournalView() {
   const notify = useApp((s) => s.notify);
   const activeLogin = useApp((s) => s.account?.login ?? 0);
+  usePrivacyMask();
 
   const [days, setDays] = useState(30);
   const [stats, setStats] = useState<JournalStats | null>(null);
@@ -62,6 +65,7 @@ export function JournalView() {
   const [editing, setEditing] = useState<{ id: number; value: string } | null>(null);
   const [shot, setShot] = useState<JournalRecord | null>(null);
   const [shotMeta, setShotMeta] = useState<ShotMeta | null>(null);
+  const [reviewing, setReviewing] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -295,13 +299,14 @@ export function JournalView() {
                     <th className="px-3 py-2 text-right font-normal">MFE / MAE</th>
                     <th className="px-2 py-2 font-normal">出场</th>
                     <th className="px-2 py-2 font-normal">标签</th>
-                    <th className="px-4 py-2 font-normal">图</th>
+                    <th className="px-2 py-2 font-normal">图</th>
+                    <th className="px-4 py-2 font-normal" />
                   </tr>
                 </thead>
                 <tbody>
                   {records.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="px-4 py-14 text-center text-[12px] text-console-faint">
+                      <td colSpan={11} className="px-4 py-14 text-center text-[12px] text-console-faint">
                         {loading ? '读取中…' : '这段时间还没有已平仓交易'}
                       </td>
                     </tr>
@@ -388,7 +393,7 @@ export function JournalView() {
                           </button>
                         )}
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-2 py-2.5">
                         {record.has_shot ? (
                           <button
                             onClick={() => setShot(record)}
@@ -400,6 +405,14 @@ export function JournalView() {
                           <span className="text-console-faint">—</span>
                         )}
                       </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <button
+                          onClick={() => setReviewing(record.position_id)}
+                          className="h-7 rounded-md border border-console-line bg-console-card px-2 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover"
+                        >
+                          复盘
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -408,6 +421,12 @@ export function JournalView() {
           </section>
         </div>
       </div>
+
+      <TradeReviewDrawer
+        positionId={reviewing}
+        onClose={() => setReviewing(null)}
+        onChanged={() => void load()}
+      />
 
       {shot && (
         <div

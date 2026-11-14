@@ -14,10 +14,15 @@ import MetaTrader5 as mt5
 
 import exporter
 from accounts import AccountError, AccountManager
+from ai import AI, AIError
 from calendar_feed import week_payload
 from config import BASE_DIR, Config
 from journal import TradeJournal
+from missed import Missed, MissedError
+from score import Score
 from notify import Notifier
+from review import Review, ReviewError
+from routines import RoutineError, Routines
 from secure_store import CredentialStore
 from store import Store
 
@@ -188,6 +193,11 @@ class Mt5Worker:
         self._risk_tracked: dict[int, float] = {}
         # 交易日志（成交配对 + MFE/MAE + 统计）与第三方告警通道
         self._journal = TradeJournal(store)
+        self._review = Review(store)
+        self._routines = Routines(store)
+        self._missed = Missed(store)
+        self._score = Score(store, self._review)
+        self._ai = AI(store, self._review, self._account_mgr.credentials, self._score)
         self._notifier = Notifier(cfg.alert_channels, store)
         # 价格告警：DB 里读出来缓存在内存，每 0.5 秒扫一遍
         self._alerts: list[dict] = []
@@ -792,6 +802,103 @@ class Mt5Worker:
                 "written": self._journal.sync(self._login(), force=True)
             },
             "journal.screenshot.save": self._journal_shot,
+            "score.get": lambda p: self._review_call(
+                lambda: self._score.get(p, self._login(), self._server_offset)
+            ),
+            "review.trades": lambda p: self._review_call(
+                lambda: self._review.trades(p, self._login(), self._server_offset)
+            ),
+            "diary.calendar": lambda p: self._review_call(
+                lambda: self._review.calendar(p, self._login(), self._server_offset)
+            ),
+            "diary.day": lambda p: self._review_call(
+                lambda: self._review.day(p, self._login(), self._server_offset)
+            ),
+            "diary.note.save": lambda p: self._review_call(
+                lambda: self._review.note_save(p, self._login())
+            ),
+            "diary.templates": lambda p: self._review_call(
+                lambda: self._review.templates(p, self._login())
+            ),
+            "diary.template.save": lambda p: self._review_call(
+                lambda: self._review.template_save(p, self._login())
+            ),
+            "diary.template.delete": lambda p: self._review_call(
+                lambda: self._review.template_delete(p, self._login())
+            ),
+            "strategy.list": lambda p: self._review_call(
+                lambda: self._review.strategy_list(p, self._login())
+            ),
+            "strategy.save": lambda p: self._review_call(
+                lambda: self._review.strategy_save(p, self._login())
+            ),
+            "strategy.delete": lambda p: self._review_call(
+                lambda: self._review.strategy_delete(p, self._login())
+            ),
+            "strategy.tradeNote": lambda p: self._review_call(
+                lambda: self._review.trade_note(p, self._login())
+            ),
+            "strategy.tradeNote.save": lambda p: self._review_call(
+                lambda: self._review.trade_note_save(p, self._login())
+            ),
+            "strategy.check": lambda p: self._review_call(
+                lambda: self._review.check(p, self._login())
+            ),
+            "strategy.adherence": lambda p: self._review_call(
+                lambda: self._review.adherence(p, self._login(), self._server_offset)
+            ),
+            "review.settings": lambda p: self._review_call(
+                lambda: self._review.settings(p, self._login())
+            ),
+            "review.settings.save": lambda p: self._review_call(
+                lambda: self._review.settings_save(p, self._login())
+            ),
+            "routine.list": lambda p: self._routine_call(
+                lambda: self._routines.list(p, self._login())
+            ),
+            "routine.seed": lambda p: self._routine_call(
+                lambda: self._routines.seed(p, self._login())
+            ),
+            "routine.day": lambda p: self._routine_call(
+                lambda: self._routines.day(p, self._login())
+            ),
+            "routine.save": lambda p: self._routine_call(
+                lambda: self._routines.save(p, self._login())
+            ),
+            "routine.delete": lambda p: self._routine_call(
+                lambda: self._routines.delete(p, self._login())
+            ),
+            "routine.toggle": lambda p: self._routine_call(
+                lambda: self._routines.toggle(p, self._login())
+            ),
+            "routine.heatmap": lambda p: self._routine_call(
+                lambda: self._routines.heatmap(p, self._login())
+            ),
+            "missed.list": lambda p: self._missed_call(
+                lambda: self._missed.list(p, self._login())
+            ),
+            "missed.save": lambda p: self._missed_call(
+                lambda: self._missed.save(p, self._login())
+            ),
+            "missed.delete": lambda p: self._missed_call(
+                lambda: self._missed.delete(p, self._login())
+            ),
+            "missed.simulate": lambda p: self._missed_call(
+                lambda: self._missed.simulate(p, self._login(), self._missed_bars)
+            ),
+            "ai.status": lambda _: self._ai_call(lambda: self._ai.status()),
+            "ai.payload": lambda p: self._ai_call(
+                lambda: self._ai.preview(p, self._login(), self._server_offset)
+            ),
+            "ai.settings.save": lambda p: self._ai_call(
+                lambda: self._ai.settings_save(p)
+            ),
+            "ai.review": lambda p: self._ai_call(
+                lambda: self._ai.review(p, self._login(), self._server_offset)
+            ),
+            "ai.cache.clear": lambda p: self._ai_call(
+                lambda: self._ai.cache_clear(p, self._login(), self._server_offset)
+            ),
             "calendar.week": lambda _: week_payload(),
             "data.export": self._data_export,
             "data.info": lambda _: {
@@ -817,6 +924,57 @@ class Mt5Worker:
         if handler is None:
             raise GatewayError("UNKNOWN_METHOD", f"未知方法: {method}")
         return handler(p)
+
+    def _review_call(self, thunk: Callable[[], Any]) -> Any:
+        """复盘层的校验错误转成统一的 GatewayError。"""
+        try:
+            return thunk()
+        except ReviewError as exc:
+            raise GatewayError(exc.code, exc.message) from exc
+
+    def _routine_call(self, thunk: Callable[[], Any]) -> Any:
+        try:
+            return thunk()
+        except RoutineError as exc:
+            raise GatewayError(exc.code, exc.message) from exc
+
+    def _missed_call(self, thunk: Callable[[], Any]) -> Any:
+        try:
+            return thunk()
+        except MissedError as exc:
+            raise GatewayError(exc.code, exc.message) from exc
+
+    def _ai_call(self, thunk: Callable[[], Any]) -> Any:
+        try:
+            return thunk()
+        except AIError as exc:
+            raise GatewayError(exc.code, exc.message) from exc
+
+    def _missed_bars(self, symbol: str, start: int, end: int) -> list[dict[str, Any]]:
+        """模拟错过机会用的 M1；时间口径与 _history 一致（服务器时间当 UTC 喂库）。"""
+        self._ensure_symbol(symbol)
+        try:
+            rates = mt5.copy_rates_range(
+                symbol,
+                mt5.TIMEFRAME_M1,
+                datetime.fromtimestamp(start),
+                datetime.fromtimestamp(end),
+            )
+        except Exception:  # noqa: BLE001 - 历史缺失按没有数据处理
+            rates = None
+        if rates is None:
+            return []
+        return [
+            {
+                "time": int(rate["time"]),
+                "open": float(rate["open"]),
+                "high": float(rate["high"]),
+                "low": float(rate["low"]),
+                "close": float(rate["close"]),
+                "volume": float(rate["tick_volume"]),
+            }
+            for rate in rates
+        ]
 
     # ---------- system ----------
 

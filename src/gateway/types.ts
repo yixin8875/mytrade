@@ -591,3 +591,403 @@ export interface DataPaths {
   exports: string;
   backups: string;
 }
+
+// ---------- 复盘：日历 / 笔记 / 策略 ----------
+
+/** 日历里的一天；没有交易的日子也有格子，trades = 0 */
+export interface DiaryDay {
+  date: string;
+  net: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  /** 可折算 R 的交易的总 R；没有带止损的交易时为 null */
+  r: number | null;
+  rTrades: number;
+}
+
+export interface DiaryWeek {
+  /** 周一到周日；不属于当前月份的格子为 null */
+  days: (DiaryDay | null)[];
+  /** 整周合计，包含相邻月份的交易日 */
+  total: number;
+}
+
+export interface DiarySummary {
+  net: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  r: number | null;
+  rTrades: number;
+  winRate: number | null;
+  expectancy: number | null;
+  avgR: number | null;
+  totalR: number;
+  avgDurationSec: number;
+  tradingDays: number;
+  winDays: number;
+  lossDays: number;
+  dayWinRate: number | null;
+  bestDay: DiaryDay | null;
+  worstDay: DiaryDay | null;
+}
+
+export interface DiaryCalendar {
+  month: string;
+  today: string;
+  timezoneOffsetMin: number;
+  weeks: DiaryWeek[];
+  summary: DiarySummary;
+}
+
+export interface DayNote {
+  day: string;
+  note: string;
+  mood: number | null;
+  tags: string[];
+  replaySessionId: string | null;
+  created_at?: number;
+  updated_at?: number | null;
+}
+
+export interface NoteTemplate {
+  id: number;
+  name: string;
+  body: string;
+}
+
+export interface Playbook {
+  id: string;
+  login: number;
+  name: string;
+  description: string;
+  rules: string[];
+  archived_at: number | null;
+  created_at: number;
+  updated_at: number;
+  /** strategy.list 附带；其他接口可能没有 */
+  tradeCount?: number;
+}
+
+export interface RuleCheck {
+  rule: string;
+  /** true = 遵守，false = 违反，null = 还没评估 */
+  followed: boolean | null;
+}
+
+/** 一笔交易在复盘层的标注；没复盘过的交易为 null */
+export interface TradeAnnotation {
+  playbookId: string | null;
+  playbookName: string | null;
+  rating: number | null;
+  mistakes: string[];
+  note: string;
+  reviewedAt: number | null;
+  rules: RuleCheck[];
+  followed: number;
+  broken: number;
+}
+
+export interface DiaryRecord extends JournalRecord {
+  r: number | null;
+  annotation: TradeAnnotation | null;
+}
+
+export interface DiaryDayDetail {
+  date: string;
+  summary: DiarySummary;
+  records: DiaryRecord[];
+  note: DayNote;
+  templates: NoteTemplate[];
+  playbooks: Playbook[];
+  timezoneOffsetMin: number;
+}
+
+export interface TradeNoteDetail {
+  positionId: number;
+  playbookId: string | null;
+  playbookName: string | null;
+  rating: number | null;
+  mistakes: string[];
+  note: string;
+  reviewedAt: number | null;
+  rules: RuleCheck[];
+  playbooks: Playbook[];
+  trade: {
+    positionId: number;
+    symbol: string;
+    side: Side;
+    volume: number;
+    openTime: number;
+    closeTime: number;
+    profit: number;
+    r: number | null;
+  };
+}
+
+/** 遵守度里的一档交易汇总 */
+export interface AdherenceBucket {
+  net: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  r: number | null;
+  rTrades: number;
+  winRate: number | null;
+  expectancy: number | null;
+  avgR: number | null;
+  totalR: number;
+  avgDurationSec: number;
+}
+
+export interface RuleStat {
+  rule: string;
+  evaluated: number;
+  rate: number | null;
+  followed: AdherenceBucket;
+  broken: AdherenceBucket;
+}
+
+export interface AdherenceBook {
+  id: string;
+  name: string;
+  description: string;
+  rules: string[];
+  archivedAt: number | null;
+  /** 关联到这本策略的交易数 */
+  total: number;
+  /** 所有规则都评估完的交易数 */
+  evaluated: number;
+  possible: number;
+  /** 通过的规则勾选 / 已评估的规则勾选 */
+  rate: number | null;
+  followed: AdherenceBucket;
+  broken: AdherenceBucket;
+  unassessed: number;
+  ruleStats: RuleStat[];
+}
+
+export interface AdherenceResult {
+  days: number;
+  timezoneOffsetMin: number;
+  books: AdherenceBook[];
+}
+
+export interface ReviewSettings {
+  timezoneOffsetMin: number;
+  localOffsetMin: number;
+}
+
+// ---------- 例行清单（P1） ----------
+
+export type RoutinePhase = 'pre' | 'during' | 'post';
+
+export interface Routine {
+  id: number;
+  title: string;
+  phase: RoutinePhase;
+  /** 1 = 周一 … 7 = 周日 */
+  weekdays: number[];
+  sort: number;
+  archivedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface RoutineItem extends Routine {
+  due: boolean;
+  done: boolean;
+}
+
+export interface RoutineDay {
+  date: string;
+  today: string;
+  weekday: number;
+  /** 只有今天和最近 7 天能补勾，更早的日期只读 */
+  editable: boolean;
+  items: RoutineItem[];
+  phases: Record<RoutinePhase, RoutineItem[]>;
+  summary: {
+    total: number;
+    done: number;
+    rate: number | null;
+  };
+}
+
+export interface RoutineHeatCell {
+  date: string;
+  weekday: number;
+  due: number;
+  done: number;
+  rate: number | null;
+  future: boolean;
+}
+
+export interface RoutineHeatmap {
+  start: string;
+  end: string;
+  today: string;
+  weeks: number;
+  cells: RoutineHeatCell[];
+  summary: {
+    rate: number | null;
+    done: number;
+    due: number;
+    streak: number;
+  };
+}
+
+// ---------- 错过机会（P1） ----------
+
+export type MissedStatus =
+  | 'tp'
+  | 'sl'
+  | 'timeout'
+  | 'open'
+  | 'no_entry'
+  | 'no_data'
+  | 'invalid';
+
+export interface MissedSim {
+  status: MissedStatus;
+  note?: string;
+  entryAt?: number;
+  entryPrice?: number;
+  exitAt?: number;
+  exitPrice?: number;
+  r?: number | null;
+  mfeR?: number | null;
+  maeR?: number | null;
+  barsHeld?: number;
+  bars?: number;
+  windowEnd?: number;
+  complete?: boolean;
+  lastPrice?: number;
+}
+
+export interface MissedTrade {
+  id: number;
+  symbol: string;
+  side: Side;
+  observedAt: number;
+  entryPrice: number | null;
+  sl: number | null;
+  tp: number | null;
+  playbookId: string | null;
+  note: string;
+  sim: MissedSim | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MissedList {
+  missed: MissedTrade[];
+  summary: {
+    total: number;
+    simulated: number;
+    hits: number;
+    stops: number;
+    totalR: number | null;
+  };
+}
+
+// ---------- 绩效趋势与散点（P1） ----------
+
+export interface TrendTrade {
+  positionId: number;
+  symbol: string;
+  side: Side;
+  volume: number;
+  openTime: number;
+  closeTime: number;
+  profit: number;
+  r: number | null;
+  risk: number | null;
+  durationSec: number | null;
+  mfe: number | null;
+  mae: number | null;
+  tag: string | null;
+  /** YYYY-MM-DD（复盘时区） */
+  day: string;
+}
+
+export interface TrendSeries {
+  days: number;
+  start: string;
+  end: string;
+  timezoneOffsetMin: number;
+  trades: TrendTrade[];
+}
+
+// ---------- 过程评分（P2） ----------
+
+export interface ScoreComponent {
+  key: string;
+  label: string;
+  weight: number;
+  unit: string;
+  /** 公式说明，和 settings/文档里的版本一致 */
+  rule: string;
+  value: number | null;
+  score: number | null;
+  included: boolean;
+  reason: string | null;
+}
+
+export interface ProcessScore {
+  version: number;
+  score: number | null;
+  sample: { trades: number; rTrades: number; days: number };
+  windowStart: string;
+  windowEnd: string;
+  components: ScoreComponent[];
+  note: string | null;
+}
+
+// ---------- AI 复盘（自带 Key，默认关闭） ----------
+
+export type AiKind = 'day' | 'week';
+
+export interface AiProvider {
+  id: string;
+  label: string;
+  defaultModel: string;
+}
+
+export interface AiStatus {
+  version: number;
+  enabled: boolean;
+  hasKey: boolean;
+  provider: string;
+  model: string;
+  baseUrl: string;
+  providers: AiProvider[];
+  notice: string;
+}
+
+/** 「将发送哪些字段」里的一行说明 */
+export interface AiPayloadField {
+  key: string;
+  label: string;
+  text: string;
+}
+
+export interface AiPayloadPreview {
+  kind: AiKind;
+  date: string;
+  fields: AiPayloadField[];
+  payload: Record<string, unknown>;
+  bytes: number;
+}
+
+export interface AiReviewResult {
+  kind: AiKind;
+  date: string;
+  provider: string;
+  model: string;
+  text: string;
+  generatedAt: number;
+  cached: boolean;
+  fields: AiPayloadField[];
+}

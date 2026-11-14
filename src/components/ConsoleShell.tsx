@@ -2,18 +2,28 @@ import type { ReactNode } from 'react';
 import {
   BarChart3,
   BookOpen,
+  CalendarDays,
   ChartCandlestick,
+  ClipboardCheck,
+  Crosshair,
+  Eye,
+  EyeOff,
   FileClock,
+  Gauge,
   History,
   LayoutDashboard,
+  ListChecks,
   RefreshCw,
   Search,
   Settings as SettingsIcon,
   ShieldCheck,
+  SlidersHorizontal,
+  TrendingUp,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
 import { fmtMoney } from '../lib/format';
+import { usePrivacyMask } from '../lib/privacy';
 import { goReplayList, routeSessionId, useReplayRoute } from '../replay/route';
 import { sessionProgress, useReplaySession } from '../replay/store';
 import { Tape } from '../replay/Tape';
@@ -27,6 +37,18 @@ const NAV: { label: string; items: { page: Page; label: string; icon: typeof Lay
         { page: 'overview', label: '概览', icon: LayoutDashboard },
         { page: 'trade', label: '交易台', icon: ChartCandlestick },
         { page: 'replay', label: '历史复盘', icon: History },
+      ],
+    },
+    {
+      label: '复盘',
+      items: [
+        { page: 'diary', label: '盈亏日历', icon: CalendarDays },
+        { page: 'strategy', label: '策略手册', icon: ListChecks },
+        { page: 'routines', label: '例行清单', icon: ClipboardCheck },
+        { page: 'missed', label: '错过机会', icon: Crosshair },
+        { page: 'trends', label: '绩效趋势', icon: TrendingUp },
+        { page: 'analysis', label: '深度分析', icon: SlidersHorizontal },
+        { page: 'score', label: '过程评分', icon: Gauge },
       ],
     },
     {
@@ -64,6 +86,9 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   const orders = useApp((s) => s.orders);
   const risk = useApp((s) => s.riskStatus);
   const setPaletteOpen = useApp((s) => s.setPaletteOpen);
+  const privacy = useApp((s) => s.privacy);
+  const setPrivacy = useApp((s) => s.setPrivacy);
+  const masked = usePrivacyMask();
   const replayRoute = useReplayRoute();
   const replaySession = useReplaySession(routeSessionId(replayRoute));
 
@@ -209,6 +234,23 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="mt-auto px-3 pb-3">
+          <button
+            onClick={() => setPrivacy(!privacy)}
+            className={clsx('console-nav mb-1', privacy && 'console-nav-active')}
+            title="隐私模式下，复盘与报表页的金额显示为 ••••；交易台不受影响"
+            aria-pressed={privacy}
+          >
+            {privacy ? (
+              <EyeOff size={16} strokeWidth={1.5} className="text-console-ink" />
+            ) : (
+              <Eye size={16} strokeWidth={1.5} className="text-console-muted" />
+            )}
+            <span className="flex-1">隐私模式</span>
+            <span className="text-[10px] text-console-faint">
+              {privacy ? (masked ? '已遮金额' : '交易台不遮') : '关'}
+            </span>
+          </button>
+
           <button
             onClick={() => setPage('settings')}
             className={clsx('console-nav mb-1', page === 'settings' && 'console-nav-active')}

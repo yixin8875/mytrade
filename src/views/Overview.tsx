@@ -4,6 +4,7 @@ import {
   BarChart3,
   BookOpen,
   ChartCandlestick,
+  Gauge,
   Layers,
   Settings as SettingsIcon,
   ShieldCheck,
@@ -12,7 +13,9 @@ import { clsx } from 'clsx';
 import { gateway } from '../gateway/client';
 import { useApp, type Page } from '../store/useApp';
 import { fmtMoney, fmtSigned, fmtVolume, signedClass } from '../lib/format';
-import type { JournalRecord, JournalStats } from '../gateway/types';
+import { usePrivacyMask } from '../lib/privacy';
+import { scoreTone, scoreWords } from '../lib/score';
+import type { JournalRecord, JournalStats, ProcessScore } from '../gateway/types';
 
 function fmtTime(ts: number): string {
   if (!ts) return '—';
@@ -40,6 +43,7 @@ const QUICK_LINKS: {
 /** 中心服务台首页：账户、今日风控、最近交易与快捷入口 */
 export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
   const conn = useApp((s) => s.conn);
+  usePrivacyMask();
   const account = useApp((s) => s.account);
   const risk = useApp((s) => s.riskStatus);
   const positions = useApp((s) => s.positions);
@@ -337,6 +341,8 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
                 <ArrowUpRight size={13} strokeWidth={1.5} />
               </button>
             </section>
+
+            <ScoreCard onNavigate={onNavigate} />
           </div>
         </div>
 
@@ -371,6 +377,64 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
         </section>
       </div>
     </div>
+  );
+}
+
+/** 首页只用一张小卡提示过程评分，分量与公式去「过程评分」页看 */
+function ScoreCard({ onNavigate }: { onNavigate: (page: Page) => void }) {
+  const conn = useApp((s) => s.conn);
+  const activeLogin = useApp((s) => s.account?.login ?? 0);
+  const [score, setScore] = useState<ProcessScore | null>(null);
+
+  useEffect(() => {
+    if (conn !== 'open') return;
+    let alive = true;
+    gateway
+      .call<ProcessScore>('score.get', { days: 90 })
+      .then((next) => {
+        if (alive) setScore(next);
+      })
+      .catch(() => {
+        /* 评分算不出来时卡片停在空态，不打扰首页其他信息 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [conn, activeLogin]);
+
+  const value = score?.score ?? null;
+
+  return (
+    <section className="console-card p-5">
+      <div className="flex items-center gap-2">
+        <Gauge size={16} strokeWidth={1.5} className="text-console-muted" />
+        <span className="text-[13px] font-semibold">过程评分</span>
+        <span className="flex-1" />
+        {score && <span className="num font-mono text-[10px] text-console-faint">v{score.version}</span>}
+      </div>
+
+      <div className="mt-3 flex items-end gap-3">
+        <span className={clsx('num font-mono text-[28px] leading-none', scoreTone(value))}>
+          {value == null ? '—' : Math.round(value)}
+        </span>
+        <span className={clsx('pb-0.5 text-[12px]', scoreTone(value))}>{scoreWords(value)}</span>
+      </div>
+
+      <div className="mt-2 text-[11px] leading-relaxed text-console-muted">
+        {score?.note ??
+          (score
+            ? `近 90 天 · ${score.sample.trades} 笔 · 其中 ${score.sample.rTrades} 笔可折算 R`
+            : '连接网关后读取')}
+      </div>
+
+      <button
+        onClick={() => onNavigate('score')}
+        className="mt-2 flex items-center gap-1 text-[12px] text-console-muted transition-colors hover:text-console-ink"
+      >
+        查看分量与公式
+        <ArrowUpRight size={13} strokeWidth={1.5} />
+      </button>
+    </section>
   );
 }
 

@@ -40,12 +40,19 @@ export type Theme = 'light' | 'white' | 'dark';
 
 export const THEMES: Theme[] = ['light', 'white', 'dark'];
 
-/** 控制台页面：概览 / 交易台 / 交易日志 / 统计报表 / 执行质量 / 审计日志 / 设置 */
+/** 控制台页面：概览 / 交易台 / 交易日志 / 盈亏日历 / 策略手册 / 统计报表 / 执行质量 / 审计日志 / 设置 */
 export type Page =
   | 'overview'
   | 'trade'
   | 'replay'
   | 'journal'
+  | 'diary'
+  | 'strategy'
+  | 'routines'
+  | 'missed'
+  | 'trends'
+  | 'analysis'
+  | 'score'
   | 'reports'
   | 'executions'
   | 'audit'
@@ -56,6 +63,13 @@ export const PAGES: Page[] = [
   'trade',
   'replay',
   'journal',
+  'diary',
+  'strategy',
+  'routines',
+  'missed',
+  'trends',
+  'analysis',
+  'score',
   'reports',
   'executions',
   'audit',
@@ -72,6 +86,7 @@ export type SettingsSection =
   | 'accounts'
   | 'alerts'
   | 'data'
+  | 'ai'
   | 'updates'
   | 'about';
 
@@ -124,6 +139,8 @@ interface AppStore {
   layoutSync: ChartSync;
   /** 深色 / 浅色主题，存 localStorage */
   theme: Theme;
+  /** 隐私模式：除交易台外把金额显示成 ••••，存 localStorage */
+  privacy: boolean;
   /** 强调色 #rrggbb，存 localStorage；默认色不写覆盖，交给 CSS 默认值 */
   accentColor: string;
   alertSound: boolean;
@@ -171,6 +188,7 @@ interface AppStore {
   setLayout: (layout: ChartLayout) => void;
   setLayoutSync: (patch: Partial<ChartSync>) => void;
   setTheme: (theme: Theme) => void;
+  setPrivacy: (privacy: boolean) => void;
   /** 传非法值时回到默认强调色 */
   setAccentColor: (hex: string) => void;
   setAlertPrefs: (patch: Partial<Pick<AppStore, 'alertSound' | 'alertDesktop'>>) => void;
@@ -311,6 +329,7 @@ function loadRisk(): RiskSettings {
 const LAYOUT_KEY = 'mytrade.layout';
 const LAYOUT_SYNC_KEY = 'mytrade.layoutSync';
 const THEME_KEY = 'mytrade.theme';
+const PRIVACY_KEY = 'mytrade.privacy';
 const ACCENT_KEY = 'mytrade.accent';
 const RES_KEY = 'mytrade.resolution';
 const PREFS_KEY = 'mytrade.alertPrefs';
@@ -343,6 +362,10 @@ function loadLayout(): ChartLayout {
 function loadTheme(): Theme {
   const raw = readJson<unknown>(THEME_KEY, 'light');
   return raw === 'dark' || raw === 'white' ? raw : 'light';
+}
+
+function loadPrivacy(): boolean {
+  return window.localStorage.getItem(PRIVACY_KEY) === '1';
 }
 
 const defaultLayoutSync: ChartSync = {
@@ -426,6 +449,7 @@ export const useApp = create<AppStore>((set, get) => ({
   layout: loadLayout(),
   layoutSync: loadLayoutSync(),
   theme: loadTheme(),
+  privacy: loadPrivacy(),
   accentColor: normalizeHex(readJson<unknown>(ACCENT_KEY, DEFAULT_ACCENT)) ?? DEFAULT_ACCENT,
   alertSound: loadPrefs().sound,
   alertDesktop: loadPrefs().desktop,
@@ -560,6 +584,14 @@ export const useApp = create<AppStore>((set, get) => ({
   setTheme: (theme) => {
     writeJson(THEME_KEY, theme);
     set({ theme });
+  },
+  setPrivacy: (privacy) => {
+    try {
+      window.localStorage.setItem(PRIVACY_KEY, privacy ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+    set({ privacy });
   },
   setAccentColor: (hex) => {
     const accentColor = normalizeHex(hex) ?? DEFAULT_ACCENT;

@@ -17,6 +17,13 @@ import { WatchlistPanel } from './components/WatchlistPanel';
 import { Overview } from './views/Overview';
 import { ReplayView } from './replay/ReplayView';
 import { JournalView } from './views/Journal';
+import { DiaryView } from './views/Diary';
+import { StrategyView } from './views/Strategy';
+import { RoutinesView } from './views/Routines';
+import { MissedView } from './views/Missed';
+import { TrendsView } from './views/Trends';
+import { AnalysisView } from './views/Analysis';
+import { ScoreView } from './views/Score';
 import { ReportsView } from './views/Reports';
 import { ExecutionsView } from './views/Executions';
 import { AuditView } from './views/Audit';
@@ -338,6 +345,13 @@ export default function App() {
 
       {page === 'replay' && <ReplayView />}
       {page === 'journal' && <JournalView />}
+      {page === 'diary' && <DiaryView />}
+      {page === 'strategy' && <StrategyView />}
+      {page === 'routines' && <RoutinesView />}
+      {page === 'missed' && <MissedView />}
+      {page === 'trends' && <TrendsView />}
+      {page === 'analysis' && <AnalysisView />}
+      {page === 'score' && <ScoreView />}
       {page === 'reports' && <ReportsView />}
       {page === 'executions' && <ExecutionsView />}
       {page === 'audit' && <AuditView />}

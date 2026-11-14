@@ -4,6 +4,7 @@ import { ShieldCheck } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtSigned, signedClass } from '../lib/format';
+import { usePrivacyMask } from '../lib/privacy';
 import type {
   JournalBreakdown,
   JournalExecutionCross,
@@ -48,6 +49,7 @@ function fmtPoints(value: number | null | undefined): string {
 export function ReportsView() {
   const setPage = useApp((s) => s.setPage);
   const activeLogin = useApp((s) => s.account?.login ?? 0);
+  usePrivacyMask();
 
   const [days, setDays] = useState(30);
   const [mode, setMode] = useState<CurveMode>('pnl');

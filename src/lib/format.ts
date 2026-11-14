@@ -1,3 +1,5 @@
+import { maskMoneyText } from './privacy';
+
 export function fmtPrice(value: number | null | undefined, digits = 5): string {
   if (value == null || !Number.isFinite(value)) return '—';
   return value.toFixed(digits);
@@ -5,15 +7,17 @@ export function fmtPrice(value: number | null | undefined, digits = 5): string {
 
 export function fmtMoney(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
-  return value.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  return maskMoneyText(
+    value.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }),
+  );
 }
 
 export function fmtSigned(value: number | null | undefined, digits = 2): string {
   if (value == null || !Number.isFinite(value)) return '—';
-  return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
+  return maskMoneyText(`${value >= 0 ? '+' : ''}${value.toFixed(digits)}`);
 }
 
 export function volumeDecimals(step: number): number {

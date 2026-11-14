@@ -4,9 +4,20 @@ import json
 import sqlite3
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+def _json_list(value: Any) -> list[Any]:
+    """复盘字段里的 JSON 数组；坏数据一律当成空数组。"""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    return value if isinstance(value, list) else []
 
 
 class Store:
@@ -133,6 +144,157 @@ class Store:
                     state TEXT NOT NULL,
                     reason TEXT,
                     created_at INTEGER NOT NULL
+                )
+                """
+            )
+            # 复盘层：日笔记、策略手册、规则检查。全部与 journal 解耦，
+            # journal 重建时这些注释不会跟着消失。
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS review_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS day_notes (
+                    login INTEGER NOT NULL DEFAULT 0,
+                    day TEXT NOT NULL,
+                    note TEXT NOT NULL DEFAULT '',
+                    mood INTEGER,
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    replay_session_id TEXT,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (login, day)
+                )
+                """
+            )
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS note_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    login INTEGER NOT NULL DEFAULT 0,
+                    name TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+                """
+            )
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS playbooks (
+                    id TEXT PRIMARY KEY,
+                    login INTEGER NOT NULL DEFAULT 0,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    rules TEXT NOT NULL DEFAULT '[]',
+                    archived_at INTEGER,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+                """
+            )
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS trade_notes (
+                    login INTEGER NOT NULL,
+                    position_id INTEGER NOT NULL,
+                    playbook_id TEXT,
+                    rating INTEGER,
+                    mistakes TEXT NOT NULL DEFAULT '[]',
+                    note TEXT NOT NULL DEFAULT '',
+                    reviewed_at INTEGER,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (login, position_id)
+                )
+                """
+            )
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS playbook_checks (
+                    login INTEGER NOT NULL,
+                    position_id INTEGER NOT NULL,
+                    playbook_id TEXT NOT NULL,
+                    rule TEXT NOT NULL,
+                    followed INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (login, position_id, rule)
+                )
+                """
+            )
+            self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_trade_notes_book ON trade_notes(login, playbook_id)"
+            )
+            self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_checks_book ON playbook_checks(login, playbook_id)"
+            )
+            # 例行清单与错过机会：同样独立于 journal，不影响成交统计。
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS routines (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    login INTEGER NOT NULL DEFAULT 0,
+                    title TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    weekdays TEXT NOT NULL DEFAULT '[1,2,3,4,5]',
+                    sort INTEGER NOT NULL DEFAULT 0,
+                    archived_at INTEGER,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+                """
+            )
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS routine_done (
+                    login INTEGER NOT NULL DEFAULT 0,
+                    routine_id INTEGER NOT NULL,
+                    day TEXT NOT NULL,
+                    done_at INTEGER NOT NULL,
+                    PRIMARY KEY (login, routine_id, day)
+                )
+                """
+            )
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS missed_trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    login INTEGER NOT NULL DEFAULT 0,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    observed_at INTEGER NOT NULL,
+                    entry_price REAL,
+                    sl REAL,
+                    tp REAL,
+                    playbook_id TEXT,
+                    note TEXT NOT NULL DEFAULT '',
+                    sim TEXT,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+                """
+            )
+            self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_routine_done_day ON routine_done(login, day)"
+            )
+            self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_missed_login ON missed_trades(login, observed_at)"
+            )
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ai_reviews (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    login INTEGER NOT NULL DEFAULT 0,
+                    kind TEXT NOT NULL,
+                    day TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    UNIQUE(login, kind, day, provider, model)
                 )
                 """
             )
@@ -837,6 +999,407 @@ class Store:
             }
         return out
 
+    # ---------- 复盘：日笔记 / 策略 / 规则 ----------
+
+    def review_setting_get(self, key: str, default: Any = None) -> Any:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT value FROM review_settings WHERE key=?", (key,)
+            ).fetchone()
+        if row is None:
+            return default
+        try:
+            return json.loads(row["value"])
+        except json.JSONDecodeError:
+            return default
+
+    def review_setting_set(self, key: str, value: Any) -> None:
+        with self._lock:
+            self._db.execute(
+                """
+                INSERT INTO review_settings (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (key, json.dumps(value, ensure_ascii=False)),
+            )
+            self._db.commit()
+
+    # ---------- AI 复盘缓存 ----------
+
+    def ai_review_get(
+        self, login: int, kind: str, day: str, provider: str, model: str
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute(
+                """
+                SELECT text, created_at FROM ai_reviews
+                WHERE login=? AND kind=? AND day=? AND provider=? AND model=?
+                """,
+                (login, kind, day, provider, model),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"text": row["text"], "createdAt": int(row["created_at"])}
+
+    def ai_review_save(
+        self,
+        login: int,
+        kind: str,
+        day: str,
+        provider: str,
+        model: str,
+        text: str,
+        created_at: int,
+    ) -> None:
+        with self._lock:
+            self._db.execute(
+                """
+                INSERT INTO ai_reviews (login, kind, day, provider, model, created_at, text)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(login, kind, day, provider, model)
+                DO UPDATE SET created_at=excluded.created_at, text=excluded.text
+                """,
+                (login, kind, day, provider, model, created_at, text),
+            )
+            self._db.commit()
+
+    def ai_review_clear(self, login: int, kind: str, day: str) -> int:
+        with self._lock:
+            cursor = self._db.execute(
+                "DELETE FROM ai_reviews WHERE login=? AND kind=? AND day=?",
+                (login, kind, day),
+            )
+            self._db.commit()
+            return cursor.rowcount
+
+    def journal_between(
+        self, start: int, end: int, login: int = 0, limit: int = 10000
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                """SELECT * FROM journal
+                   WHERE login=? AND close_time >= ? AND close_time < ?
+                   ORDER BY close_time ASC LIMIT ?""",
+                (int(login), int(start), int(end), int(limit)),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def day_note_get(self, day: str, login: int = 0) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM day_notes WHERE login=? AND day=?",
+                (int(login), day),
+            ).fetchone()
+        if row is None:
+            return None
+        data = dict(row)
+        data["tags"] = _json_list(data.get("tags"))
+        data["replaySessionId"] = data.pop("replay_session_id", None)
+        return data
+
+    def day_note_save(
+        self,
+        day: str,
+        note: str,
+        mood: int | None,
+        tags: list[str],
+        replay_session_id: str | None,
+        login: int = 0,
+    ) -> dict[str, Any]:
+        now = int(time.time())
+        with self._lock:
+            self._db.execute(
+                """
+                INSERT INTO day_notes
+                    (login, day, note, mood, tags, replay_session_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(login, day) DO UPDATE SET
+                    note=excluded.note,
+                    mood=excluded.mood,
+                    tags=excluded.tags,
+                    replay_session_id=excluded.replay_session_id,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    int(login),
+                    day,
+                    note,
+                    mood,
+                    json.dumps(tags, ensure_ascii=False),
+                    replay_session_id,
+                    now,
+                    now,
+                ),
+            )
+            self._db.commit()
+        return self.day_note_get(day, login) or {}
+
+    def note_templates_list(self, login: int = 0) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, name, body FROM note_templates WHERE login=? ORDER BY id",
+                (int(login),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def note_template_save(
+        self,
+        name: str,
+        body: str,
+        login: int = 0,
+        template_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            if template_id:
+                cursor = self._db.execute(
+                    "UPDATE note_templates SET name=?, body=? WHERE id=? AND login=?",
+                    (name, body, int(template_id), int(login)),
+                )
+                if cursor.rowcount == 0:
+                    return None
+                self._db.commit()
+                row = self._db.execute(
+                    "SELECT id, name, body FROM note_templates WHERE id=?",
+                    (int(template_id),),
+                ).fetchone()
+            else:
+                cursor = self._db.execute(
+                    "INSERT INTO note_templates (login, name, body, created_at) VALUES (?, ?, ?, ?)",
+                    (int(login), name, body, int(time.time())),
+                )
+                self._db.commit()
+                row = self._db.execute(
+                    "SELECT id, name, body FROM note_templates WHERE id=?",
+                    (int(cursor.lastrowid),),
+                ).fetchone()
+        return dict(row) if row else None
+
+    def note_template_delete(self, template_id: int, login: int = 0) -> bool:
+        with self._lock:
+            cursor = self._db.execute(
+                "DELETE FROM note_templates WHERE id=? AND login=?",
+                (int(template_id), int(login)),
+            )
+            self._db.commit()
+        return cursor.rowcount > 0
+
+    def playbooks_list(
+        self, login: int = 0, include_archived: bool = False
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM playbooks WHERE login=?"
+        if not include_archived:
+            sql += " AND archived_at IS NULL"
+        sql += " ORDER BY created_at, id"
+        with self._lock:
+            rows = self._db.execute(sql, (int(login),)).fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            item["rules"] = [str(rule) for rule in _json_list(item.get("rules"))]
+            out.append(item)
+        return out
+
+    def playbook_get(self, playbook_id: str, login: int = 0) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM playbooks WHERE id=? AND login=?",
+                (playbook_id, int(login)),
+            ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["rules"] = [str(rule) for rule in _json_list(item.get("rules"))]
+        return item
+
+    def playbook_save(
+        self,
+        name: str,
+        description: str,
+        rules: list[str],
+        login: int = 0,
+        playbook_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        now = int(time.time())
+        payload = json.dumps(rules, ensure_ascii=False)
+        with self._lock:
+            if playbook_id:
+                cursor = self._db.execute(
+                    """
+                    UPDATE playbooks
+                    SET name=?, description=?, rules=?, updated_at=?
+                    WHERE id=? AND login=?
+                    """,
+                    (name, description, payload, now, playbook_id, int(login)),
+                )
+                if cursor.rowcount == 0:
+                    return None
+                target = playbook_id
+            else:
+                target = uuid.uuid4().hex
+                self._db.execute(
+                    """
+                    INSERT INTO playbooks
+                        (id, login, name, description, rules, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (target, int(login), name, description, payload, now, now),
+                )
+            self._db.commit()
+        return self.playbook_get(target, login)
+
+    def playbook_delete(self, playbook_id: str, login: int = 0) -> bool:
+        """软删除：历史规则检查仍然保留，交易只解除关联。"""
+        with self._lock:
+            cursor = self._db.execute(
+                "UPDATE playbooks SET archived_at=? WHERE id=? AND login=? AND archived_at IS NULL",
+                (int(time.time()), playbook_id, int(login)),
+            )
+            self._db.commit()
+        return cursor.rowcount > 0
+
+    def trade_note_get(self, position_id: int, login: int = 0) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM trade_notes WHERE login=? AND position_id=?",
+                (int(login), int(position_id)),
+            ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["mistakes"] = [str(value) for value in _json_list(item.get("mistakes"))]
+        return item
+
+    def trade_note_save(
+        self,
+        position_id: int,
+        playbook_id: str | None,
+        rating: int | None,
+        mistakes: list[str],
+        note: str,
+        login: int = 0,
+    ) -> dict[str, Any]:
+        now = int(time.time())
+        with self._lock:
+            self._db.execute(
+                """
+                INSERT INTO trade_notes
+                    (login, position_id, playbook_id, rating, mistakes, note, reviewed_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(login, position_id) DO UPDATE SET
+                    playbook_id=excluded.playbook_id,
+                    rating=excluded.rating,
+                    mistakes=excluded.mistakes,
+                    note=excluded.note,
+                    reviewed_at=excluded.reviewed_at,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    int(login),
+                    int(position_id),
+                    playbook_id,
+                    rating,
+                    json.dumps(mistakes, ensure_ascii=False),
+                    note,
+                    now,
+                    now,
+                ),
+            )
+            self._db.commit()
+        return self.trade_note_get(position_id, login) or {}
+
+    def trade_notes_all(
+        self, login: int = 0, since: int = 0
+    ) -> dict[int, dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                """
+                SELECT n.* FROM trade_notes n
+                JOIN journal j ON j.login=n.login AND j.position_id=n.position_id
+                WHERE n.login=? AND j.close_time >= ?
+                """,
+                (int(login), int(since)),
+            ).fetchall()
+        out: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            item = dict(row)
+            item["mistakes"] = [str(value) for value in _json_list(item.get("mistakes"))]
+            out[int(item["position_id"])] = item
+        return out
+
+    def playbook_check_set(
+        self,
+        position_id: int,
+        playbook_id: str,
+        rule: str,
+        followed: bool | None,
+        login: int = 0,
+    ) -> None:
+        with self._lock:
+            if followed is None:
+                self._db.execute(
+                    """DELETE FROM playbook_checks
+                       WHERE login=? AND position_id=? AND rule=?""",
+                    (int(login), int(position_id), rule),
+                )
+            else:
+                self._db.execute(
+                    """
+                    INSERT INTO playbook_checks
+                        (login, position_id, playbook_id, rule, followed, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(login, position_id, rule) DO UPDATE SET
+                        playbook_id=excluded.playbook_id,
+                        followed=excluded.followed,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        int(login),
+                        int(position_id),
+                        playbook_id,
+                        rule,
+                        1 if followed else 0,
+                        int(time.time()),
+                    ),
+                )
+            self._db.commit()
+
+    def playbook_checks_clear(self, position_id: int, login: int = 0) -> None:
+        with self._lock:
+            self._db.execute(
+                "DELETE FROM playbook_checks WHERE login=? AND position_id=?",
+                (int(login), int(position_id)),
+            )
+            self._db.commit()
+
+    def playbook_checks_get(
+        self, position_id: int, login: int = 0
+    ) -> dict[str, bool]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT rule, followed FROM playbook_checks WHERE login=? AND position_id=?",
+                (int(login), int(position_id)),
+            ).fetchall()
+        return {str(row["rule"]): bool(row["followed"]) for row in rows}
+
+    def playbook_checks_all(
+        self, login: int = 0, since: int = 0
+    ) -> dict[int, dict[str, bool]]:
+        with self._lock:
+            rows = self._db.execute(
+                """
+                SELECT c.position_id, c.rule, c.followed FROM playbook_checks c
+                JOIN journal j ON j.login=c.login AND j.position_id=c.position_id
+                WHERE c.login=? AND j.close_time >= ?
+                """,
+                (int(login), int(since)),
+            ).fetchall()
+        out: dict[int, dict[str, bool]] = {}
+        for row in rows:
+            out.setdefault(int(row["position_id"]), {})[str(row["rule"])] = bool(
+                row["followed"]
+            )
+        return out
+
     # ---------- audit ----------
 
     def audit(self, kind: str, payload: Any) -> None:
@@ -891,3 +1454,231 @@ class Store:
             if len(out) >= int(limit):
                 break
         return out
+
+    # ---------- 例行清单 ----------
+
+    @staticmethod
+    def _routine_row(row: Any) -> dict[str, Any]:
+        item = dict(row)
+        item["weekdays"] = [
+            int(value)
+            for value in _json_list(item.get("weekdays"))
+            if isinstance(value, (int, float, str)) and str(value).isdigit()
+        ]
+        return item
+
+    def routines_list(
+        self, login: int = 0, include_archived: bool = False
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM routines WHERE login=?"
+        if not include_archived:
+            sql += " AND archived_at IS NULL"
+        sql += " ORDER BY sort, id"
+        with self._lock:
+            rows = self._db.execute(sql, (int(login),)).fetchall()
+        return [self._routine_row(row) for row in rows]
+
+    def routine_get(self, routine_id: int, login: int = 0) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM routines WHERE id=? AND login=?",
+                (int(routine_id), int(login)),
+            ).fetchone()
+        return self._routine_row(row) if row else None
+
+    def routine_save(
+        self,
+        title: str,
+        phase: str,
+        weekdays: list[int],
+        sort: int,
+        login: int = 0,
+        routine_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        now = int(time.time())
+        payload = json.dumps(weekdays, ensure_ascii=False)
+        with self._lock:
+            if routine_id:
+                cursor = self._db.execute(
+                    """
+                    UPDATE routines
+                    SET title=?, phase=?, weekdays=?, sort=?, updated_at=?
+                    WHERE id=? AND login=? AND archived_at IS NULL
+                    """,
+                    (title, phase, payload, int(sort), now, int(routine_id), int(login)),
+                )
+                if cursor.rowcount == 0:
+                    return None
+                target = int(routine_id)
+            else:
+                cursor = self._db.execute(
+                    """
+                    INSERT INTO routines
+                        (login, title, phase, weekdays, sort, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (int(login), title, phase, payload, int(sort), now, now),
+                )
+                target = int(cursor.lastrowid)
+            self._db.commit()
+        return self.routine_get(target, login)
+
+    def routine_archive(self, routine_id: int, login: int = 0) -> bool:
+        with self._lock:
+            cursor = self._db.execute(
+                "UPDATE routines SET archived_at=? WHERE id=? AND login=? AND archived_at IS NULL",
+                (int(time.time()), int(routine_id), int(login)),
+            )
+            self._db.commit()
+        return cursor.rowcount > 0
+
+    def routine_done_set(
+        self, routine_id: int, day: str, done: bool, login: int = 0
+    ) -> None:
+        now = int(time.time())
+        with self._lock:
+            if done:
+                self._db.execute(
+                    """
+                    INSERT INTO routine_done (login, routine_id, day, done_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(login, routine_id, day) DO UPDATE SET done_at=excluded.done_at
+                    """,
+                    (int(login), int(routine_id), day, now),
+                )
+            else:
+                self._db.execute(
+                    "DELETE FROM routine_done WHERE login=? AND routine_id=? AND day=?",
+                    (int(login), int(routine_id), day),
+                )
+            self._db.commit()
+
+    def routine_done_range(
+        self, login: int, start_day: str, end_day: str
+    ) -> dict[tuple[int, str], int]:
+        with self._lock:
+            rows = self._db.execute(
+                """SELECT routine_id, day, done_at FROM routine_done
+                   WHERE login=? AND day >= ? AND day <= ?""",
+                (int(login), start_day, end_day),
+            ).fetchall()
+        return {(int(row["routine_id"]), str(row["day"])): int(row["done_at"]) for row in rows}
+
+    # ---------- 错过机会 ----------
+
+    @staticmethod
+    def _missed_row(row: Any) -> dict[str, Any]:
+        item = dict(row)
+        raw = item.pop("sim", None)
+        try:
+            item["sim"] = json.loads(raw) if raw else None
+        except json.JSONDecodeError:
+            item["sim"] = None
+        return item
+
+    def missed_list(self, login: int = 0, limit: int = 200) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                """SELECT * FROM missed_trades WHERE login=?
+                   ORDER BY observed_at DESC, id DESC LIMIT ?""",
+                (int(login), int(limit)),
+            ).fetchall()
+        return [self._missed_row(row) for row in rows]
+
+    def missed_get(self, missed_id: int, login: int = 0) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM missed_trades WHERE id=? AND login=?",
+                (int(missed_id), int(login)),
+            ).fetchone()
+        return self._missed_row(row) if row else None
+
+    def missed_save(
+        self,
+        symbol: str,
+        side: str,
+        observed_at: int,
+        entry_price: float | None,
+        sl: float | None,
+        tp: float | None,
+        playbook_id: str | None,
+        note: str,
+        login: int = 0,
+        missed_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        now = int(time.time())
+        with self._lock:
+            if missed_id:
+                cursor = self._db.execute(
+                    """
+                    UPDATE missed_trades
+                    SET symbol=?, side=?, observed_at=?, entry_price=?, sl=?, tp=?,
+                        playbook_id=?, note=?, sim=NULL, updated_at=?
+                    WHERE id=? AND login=?
+                    """,
+                    (
+                        symbol,
+                        side,
+                        int(observed_at),
+                        entry_price,
+                        sl,
+                        tp,
+                        playbook_id,
+                        note,
+                        now,
+                        int(missed_id),
+                        int(login),
+                    ),
+                )
+                if cursor.rowcount == 0:
+                    return None
+                target = int(missed_id)
+            else:
+                cursor = self._db.execute(
+                    """
+                    INSERT INTO missed_trades
+                        (login, symbol, side, observed_at, entry_price, sl, tp,
+                         playbook_id, note, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(login),
+                        symbol,
+                        side,
+                        int(observed_at),
+                        entry_price,
+                        sl,
+                        tp,
+                        playbook_id,
+                        note,
+                        now,
+                        now,
+                    ),
+                )
+                target = int(cursor.lastrowid)
+            self._db.commit()
+        return self.missed_get(target, login)
+
+    def missed_update_sim(
+        self, missed_id: int, sim: dict[str, Any], login: int = 0
+    ) -> None:
+        with self._lock:
+            self._db.execute(
+                "UPDATE missed_trades SET sim=?, updated_at=? WHERE id=? AND login=?",
+                (
+                    json.dumps(sim, ensure_ascii=False),
+                    int(time.time()),
+                    int(missed_id),
+                    int(login),
+                ),
+            )
+            self._db.commit()
+
+    def missed_delete(self, missed_id: int, login: int = 0) -> bool:
+        with self._lock:
+            cursor = self._db.execute(
+                "DELETE FROM missed_trades WHERE id=? AND login=?",
+                (int(missed_id), int(login)),
+            )
+            self._db.commit()
+        return cursor.rowcount > 0

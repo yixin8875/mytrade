@@ -10,10 +10,12 @@ import {
   Download,
   FolderOpen,
   Info,
+  KeyRound,
   Palette,
   RefreshCw,
   Save,
   ShieldCheck,
+  Sparkles,
   Target,
   Trash2,
   Users,
@@ -32,6 +34,7 @@ import {
   settingsSnapshot,
 } from '../lib/dataExport';
 import type {
+  AiStatus,
   BackupInfo,
   DataPaths,
   ExportResult,
@@ -62,6 +65,7 @@ const NAV = [
   { id: 'accounts', label: 'MT5 账户', hint: '自动登录与切换', icon: Users },
   { id: 'alerts', label: '告警', hint: '声音与通知', icon: Bell },
   { id: 'data', label: '数据与备份', hint: '导出、备份与恢复', icon: Database },
+  { id: 'ai', label: 'AI 复盘', hint: '自带 Key，默认关闭', icon: Sparkles },
   { id: 'updates', label: '更新', hint: '版本与检查更新', icon: RefreshCw },
   { id: 'about', label: '数据与连接', hint: '终端状态与本机路径', icon: Info },
 ] as const;
@@ -279,6 +283,7 @@ export function SettingsPanel() {
           {section === 'accounts' && <AccountManager />}
           {section === 'alerts' && <AlertsSection />}
           {section === 'data' && <DataSection />}
+          {section === 'ai' && <AiSection />}
           {section === 'updates' && <UpdatesSection />}
           {section === 'about' && <AboutSection />}
         </div>
@@ -1422,6 +1427,183 @@ function AlertsSection() {
           {config?.alert_channel_names?.length
             ? `已配置：${config.alert_channel_names.join('、')}`
             : '未配置第三方通道'}
+        </div>
+      </Card>
+    </>
+  );
+}
+
+function AiSection() {
+  const [status, setStatus] = useState<AiStatus | null>(null);
+  const [provider, setProvider] = useState('anthropic');
+  const [model, setModel] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [enabled, setEnabled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const apply = (next: AiStatus) => {
+    setStatus(next);
+    setProvider(next.provider);
+    setModel(next.model);
+    setBaseUrl(next.baseUrl);
+    setEnabled(next.enabled);
+  };
+
+  useEffect(() => {
+    let alive = true;
+    gateway
+      .call<AiStatus>('ai.status')
+      .then((next) => {
+        if (alive) apply(next);
+      })
+      .catch((err) => {
+        if (alive) setError(`读取失败：${(err as Error).message}`);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const save = async (extra: Record<string, unknown> = {}) => {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const next = await gateway.call<AiStatus>('ai.settings.save', {
+        provider,
+        model,
+        baseUrl,
+        enabled,
+        ...extra,
+      });
+      apply(next);
+      setApiKey('');
+      setMessage('已保存');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changeProvider = (id: string) => {
+    setProvider(id);
+    const found = status?.providers.find((item) => item.id === id);
+    setModel(found?.defaultModel ?? '');
+    setBaseUrl('');
+  };
+
+  const inputClass =
+    'h-8 w-full rounded-lg border border-console-line bg-console-canvas px-2 text-[12px] text-console-ink outline-none focus:border-console-accent';
+
+  return (
+    <>
+      <Card
+        title="AI 复盘（可选）"
+        description="用你自己的 Key 生成日/周复盘。默认关闭，关闭或没有 Key 时功能完全不可见；只发送聚合统计和你在面板里勾选的笔记，不含账户号、服务器、密码、截图。"
+      >
+        <Row label="启用" hint="关闭时交易数据完全不出本机">
+          <Toggle checked={enabled} onChange={setEnabled} />
+        </Row>
+        <Row label="模型提供方">
+          <Segmented
+            value={provider}
+            options={(status?.providers ?? [{ id: 'anthropic', label: 'Anthropic（Claude）' }]).map(
+              (item) => ({ value: item.id, label: item.label }),
+            )}
+            onChange={changeProvider}
+          />
+        </Row>
+        <Row label="模型" hint="换成你账号可用的模型名，例如 claude-sonnet-5-5">
+          <input
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            spellCheck={false}
+            className={clsx(inputClass, 'w-56 font-mono')}
+            aria-label="模型名"
+          />
+        </Row>
+        <Row
+          label="Base URL"
+          hint={
+            provider === 'compatible'
+              ? 'OpenAI 兼容服务必填，例如 https://your-host/v1'
+              : '留空使用官方地址；只有走代理时才需要改'
+          }
+        >
+          <input
+            value={baseUrl}
+            onChange={(event) => setBaseUrl(event.target.value)}
+            spellCheck={false}
+            placeholder={provider === 'compatible' ? 'https://…/v1' : '默认'}
+            className={clsx(inputClass, 'w-56 font-mono')}
+            aria-label="Base URL"
+          />
+        </Row>
+        <Row
+          label="API Key"
+          hint={
+            status?.hasKey
+              ? '已保存。留空表示不修改；Key 用 Windows DPAPI 加密，只有本机当前用户能解密，前端永远拿不到明文。'
+              : '还没有保存。Key 用 Windows DPAPI 加密，只有本机当前用户能解密。'
+          }
+        >
+          <div className="flex items-center gap-1.5">
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={status?.hasKey ? '已保存' : '粘贴 Key'}
+              spellCheck={false}
+              autoComplete="off"
+              className={clsx(inputClass, 'w-56 font-mono')}
+              aria-label="API Key"
+            />
+            <button
+              onClick={() => void save(apiKey ? { apiKey } : {})}
+              disabled={busy}
+              className="console-btn console-btn-secondary h-8"
+            >
+              <KeyRound size={14} strokeWidth={1.5} />
+              保存 Key
+            </button>
+          </div>
+        </Row>
+      </Card>
+
+      <Card
+        title="保存"
+        description="切换提供方或模型后需要保存；勾选启用前必须先保存 Key。"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void save()}
+            disabled={busy}
+            className="console-btn console-btn-primary"
+          >
+            <Save size={14} strokeWidth={1.5} />
+            {busy ? '保存中…' : '保存设置'}
+          </button>
+          {status?.hasKey && (
+            <button
+              onClick={() => void save({ apiKey: '', enabled: false })}
+              disabled={busy}
+              className="console-btn console-btn-secondary"
+            >
+              <Trash2 size={14} strokeWidth={1.5} />
+              清除 Key
+            </button>
+          )}
+          {message && <span className="text-[11px] text-console-gain">{message}</span>}
+        </div>
+        {error && <div className="mt-3 text-[11px] text-console-warn">{error}</div>}
+        <div className="mt-4 space-y-1 text-[11px] leading-relaxed text-console-faint">
+          <div>· 每次生成前可以在复盘面板展开「将发送哪些字段」预览。</div>
+          <div>· 笔记默认不发，必须勾选才会带上，并截断到 500 字/条。</div>
+          <div>· 输出只作建议，不写回交易数据，也不影响下单。</div>
         </div>
       </Card>
     </>
