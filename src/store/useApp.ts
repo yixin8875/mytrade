@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { normalizeLayoutId } from '../chart/layouts';
 import { DEFAULT_ACCENT, normalizeHex } from '../lib/accent';
+import { DEFAULT_TEMPLATE, normalizeTemplateSteps } from '../lib/template';
 import type {
   Account,
   ConnState,
@@ -13,7 +14,6 @@ import type {
   RiskSettings,
   RiskStatus,
   SymbolInfo,
-  TemplateStep,
   Toast,
   TradePreview,
   TradeTemplate,
@@ -159,6 +159,8 @@ interface AppStore {
   /** 修改指定模板；id / name 之外走同一套清洗规则 */
   updateTemplate: (id: string, patch: Partial<Omit<TradeTemplate, 'id'>>) => void;
   addTemplate: () => void;
+  /** 新建一个空白模板（与「复制当前模板」区分） */
+  createTemplate: () => void;
   deleteTemplate: (id: string) => void;
   setTemplateArmed: (armed: boolean) => void;
   setSettingsSection: (section: SettingsSection) => void;
@@ -197,14 +199,9 @@ const defaultRisk: RiskSettings = {
 
 const RISK_KEY = 'mytrade.risk';
 
-/** 模板最多带多少个阶段，防止手改配置拖垮 0.4 秒一轮的检查 */
-const MAX_STEPS = 8;
-
 const TEMPLATES_KEY = 'mytrade.templates';
 /** 旧版本单个模板的键，启动时迁移成列表里的「默认模板」 */
 const LEGACY_TEMPLATE_KEY = 'mytrade.template';
-/** 全新安装的默认模板：0.5% 风险 + 2R 止盈 + 1R 移到保本 */
-const DEFAULT_STEPS: TemplateStep[] = [{ atR: 1, closePercent: null, moveBreakeven: true }];
 
 type TemplateInput = Partial<TradeTemplate> & { breakevenR?: number };
 
@@ -222,31 +219,13 @@ function newTemplateId(): string {
   }
 }
 
-/** 阶段清洗：R 必须为正、平仓比例留空或 1–99、按 R 升序、最多 MAX_STEPS 条 */
-function normalizeSteps(raw: unknown): TemplateStep[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => {
-      const source = (item ?? {}) as Record<string, unknown>;
-      const atR = Number(source.atR);
-      if (!Number.isFinite(atR) || atR <= 0 || atR > 100) return null;
-      const close = source.closePercent == null ? null : Number(source.closePercent);
-      const closePercent =
-        close != null && Number.isFinite(close) && close > 0 && close < 100 ? close : null;
-      return { atR, closePercent, moveBreakeven: source.moveBreakeven === true };
-    })
-    .filter((item): item is TemplateStep => item !== null)
-    .sort((a, b) => a.atR - b.atR)
-    .slice(0, MAX_STEPS);
-}
-
 /**
  * 把任意来源的模板数据洗干净。
  * 旧版本只有 riskPercent / rewardR / breakevenR 三个字段，这里转成一个
  * 「浮盈 beR 移到保本」的阶段，迁移后行为不变。
  */
 function makeTemplate(raw: TemplateInput = {}): TradeTemplate {
-  const steps = normalizeSteps(raw.steps);
+  const steps = normalizeTemplateSteps(raw.steps);
   const legacyBreakeven = numIn(raw.breakevenR, 0, 50, 0);
   const hasSteps = Array.isArray(raw.steps);
   return {
@@ -287,7 +266,7 @@ function loadTemplates(): TemplateBundle {
         id: 'default',
         name: '默认模板',
       })
-    : makeTemplate({ id: 'default', name: '默认模板', steps: DEFAULT_STEPS });
+    : makeTemplate(DEFAULT_TEMPLATE);
   return { templates: [template], activeTemplateId: template.id };
 }
 
@@ -461,15 +440,19 @@ export const useApp = create<AppStore>((set, get) => ({
   setHealth: (health) => set({ health }),
   setLatency: (latency) => set({ latency }),
   setSymbols: (symbols) => set({ symbols }),
-  setSymbol: (symbol) =>
+  setSymbol: (symbol) => {
+    const wasArmed = get().templateArmed;
     set((state) => ({
       symbol,
       quote: null,
       preview: null,
+      templateArmed: false,
       draft: state.draft.active
         ? { ...state.draft, active: false, sl: null, tp: null, price: 0 }
         : state.draft,
-    })),
+    }));
+    if (wasArmed) get().notify('info', '已切换品种，下单模板已解除');
+  },
   setResolution: (resolution) => {
     writeJson(RES_KEY, resolution);
     set({ resolution });
@@ -480,7 +463,7 @@ export const useApp = create<AppStore>((set, get) => ({
   setOrders: (orders) => set({ orders }),
 
   patchDraft: (patch) => set((state) => ({ draft: { ...state.draft, ...patch } })),
-  resetDraft: () => set({ draft: { ...emptyDraft }, preview: null }),
+  resetDraft: () => set({ draft: { ...emptyDraft }, preview: null, templateArmed: false }),
   setPreview: (preview) => set({ preview }),
   patchRisk: (patch) =>
     set((state) => {
@@ -531,15 +514,29 @@ export const useApp = create<AppStore>((set, get) => ({
       saveTemplates({ templates, activeTemplateId: copy.id });
       return { templates, activeTemplateId: copy.id };
     }),
-  deleteTemplate: (id) =>
+  createTemplate: () =>
     set((state) => {
-      if (state.templates.length <= 1) return {};
-      const templates = state.templates.filter((item) => item.id !== id);
-      const activeTemplateId =
-        state.activeTemplateId === id ? templates[0].id : state.activeTemplateId;
-      saveTemplates({ templates, activeTemplateId });
-      return { templates, activeTemplateId };
+      const template = makeTemplate({
+        ...DEFAULT_TEMPLATE,
+        id: newTemplateId(),
+        name: `模板 ${state.templates.length + 1}`,
+      });
+      const templates = [...state.templates, template];
+      saveTemplates({ templates, activeTemplateId: template.id });
+      return { templates, activeTemplateId: template.id };
     }),
+  deleteTemplate: (id) => {
+    const state = get();
+    if (state.templates.length <= 1) return;
+    const templates = state.templates.filter((item) => item.id !== id);
+    const activeTemplateId =
+      state.activeTemplateId === id ? templates[0].id : state.activeTemplateId;
+    saveTemplates({ templates, activeTemplateId });
+    // 删掉正在启用的模板时一并解除，避免计划仍按一个已不存在的模板执行
+    const disarm = state.templateArmed && id === state.activeTemplateId;
+    set({ templates, activeTemplateId, ...(disarm ? { templateArmed: false } : {}) });
+    if (disarm) state.notify('info', '当前模板已删除，下单模板已解除');
+  },
   setTemplateArmed: (templateArmed) => set({ templateArmed }),
   setSettingsSection: (settingsSection) => set({ settingsSection }),
   setLayout: (layout) => {
@@ -608,6 +605,7 @@ export const useApp = create<AppStore>((set, get) => ({
       preview: null,
       watchRows: [],
       crosshairPrice: null,
+      templateArmed: false,
       draft: { ...emptyDraft },
     }),
 }));
@@ -641,6 +639,7 @@ export function handleGlobalShortcut(event: KeyboardEvent): void {
     state.setCalendarOpen(false);
     state.setPaletteOpen(false);
     if (state.draft.active) state.patchDraft({ active: false });
+    if (state.templateArmed) state.setTemplateArmed(false);
     return;
   }
 
@@ -663,5 +662,6 @@ export function handleGlobalShortcut(event: KeyboardEvent): void {
   const side = key === 'b' ? 'buy' : 'sell';
   const price = side === 'buy' ? state.quote.ask : state.quote.bid;
   state.patchDraft({ side, type: 'market', active: true, price });
+  state.setTemplateArmed(false);
   state.notify('info', `${side === 'buy' ? '买入' : '卖出'}市价草稿已就绪，核对后发送`);
 }

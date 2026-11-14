@@ -82,6 +82,10 @@ RETCODE_TEXT = {
 
 OK_RETCODES = {10008, 10009, 10010}
 
+# 挂单计划：成交后登记的宽限（成交与持仓快照之间有几百毫秒空档）与最长存活时间
+PENDING_PLAN_GRACE = 3.0
+PENDING_PLAN_TTL = 30 * 24 * 3600
+
 ORDER_STATES = {
     0: "started",
     1: "working",
@@ -174,6 +178,11 @@ class Mt5Worker:
         self._trail_next: dict[int, float] = {}
         # 模板开仓的分批止盈 / 保本计划：ticket -> {entry, risk, side, steps, next}
         self._auto_be: dict[int, dict] = {}
+        # 挂单的模板计划：order ticket -> {clientId, symbol, side, sl, steps, placedAt}
+        # 成交后由 _adopt_pending_template_plans 迁移到实际持仓的 _auto_be
+        self._pending_plans: dict[int, dict] = {}
+        # 最近一次暂停模板阶段的原因（只读 / 停机），用于每次切换只审计一次
+        self._auto_be_pause_reason = ""
         self._state_loaded = False
         # 已经记录过初始风险的持仓 ticket（重复轮询时不要反复写库）
         self._risk_tracked: dict[int, float] = {}
@@ -432,10 +441,10 @@ class Mt5Worker:
                 except (TypeError, ValueError):
                     self._trailing = {}
                 auto_be = self.store.get_state("autoBreakeven", login) or {}
-                try:
-                    self._auto_be = {int(k): v for k, v in auto_be.items()}
-                except (TypeError, ValueError):
-                    self._auto_be = {}
+                self._auto_be = self._restore_auto_be(auto_be)
+                pending = self.store.get_state("pendingTemplatePlans", login) or {}
+                self._pending_plans = self._restore_pending_plans(pending)
+                self._auto_be_pause_reason = ""
             self._poll_trade_state()
             self._poll_account()
             self._reconcile()
@@ -477,6 +486,8 @@ class Mt5Worker:
         self._trailing = {}
         self._trail_next = {}
         self._auto_be = {}
+        self._pending_plans = {}
+        self._auto_be_pause_reason = ""
         self._alerts = []
         self._alert_last = {}
         self._watch_day = {}
@@ -2219,22 +2230,43 @@ class Mt5Worker:
                         "done": False,
                     }
                 ]
-        if a["action"] == mt5.TRADE_ACTION_DEAL and a["sl"] and ticket and steps:
-            entry = float(payload["price"] or a["price"])
-            risk = abs(entry - float(a["sl"]))
-            if risk > 0:
-                self._auto_be[ticket] = {
-                    "entry": entry,
-                    "risk": risk,
-                    "side": a["side"],
-                    "steps": steps,
-                    "next": 0.0,
-                }
-                self._save_auto_be()
-                self.store.audit(
-                    "position.template_plan.set",
-                    {"ticket": ticket, "entry": entry, "steps": steps},
-                )
+        if a["action"] == mt5.TRADE_ACTION_DEAL and a["sl"] and steps:
+            # 市价单的 order ticket 不一定等于持仓 ticket（netting 下会被合并），
+            # _enrich_place_payload 已经按 comment 找到了真正成交的持仓
+            position_ticket = int(payload.get("ticket") or ticket or 0)
+            if position_ticket:
+                if ticket and position_ticket != ticket:
+                    self.store.audit(
+                        "position.template_plan.ticket_replaced",
+                        {"order": ticket, "position": position_ticket},
+                    )
+                entry = float(payload["price"] or a["price"])
+                risk = abs(entry - float(a["sl"]))
+                if risk > 0:
+                    self._auto_be[position_ticket] = {
+                        "entry": entry,
+                        "risk": risk,
+                        "side": a["side"],
+                        "steps": steps,
+                        "next": 0.0,
+                        "templateId": str(plan.get("templateId") or "")[:40] or None,
+                        "templateName": str(plan.get("templateName") or "")[:40] or None,
+                    }
+                    self._save_auto_be()
+                    self.store.audit(
+                        "position.template_plan.set",
+                        {
+                            "ticket": position_ticket,
+                            "order": ticket,
+                            "entry": entry,
+                            "steps": steps,
+                            "source": "market",
+                            "templateId": plan.get("templateId"),
+                            "templateName": plan.get("templateName"),
+                        },
+                    )
+        elif a["action"] == mt5.TRADE_ACTION_PENDING and ticket and steps:
+            self._remember_pending_plan(ticket, client_id, a, steps, plan)
         self._emit("trade", {**payload, "state": state, "symbol": a["symbol"], "side": a["side"]})
         return {**payload, "state": state}
 
@@ -2360,6 +2392,11 @@ class Mt5Worker:
         out = self._result_or_raise(result, "order.cancel")
         if comment and self.store.get_intent(comment, self._login()):
             self.store.update_intent(comment, "cancelled", login=self._login())
+        if self._pending_plans.pop(ticket, None) is not None:
+            self._save_pending_plans()
+            self.store.audit(
+                "order.template_plan.dropped", {"ticket": ticket, "reason": "cancelled"}
+            )
         self._poll_trade_state()
         return out
 
@@ -2501,10 +2538,103 @@ class Mt5Worker:
             "trailing", {str(k): v for k, v in self._trailing.items()}, self._login()
         )
 
-    def _save_auto_be(self) -> None:
-        self.store.set_state(
-            "autoBreakeven", {str(k): v for k, v in self._auto_be.items()}, self._login()
+    def _remember_pending_plan(
+        self, ticket: int, client_id: str, a: dict, steps: list[dict], plan: dict
+    ) -> None:
+        """挂单带上模板计划：成交后由 _adopt_pending_template_plans 接手。"""
+        if not a["sl"]:
+            # 没有止损就算不出 R，阶段无从触发；只审计，不影响下单
+            self.store.audit(
+                "order.template_plan.skipped",
+                {"ticket": ticket, "reason": "no-sl", "symbol": a["symbol"]},
+            )
+            return
+        self._pending_plans[ticket] = {
+            "clientId": client_id,
+            "symbol": a["symbol"],
+            "side": a["side"],
+            "sl": float(a["sl"]),
+            "steps": steps,
+            "placedAt": time.time(),
+            "goneAt": None,
+            "templateId": str(plan.get("templateId") or "")[:40] or None,
+            "templateName": str(plan.get("templateName") or "")[:40] or None,
+        }
+        self._save_pending_plans()
+        self.store.audit(
+            "order.template_plan.pending",
+            {
+                "ticket": ticket,
+                "symbol": a["symbol"],
+                "side": a["side"],
+                "sl": float(a["sl"]),
+                "steps": steps,
+                "templateId": plan.get("templateId"),
+                "templateName": plan.get("templateName"),
+            },
         )
+
+    def _save_pending_plans(self) -> None:
+        # goneAt 是这一轮进程里的宽限计时，不落盘
+        self.store.set_state(
+            "pendingTemplatePlans",
+            {
+                str(k): {key: value for key, value in record.items() if key != "goneAt"}
+                for k, record in self._pending_plans.items()
+            },
+            self._login(),
+        )
+
+    @staticmethod
+    def _restore_pending_plans(raw: Any) -> dict[int, dict]:
+        """读回挂单计划；超过 TTL 的挂单早就不在了，直接丢弃。"""
+        plans: dict[int, dict] = {}
+        if not isinstance(raw, dict):
+            return plans
+        now = time.time()
+        for key, value in raw.items():
+            if not isinstance(value, dict):
+                continue
+            try:
+                ticket = int(key)
+                placed_at = float(value.get("placedAt") or 0)
+            except (TypeError, ValueError):
+                continue
+            if placed_at <= 0 or now - placed_at > PENDING_PLAN_TTL:
+                continue
+            record = dict(value)
+            record["goneAt"] = None
+            plans[ticket] = record
+        return plans
+
+    def _save_auto_be(self) -> None:
+        # next 是 time.monotonic() 的值，跨进程没有意义，不落盘
+        self.store.set_state(
+            "autoBreakeven",
+            {
+                str(k): {key: value for key, value in plan.items() if key != "next"}
+                for k, plan in self._auto_be.items()
+            },
+            self._login(),
+        )
+
+    @staticmethod
+    def _restore_auto_be(raw: Any) -> dict[int, dict]:
+        """读回持久化的计划；monotonic 的 next 在新进程里没有意义，一律清零。"""
+        plans: dict[int, dict] = {}
+        if not isinstance(raw, dict):
+            return plans
+        for key, value in raw.items():
+            if not isinstance(value, dict):
+                continue
+            try:
+                ticket = int(key)
+            except (TypeError, ValueError):
+                continue
+            plan = dict(value)
+            plan["next"] = 0.0
+            plans[ticket] = plan
+        return plans
 
     @staticmethod
     def _normalize_plan_steps(raw: Any) -> list[dict]:
@@ -2591,12 +2721,16 @@ class Mt5Worker:
         return target
 
     def _auto_move_breakeven(
-        self, ticket: int, position: Any, info: Any, tick: Any
+        self, ticket: int, plan: dict, position: dict, info: Any, tick: Any
     ) -> float | None:
-        """把止损移到开仓价；已经在保本或更好时返回 None，成功返回新止损价。"""
+        """把止损移到开仓价；已经在保本或更好时返回 None，成功返回新止损价。
+
+        position 是 `_position_payload` 的 dict（openPrice/sl/tp），不是 MT5 的
+        TradePosition 对象；早期版本按对象取属性，导致所有移保本阶段抛 AttributeError。
+        """
         point = float(info.point)
-        buy = int(position.type) == 0
-        entry = float(position.price_open)
+        buy = str(plan.get("side")) == "buy"
+        entry = float(plan.get("entry") or position.get("openPrice") or 0)
         stops = max(
             int(getattr(info, "trade_stops_level", 0) or 0),
             int(getattr(info, "trade_freeze_level", 0) or 0),
@@ -2605,7 +2739,7 @@ class Mt5Worker:
         price = float(tick.bid if buy else tick.ask)
         target = min(entry, price - min_dist) if buy else max(entry, price + min_dist)
         target = align_price(target, info)
-        current_sl = float(position.sl or 0)
+        current_sl = float(position.get("sl") or 0)
         if current_sl:
             if buy and current_sl >= target - point / 2:
                 return None
@@ -2613,20 +2747,196 @@ class Mt5Worker:
                 return None
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
-            "symbol": position.symbol,
+            "symbol": position["symbol"],
             "position": ticket,
             "sl": target,
-            "tp": float(position.tp or 0),
+            "tp": float(position.get("tp") or 0),
             "magic": self.cfg.magic,
         }
         self._result_or_raise(mt5.order_send(request), "position.template_step.breakeven")
         return target
 
+    def _template_pause_reason(self) -> str:
+        """只读或停机时暂停模板阶段：保护性动作也不发单，恢复可交易后继续。"""
+        if str(self._trade_mode or "").lower() == "readonly":
+            return "readonly"
+        if self._halted:
+            return "halted"
+        return ""
+
+    def _history_order(self, ticket: int) -> Any:
+        """挂单从 orders_get 消失后，从历史里拿它的最终状态与成交持仓号。"""
+        try:
+            found = mt5.history_orders_get(ticket=ticket)
+        except Exception:  # noqa: BLE001 - 查不到就按「已消失」处理
+            return None
+        return found[0] if found else None
+
+    def _match_pending_position(self, record: dict, order: Any) -> dict | None:
+        """按 comment 前缀找成交生成的持仓，再用历史里的 position_id 兜底。"""
+        prefix = str(record.get("clientId") or "")[:20]
+        if prefix:
+            for position in self._positions:
+                if str(position.get("comment") or "").startswith(prefix):
+                    return position
+        position_id = int(getattr(order, "position_id", 0) or 0) if order is not None else 0
+        if position_id:
+            for position in self._positions:
+                if int(position.get("ticket") or 0) == position_id:
+                    return position
+                if int(position.get("identifier") or 0) == position_id:
+                    return position
+        return None
+
+    def _register_pending_plan(self, ticket: int, record: dict, position: dict) -> None:
+        """把挂单计划登记到实际持仓；登记失败只审计，绝不影响交易轮询。"""
+        self._pending_plans.pop(ticket, None)
+        try:
+            entry = float(position.get("openPrice") or 0)
+            sl = float(position.get("sl") or record.get("sl") or 0)
+            side = str(record.get("side") or position.get("side") or "")
+            risk = abs(entry - sl) if entry > 0 and sl > 0 else 0.0
+            steps = self._normalize_plan_steps(record.get("steps"))
+            position_ticket = int(position.get("ticket") or 0)
+            if not steps or risk <= 0 or side not in ("buy", "sell") or not position_ticket:
+                self.store.audit(
+                    "order.template_plan.dropped",
+                    {
+                        "ticket": ticket,
+                        "position": position_ticket or None,
+                        "reason": "no-risk",
+                    },
+                )
+                return
+            existing = self._auto_be.get(position_ticket)
+            self._auto_be[position_ticket] = {
+                "entry": entry,
+                "risk": risk,
+                "side": side,
+                "steps": steps,
+                "next": 0.0,
+                "templateId": record.get("templateId"),
+                "templateName": record.get("templateName"),
+            }
+            self._save_auto_be()
+            payload = {
+                "ticket": position_ticket,
+                "order": ticket,
+                "entry": entry,
+                "sl": sl,
+                "steps": steps,
+                "source": "pending",
+                "templateId": record.get("templateId"),
+                "templateName": record.get("templateName"),
+            }
+            if existing is not None:
+                # netting 账户同一方向的持仓会被合并，后登记的模板生效
+                payload["replaced"] = True
+                self.store.audit("position.template_plan.netting", payload)
+            self.store.audit("position.template_plan.set", payload)
+        except Exception as exc:  # noqa: BLE001 - 登记失败不能中断轮询
+            self.store.audit(
+                "order.template_plan.dropped",
+                {"ticket": ticket, "reason": "error", "error": f"{type(exc).__name__}: {exc}"},
+            )
+
+    def _adopt_pending_template_plans(self) -> None:
+        """挂单成交后把阶段计划迁移到实际持仓；撤单 / 过期 / 已平仓则丢弃。"""
+        if not self._pending_plans or not self._connected:
+            return
+        now = time.time()
+        changed = False
+        orders = {int(order["ticket"]): order for order in self._orders}
+        for ticket, record in list(self._pending_plans.items()):
+            try:
+                placed_at = float(record.get("placedAt") or 0)
+            except (TypeError, ValueError):
+                placed_at = 0.0
+            if now - placed_at > PENDING_PLAN_TTL:
+                self._pending_plans.pop(ticket, None)
+                changed = True
+                self.store.audit(
+                    "order.template_plan.dropped", {"ticket": ticket, "reason": "ttl"}
+                )
+                continue
+            order = orders.get(ticket)
+            if order is not None:
+                record["goneAt"] = None
+                position = self._match_pending_position(record, None)
+                if position is None:
+                    continue
+            else:
+                # 成交与持仓快照之间有空档，先给几秒宽限再判定「消失了」
+                gone_at = record.get("goneAt")
+                if not gone_at:
+                    record["goneAt"] = now
+                    continue
+                if now - float(gone_at) < PENDING_PLAN_GRACE:
+                    continue
+                history = self._history_order(ticket)
+                state = ""
+                if history is not None:
+                    raw_state = getattr(history, "state", None)
+                    if isinstance(raw_state, int):
+                        state = ORDER_STATES.get(raw_state, "")
+                if state in ("cancelled", "expired", "rejected"):
+                    self._pending_plans.pop(ticket, None)
+                    changed = True
+                    self.store.audit(
+                        "order.template_plan.dropped",
+                        {"ticket": ticket, "reason": state},
+                    )
+                    continue
+                position = self._match_pending_position(record, history)
+                if position is None:
+                    self._pending_plans.pop(ticket, None)
+                    changed = True
+                    self.store.audit(
+                        "order.template_plan.dropped",
+                        {"ticket": ticket, "reason": "gone", "state": state or None},
+                    )
+                    continue
+            self._register_pending_plan(ticket, record, position)
+            changed = True
+        if changed:
+            self._save_pending_plans()
+
     def _auto_breakeven(self) -> None:
         """模板开仓的分批止盈 / 保本：每轮最多推进一步，失败 3 秒后重试。"""
-        if not self._auto_be or not self._connected:
+        if not self._connected:
+            return
+        self._adopt_pending_template_plans()
+        if not self._auto_be:
             return
         changed = False
+        # 暂停期间也要清掉已不存在的持仓，避免状态越积越多
+        for ticket in list(self._auto_be):
+            if not any(item["ticket"] == ticket for item in self._positions):
+                self._auto_be.pop(ticket, None)
+                changed = True
+        reason = self._template_pause_reason()
+        if reason:
+            if reason != self._auto_be_pause_reason:
+                self._auto_be_pause_reason = reason
+                self.store.audit(
+                    "position.template_plan.paused",
+                    {
+                        "reason": reason,
+                        "tradeMode": self._trade_mode,
+                        "halted": bool(self._halted),
+                        "plans": len(self._auto_be),
+                    },
+                )
+            if changed:
+                self._save_auto_be()
+            return
+        if self._auto_be_pause_reason:
+            self.store.audit(
+                "position.template_plan.resumed",
+                {"plans": len(self._auto_be)},
+            )
+            self._auto_be_pause_reason = ""
+            changed = True
         for ticket, plan in list(self._auto_be.items()):
             position = next((x for x in self._positions if x["ticket"] == ticket), None)
             if position is None:
@@ -2641,7 +2951,7 @@ class Mt5Worker:
                 continue
             buy = str(plan.get("side")) == "buy"
             price = float(tick.bid if buy else tick.ask)
-            entry = float(plan.get("entry") or position["price_open"])
+            entry = float(plan.get("entry") or position["openPrice"])
             risk = float(plan.get("risk") or 0)
             if risk <= 0:
                 self._auto_be.pop(ticket, None)
@@ -2661,16 +2971,21 @@ class Mt5Worker:
                 # 先移止损再分批：移保本是幂等的（已到保本就返回 None），
                 # 这样即使平仓失败重试，也不会把同一阶段平两次。
                 moved = (
-                    self._auto_move_breakeven(ticket, position, info, tick)
+                    self._auto_move_breakeven(ticket, plan, position, info, tick)
                     if step.get("moveBreakeven")
                     else None
                 )
                 closed = self._auto_partial_close(ticket, step.get("closePercent"))
-            except GatewayError as exc:
+            except Exception as exc:  # noqa: BLE001 - 单条计划失败不能中断整轮轮询
                 plan["next"] = time.monotonic() + 3.0
                 self.store.audit(
                     "position.template_step.failed",
-                    {"ticket": ticket, "atR": at_r, "error": str(exc)},
+                    {
+                        "ticket": ticket,
+                        "atR": at_r,
+                        "error": str(exc),
+                        "type": type(exc).__name__,
+                    },
                 )
                 continue
             step["done"] = True

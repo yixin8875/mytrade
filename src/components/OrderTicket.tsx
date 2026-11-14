@@ -1,9 +1,18 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { Settings2 } from 'lucide-react';
+import { Check, ChevronDown, Pencil, Plus, Settings2 } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { activeTemplate, useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtVolume, roundVolume } from '../lib/format';
+import {
+  fmtNum,
+  isRiskDeviated,
+  isTpManual,
+  templateStepsSummary,
+  templateSummary,
+  templateTpTarget,
+} from '../lib/template';
+import { TemplateEditor } from './TemplateEditor';
 import type {
   OrderType,
   Quote,
@@ -35,11 +44,6 @@ const ORDER_TYPES: { value: OrderType; label: string }[] = [
 const inputClass =
   'h-8 w-full rounded-lg border border-tv-border bg-tv-raised px-2 font-mono text-[12px] text-tv-text outline-none transition-colors focus:border-tv-accent focus:bg-tv-panel';
 
-/** 模板里的数字显示：2 → "2"，0.50 → "0.5" */
-function num(value: number): string {
-  return `${Number(value.toFixed(2))}`;
-}
-
 export function OrderTicket() {
   const conn = useApp((s) => s.conn);
   const health = useApp((s) => s.health);
@@ -57,8 +61,10 @@ export function OrderTicket() {
   const template = useApp(activeTemplate);
   const templates = useApp((s) => s.templates);
   const setActiveTemplate = useApp((s) => s.setActiveTemplate);
+  const createTemplate = useApp((s) => s.createTemplate);
   const templateArmed = useApp((s) => s.templateArmed);
   const setTemplateArmed = useApp((s) => s.setTemplateArmed);
+  const riskStatus = useApp((s) => s.riskStatus);
   const setPage = useApp((s) => s.setPage);
   const setSettingsSection = useApp((s) => s.setSettingsSection);
   const notify = useApp((s) => s.notify);
@@ -67,27 +73,24 @@ export function OrderTicket() {
   const [sizing, setSizing] = useState<TradeSizing | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** 下拉与票内编辑弹层互斥；点外部或 Esc 关闭 */
+  const [templateMenu, setTemplateMenu] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  /** 用户手动改过止盈后，模板不再抢回；改入场价/止损时重新跟随 */
+  const [tpTouched, setTpTouched] = useState(false);
+  const templateWrapRef = useRef<HTMLDivElement>(null);
 
   const info = symbols.find((item) => item.name === symbol);
   const digits = info?.digits ?? 5;
+  const tick = info?.tickSize || info?.point || 0;
   const step = info?.volumeStep ?? 0.01;
   const ready = conn === 'open' && !!health?.connected;
   const mode = health?.tradeMode ?? 'readonly';
   const currency = health?.account?.currency ?? '';
-
-  const stepSummary = template.steps.length
-    ? template.steps
-        .map(
-          (step) =>
-            `${num(step.atR)}R${
-              step.closePercent != null ? ` 平${num(step.closePercent)}%` : ''
-            }${step.moveBreakeven ? '→保本' : ''}`,
-        )
-        .join(' · ')
-    : '成交后不管理';
-  const templateParams = `${num(template.riskPercent)}% 风险 + ${
-    template.rewardR > 0 ? `止盈 ${num(template.rewardR)}R` : '不自动设止盈'
-  }`;
+  const paused = mode === 'readonly' || !!riskStatus?.halted;
+  const stepsText = templateStepsSummary(template);
+  const summaryText = templateSummary(template);
+  const riskDeviated = templateArmed && isRiskDeviated(template, risk);
 
   useEffect(() => {
     if (!ready || !info || !draft.active) {
@@ -180,40 +183,80 @@ export function OrderTicket() {
     patchDraft,
   ]);
 
-  // 模板启用期间在设置里改了风险比例，这里跟着套用；手动改风险不会被覆盖
+  // 模板启用期间在设置或票内改了风险比例，这里跟着套用；手动改风险不会被覆盖
   useEffect(() => {
     if (!templateArmed) return;
     if (risk.mode === 'percent' && risk.value === template.riskPercent && risk.auto) return;
     patchRisk({ mode: 'percent', value: template.riskPercent, auto: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateArmed, template.riskPercent, patchRisk]);
+  }, [templateArmed, template.id, template.riskPercent, patchRisk]);
 
-  // 模板：止损设定后按设置的 R 倍数自动放止盈；改入场价/止损会重新算
+  // 改入场价 / 止损 / 方向 / 类型后，止盈重新跟随模板（手动改过的 TP 此时让位）
   useEffect(() => {
-    if (!templateArmed || !info || !draft.active || !(draft.price > 0) || !draft.sl) return;
-    if (!(template.rewardR > 0)) return;
-    const risk = Math.abs(draft.price - draft.sl);
-    if (!(risk > 0)) return;
-    const tick = info.tickSize || info.point || 0;
-    const reward = risk * template.rewardR;
-    const raw = draft.side === 'buy' ? draft.price + reward : draft.price - reward;
-    const target = tick ? Number((Math.round(raw / tick) * tick).toFixed(digits)) : raw;
+    setTpTouched(false);
+  }, [draft.side, draft.type, draft.price, draft.sl]);
+
+  // 切换模板时同样重新跟随
+  useEffect(() => {
+    setTpTouched(false);
+  }, [template.id]);
+
+  // 模板：止损设定后按设置的 R 倍数自动放止盈；用户手动改过就不抢回
+  useEffect(() => {
+    if (!templateArmed || tpTouched || !info || !draft.active) return;
+    const target = templateTpTarget({
+      side: draft.side,
+      price: draft.price,
+      sl: draft.sl,
+      rewardR: template.rewardR,
+      tick,
+      digits,
+    });
+    if (target == null) return;
     if (draft.tp == null || Math.abs(draft.tp - target) > (tick || 1e-9) / 2) {
       patchDraft({ tp: target });
     }
-    // 只跟随入场价与止损，用户手动改止盈时不抢回
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     templateArmed,
+    tpTouched,
     template.rewardR,
     draft.active,
     draft.side,
     draft.price,
     draft.sl,
     info,
+    tick,
     digits,
     patchDraft,
   ]);
+
+  // 点模板栏外面关闭下拉/编辑器；点栏内的输入框不关闭
+  useEffect(() => {
+    if (!templateMenu && !editorOpen) return;
+    const onDown = (event: MouseEvent) => {
+      if (templateWrapRef.current?.contains(event.target as Node)) return;
+      setTemplateMenu(false);
+      setEditorOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [templateMenu, editorOpen]);
+
+  // Esc 只关闭模板下拉/编辑器，不取消草稿。
+  // 全局快捷键监听在 window 上，这里挂 document 捕获阶段，先截住事件。
+  useEffect(() => {
+    if (!templateMenu && !editorOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setTemplateMenu(false);
+      setEditorOpen(false);
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [templateMenu, editorOpen]);
 
   useEffect(() => {
     if (!confirm) return;
@@ -239,18 +282,49 @@ export function OrderTicket() {
   const applyTemplate = () => {
     if (templateArmed) {
       setTemplateArmed(false);
-      notify('info', '已取消下单模板');
+      notify('info', `已停用模板「${template.name}」，风险、手数与止损止盈保持不变`);
       return;
     }
     if (!info) return;
     patchRisk({ mode: 'percent', value: template.riskPercent, auto: true });
-    patchDraft({
-      type: 'market',
-      active: true,
-      price: defaultPrice(draft.side, 'market', quote, info),
-    });
+    setTpTouched(false);
+    // 已经有委托价的草稿（限价/停损）保留类型；否则准备一张市价草稿
+    const keepPending = draft.active && draft.type !== 'market' && draft.price > 0;
+    patchDraft(
+      keepPending
+        ? { active: true }
+        : {
+            type: 'market',
+            active: true,
+            price: defaultPrice(draft.side, 'market', quote, info),
+          },
+    );
     setTemplateArmed(true);
-    notify('info', `模板「${template.name}」已启用：${templateParams}；${stepSummary}`);
+    notify('info', `模板「${template.name}」已启用：${summaryText}`);
+  };
+
+  const selectTemplate = (id: string) => {
+    setTemplateMenu(false);
+    setActiveTemplate(id);
+    const next = templates.find((item) => item.id === id);
+    if (!next) return;
+    if (templateArmed) {
+      patchRisk({ mode: 'percent', value: next.riskPercent, auto: true });
+      setTpTouched(false);
+      notify('info', `已切换到「${next.name}」：${templateSummary(next)}`);
+    }
+  };
+
+  const restoreTemplateRisk = () => {
+    patchRisk({ mode: 'percent', value: template.riskPercent, auto: true });
+    notify('info', `已恢复模板风险 ${fmtNum(template.riskPercent)}%`);
+  };
+
+  const openTemplateSettings = () => {
+    setTemplateMenu(false);
+    setEditorOpen(false);
+    setSettingsSection('template');
+    setPage('settings');
   };
 
   const setSide = (side: Side) => {
@@ -307,6 +381,8 @@ export function OrderTicket() {
                   closePercent: step.closePercent,
                   moveBreakeven: step.moveBreakeven,
                 })),
+                templateId: template.id,
+                templateName: template.name,
               }
             : undefined,
       });
@@ -333,12 +409,16 @@ export function OrderTicket() {
     draft.type === 'market'
       ? ((draft.side === 'buy' ? quote?.ask : quote?.bid) ?? 0)
       : draft.price;
-
-  const templateLabel = `${template.name} · ${num(template.riskPercent)}%${
-    template.rewardR > 0 ? ` / ${num(template.rewardR)}R` : ''
-  }`;
-  const templateArmedLabel = `已启用 · ${template.name}`;
-  const templateTitle = `${template.name}：${templateParams}；${stepSummary}。先设置止损后会自动算止盈；右侧箭头切换模板，齿轮编辑`;
+  const tpTarget = templateTpTarget({
+    side: draft.side,
+    price: rulerEntry,
+    sl: draft.sl,
+    rewardR: template.rewardR,
+    tick,
+    digits,
+  });
+  const tpManual = templateArmed && isTpManual(tpTarget, draft.tp, tick);
+  const planTitle = `${template.name}：${summaryText}。启用后带走风险比例、止盈与阶段计划`;
 
   return (
     <section className="shrink-0 border-b border-tv-border">
@@ -402,53 +482,214 @@ export function OrderTicket() {
           ))}
         </div>
 
-        {templates.length > 1 && (
-          <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5">
-            {templates.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setActiveTemplate(item.id)}
-                title={`${item.name}：${num(item.riskPercent)}% 风险${
-                  item.rewardR > 0 ? `、止盈 ${num(item.rewardR)}R` : ''
-                }、${item.steps.length} 个阶段`}
+        <div ref={templateWrapRef} className="relative">
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => {
+                setTemplateMenu((open) => !open);
+                setEditorOpen(false);
+              }}
+              title={planTitle}
+              aria-haspopup="listbox"
+              aria-expanded={templateMenu}
+              className={clsx(
+                'flex h-9 min-w-0 flex-1 items-center gap-1.5 rounded-lg border px-2.5 text-left transition-colors',
+                templateArmed
+                  ? 'border-tv-accent/40 bg-tv-accent-soft'
+                  : 'border-tv-border bg-tv-panel hover:bg-tv-hover',
+              )}
+            >
+              <span className="min-w-0 flex-1">
+                <span
+                  className={clsx(
+                    'block truncate text-[12px] font-medium',
+                    templateArmed ? 'text-tv-accent' : 'text-tv-text',
+                  )}
+                >
+                  {template.name}
+                </span>
+                <span className="block truncate text-[10px] text-tv-muted">{summaryText}</span>
+              </span>
+              <ChevronDown
+                size={13}
+                strokeWidth={1.8}
                 className={clsx(
-                  'h-6 shrink-0 rounded-md border px-2 text-[11px] transition-colors',
-                  item.id === template.id
-                    ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
-                    : 'border-tv-border bg-tv-panel text-tv-muted hover:text-tv-text',
+                  'shrink-0',
+                  templateArmed ? 'text-tv-accent/70' : 'text-tv-muted',
                 )}
+              />
+            </button>
+            <button
+              onClick={applyTemplate}
+              disabled={!info}
+              title={
+                templateArmed
+                  ? '停用模板：已填入的风险、手数与止损止盈保持不变'
+                  : '启用模板：带入风险比例、止盈与阶段计划'
+              }
+              className={clsx(
+                'h-9 w-[62px] shrink-0 rounded-lg border text-[12px] transition-colors',
+                templateArmed
+                  ? 'border-tv-accent bg-tv-accent text-white hover:bg-tv-accent/90'
+                  : 'border-tv-border bg-tv-panel text-tv-text hover:bg-tv-hover',
+                !info && 'cursor-not-allowed opacity-40',
+              )}
+            >
+              {templateArmed ? '已启用' : '启用'}
+            </button>
+            <button
+              onClick={() => {
+                setEditorOpen((open) => !open);
+                setTemplateMenu(false);
+              }}
+              title="编辑当前模板：风险 %、止盈 R、分批止盈"
+              aria-label="编辑当前模板"
+              className={clsx(
+                'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors',
+                editorOpen
+                  ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
+                  : 'border-tv-border bg-tv-panel text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+              )}
+            >
+              <Pencil size={13} strokeWidth={1.7} />
+            </button>
+          </div>
+
+          {templateMenu && (
+            <div
+              data-modal
+              className="absolute left-0 right-0 top-full z-30 mt-1 rounded-lg border border-tv-border bg-tv-panel p-1 shadow-[0_12px_32px_rgba(20,30,45,0.16)]"
+            >
+              <div className="max-h-56 overflow-y-auto">
+                {templates.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => selectTemplate(item.id)}
+                    className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-tv-hover"
+                  >
+                    <Check
+                      size={13}
+                      strokeWidth={2}
+                      className={clsx(
+                        'mt-0.5 shrink-0',
+                        item.id === template.id ? 'text-tv-accent' : 'text-transparent',
+                      )}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12px] text-tv-text">{item.name}</span>
+                      <span className="block truncate text-[10px] text-tv-muted">
+                        {templateSummary(item)}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div className="my-1 border-t border-tv-border" />
+              <button
+                onClick={() => {
+                  createTemplate();
+                  setTemplateMenu(false);
+                  notify('info', '已新建空白模板，可点铅笔编辑');
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
               >
-                {item.name}
+                <Plus size={13} strokeWidth={1.8} />
+                新建模板
               </button>
-            ))}
+              <button
+                onClick={openTemplateSettings}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+              >
+                <Settings2 size={13} strokeWidth={1.6} />
+                管理模板（设置页）
+              </button>
+            </div>
+          )}
+
+          {editorOpen && (
+            <div
+              data-modal
+              className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[70vh] overflow-y-auto rounded-xl border border-tv-border bg-tv-panel p-3 shadow-[0_16px_48px_rgba(20,30,45,0.18)]"
+            >
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="truncate text-[12px] font-medium text-tv-text">
+                  编辑「{template.name}」
+                </span>
+                <button
+                  onClick={() => setEditorOpen(false)}
+                  className="h-6 shrink-0 rounded-md border border-tv-border px-2 text-[11px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+                >
+                  完成
+                </button>
+              </div>
+              <TemplateEditor templateId={template.id} tone="tv" compact />
+            </div>
+          )}
+        </div>
+
+        {templateArmed && (
+          <div className="rounded-lg border border-tv-accent/25 bg-tv-accent-soft/50 px-2.5 py-2 text-[11px] leading-relaxed">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[12px] font-medium text-tv-accent">
+                {template.name}
+              </span>
+              <span className="shrink-0 text-tv-muted">{summaryText}</span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-tv-muted">
+              <span>
+                风险 {fmtNum(risk.value)}%
+                {sizing ? ` ≈ ${fmtMoney(sizing.targetRisk)}${currency}` : ''}
+              </span>
+              {tpTarget != null ? (
+                <span>
+                  止盈 {fmtNum(template.rewardR)}R @ {fmtPrice(tpTarget, digits)}
+                </span>
+              ) : (
+                <span>不自动设止盈</span>
+              )}
+            </div>
+            <div className="mt-0.5 text-tv-muted">{stepsText}</div>
+            {draft.type !== 'market' && (
+              <div className="mt-0.5 text-tv-muted">挂单成交后自动登记阶段计划</div>
+            )}
+            {paused && (
+              <div className="mt-0.5 text-tv-warn">
+                阶段已暂停：{mode === 'readonly' ? '只读模式' : '风控急停'}，恢复可交易后继续
+              </div>
+            )}
+            {riskDeviated && (
+              <div className="mt-1 flex items-center justify-between gap-2 text-tv-warn">
+                <span>
+                  已偏离模板：风险{' '}
+                  {risk.mode === 'percent'
+                    ? `${fmtNum(risk.value)}%`
+                    : `固定 ${fmtMoney(risk.value)}`}
+                  {risk.auto ? '' : ' · 手动手数'}
+                </span>
+                <button
+                  onClick={restoreTemplateRisk}
+                  className="shrink-0 rounded border border-tv-warn/40 px-1.5 py-0.5 text-[10px] text-tv-warn transition-colors hover:bg-tv-warn-soft"
+                >
+                  恢复
+                </button>
+              </div>
+            )}
+            {tpManual && tpTarget != null && (
+              <div className="mt-1 flex items-center justify-between gap-2 text-tv-warn">
+                <span>止盈已手动调整（模板 {fmtPrice(tpTarget, digits)}）</span>
+                <button
+                  onClick={() => {
+                    setTpTouched(false);
+                    patchDraft({ tp: tpTarget });
+                  }}
+                  className="shrink-0 rounded border border-tv-warn/40 px-1.5 py-0.5 text-[10px] text-tv-warn transition-colors hover:bg-tv-warn-soft"
+                >
+                  用模板止盈
+                </button>
+              </div>
+            )}
           </div>
         )}
-
-        <div className="flex gap-1.5">
-          <button
-            onClick={applyTemplate}
-            title={templateTitle}
-            className={clsx(
-              'h-8 flex-1 truncate rounded-lg border text-[12px] transition-colors',
-              templateArmed
-                ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
-                : 'border-tv-border bg-tv-panel text-tv-muted hover:text-tv-text',
-            )}
-          >
-            {templateArmed ? templateArmedLabel : templateLabel}
-          </button>
-          <button
-            onClick={() => {
-              setSettingsSection('template');
-              setPage('settings');
-            }}
-            title="新建或编辑模板：风险 %、止盈 R、分批止盈"
-            aria-label="自定义下单模板"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-tv-border bg-tv-panel text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
-          >
-            <Settings2 size={14} strokeWidth={1.6} />
-          </button>
-        </div>
 
         <Field label="风险开仓">
           <div className="space-y-2">
@@ -590,9 +831,10 @@ export function OrderTicket() {
               step={info?.tickSize ?? 0.00001}
               value={draft.tp ?? ''}
               placeholder="无"
-              onChange={(event) =>
-                patchDraft({ tp: event.target.value === '' ? null : Number(event.target.value) })
-              }
+              onChange={(event) => {
+                setTpTouched(true);
+                patchDraft({ tp: event.target.value === '' ? null : Number(event.target.value) });
+              }}
               className={inputClass}
             />
           </Field>
@@ -690,7 +932,27 @@ export function OrderTicket() {
               <ConfirmRow label="止盈" value={fmtPrice(draft.tp, digits)} />
               <ConfirmRow label="预估风险" value={fmtMoney(preview?.riskAmount)} />
               <ConfirmRow label="策略标签" value={orderTag.trim() || '—'} />
-              <ConfirmRow label="模板步骤" value={templateArmed ? stepSummary : '—'} />
+              <ConfirmRow label="模板" value={templateArmed ? template.name : '—'} />
+              <ConfirmRow
+                label="模板参数"
+                value={
+                  templateArmed
+                    ? `${fmtNum(template.riskPercent)}% 风险 · ${
+                        template.rewardR > 0 ? `止盈 ${fmtNum(template.rewardR)}R` : '不自动设止盈'
+                      }`
+                    : '—'
+                }
+              />
+              <ConfirmRow label="模板阶段" value={templateArmed ? stepsText : '—'} />
+              {templateArmed && (riskDeviated || tpManual) && (
+                <ConfirmRow
+                  label="模板偏离"
+                  value={[riskDeviated ? '风险已改' : '', tpManual ? '止盈已改' : '']
+                    .filter(Boolean)
+                    .join(' · ')}
+                  accent="text-tv-warn"
+                />
+              )}
             </dl>
             <div className="mt-5 flex gap-2">
               <button
