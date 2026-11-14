@@ -27,6 +27,8 @@ interface Drawn {
 export class CalendarLayer {
   private chart: IChartWidgetApi;
   private drawn = new Map<string, Drawn>();
+  /** 已经发出创建请求、还没拿到 id 的事件；防止滚动时重复画线 */
+  private pending = new Set<string>();
   private events: CalendarEvent[] = [];
   private currencies: string[] = [];
   private timer: number | null = null;
@@ -97,13 +99,14 @@ export class CalendarLayer {
       }
     }
     for (const event of wanted) {
-      if (this.drawn.has(event.id)) continue;
+      if (this.drawn.has(event.id) || this.pending.has(event.id)) continue;
       const color = COLORS[event.impact] ?? COLORS.Medium;
-      const text = `${event.country} ${event.title}`.slice(0, 40);
+      this.pending.add(event.id);
+      // 只用竖线标位置。vertical_line 的 text 在图表里会沿竖线旋转 90°，
+      // 多个事件时间接近时叠在一起，既看不清也挡住 K 线；事件名在财经日历面板里看。
       void this.chart
         .createMultipointShape([{ time: event.ts, price }], {
           shape: 'vertical_line',
-          text,
           lock: true,
           disableSelection: true,
           disableSave: true,
@@ -111,15 +114,13 @@ export class CalendarLayer {
           showInObjectsTree: false,
           zOrder: 'bottom',
           overrides: {
-            color,
-            textColor: color,
+            linecolor: color,
             linewidth: 1,
             linestyle: 2,
-            fontSize: 10,
-            showLabel: true,
           },
         })
         .then((id: EntityId) => {
+          this.pending.delete(event.id);
           if (this.disposed) {
             this.removeShape(id);
             return;
@@ -137,7 +138,7 @@ export class CalendarLayer {
           }
         })
         .catch(() => {
-          /* 图表还没准备好时忽略 */
+          this.pending.delete(event.id);
         });
     }
   }
@@ -152,5 +153,6 @@ export class CalendarLayer {
     }
     for (const drawn of this.drawn.values()) this.removeShape(drawn.id);
     this.drawn.clear();
+    this.pending.clear();
   }
 }

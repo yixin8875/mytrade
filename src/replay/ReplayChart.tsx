@@ -2,12 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
 import { useApp, type Theme } from '../store/useApp';
+import type { OrderType, Side } from '../gateway/types';
 import { aggregateBars, ReplayDatafeed } from './datafeed';
 import { replayBars, sourceFor } from './source';
 import { useReplay } from './store';
+import { roundPrice } from './engine';
 import type {
   ChartingLibraryWidgetOptions,
   ChartPropertiesOverrides,
+  DrawingToolIdentifier,
   IChartingLibraryWidget,
   IChartWidgetApi,
   ResolutionString,
@@ -16,6 +19,129 @@ import type {
 const UP = '#0f7a55';
 const DOWN = '#c2413a';
 const ACCENT = '#1f5fd6';
+
+/** 与交易台主图相同的画线工具与周期收藏 */
+const DRAWING_TOOLS: DrawingToolIdentifier[] = [
+  'LineToolTrendLine',
+  'LineToolHorzLine',
+  'LineToolVertLine',
+  'LineToolRay',
+  'LineToolParallelChannel',
+  'LineToolFibRetracement',
+  'LineToolRectangle',
+  'LineToolEllipse',
+  'LineToolText',
+  'LineToolCallout',
+  'LineToolArrow',
+];
+
+const FAVORITE_INTERVALS = ['1', '5', '15', '60', '240', '1D'] as ResolutionString[];
+
+export interface ReplayDraft {
+  active: boolean;
+  side: Side;
+  type: OrderType;
+  price: number;
+  sl: number | null;
+  tp: number | null;
+  volume: number;
+}
+
+export interface ReplayDraftPatch {
+  price?: number;
+  sl?: number | null;
+  tp?: number | null;
+}
+
+export interface ReplayChartProps {
+  sessionId: string;
+  revision: number;
+  timeframe: string;
+  follow: boolean;
+  draft?: ReplayDraft;
+  onDraftChange?: (patch: ReplayDraftPatch) => void;
+  onTimeframeChange?: (resolution: string) => void;
+}
+
+/** 图表状态按会话保存：复盘的画线/指标不会串到交易台，反之亦然 */
+function chartStateKey(sessionId: string): string {
+  return `mytrade.replay.chart.${sessionId}`;
+}
+
+function readChartState(sessionId: string): object | null {
+  try {
+    const raw = window.localStorage.getItem(chartStateKey(sessionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as object) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeChartState(sessionId: string, state: object): void {
+  try {
+    window.localStorage.setItem(chartStateKey(sessionId), JSON.stringify(state));
+  } catch {
+    /* 存储满/被禁用时不影响图表本身 */
+  }
+}
+
+/** 画线单独存：低层 save() 不含绘图对象，要用 getLineToolsState/applyLineToolsState */
+function drawingsKey(sessionId: string): string {
+  return `mytrade.replay.drawings.${sessionId}`;
+}
+
+function serializeDrawings(chart: IChartWidgetApi): string | null {
+  try {
+    const state = chart.getLineToolsState();
+    return JSON.stringify({
+      symbol: state.symbol,
+      sources: state.sources ? [...state.sources.entries()] : null,
+      groups: [...state.groups.entries()],
+    });
+  } catch {
+    return null;
+  }
+}
+
+function writeDrawings(sessionId: string, chart: IChartWidgetApi): void {
+  const raw = serializeDrawings(chart);
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw) as {
+      sources?: [string, unknown][] | null;
+      groups?: unknown[];
+    };
+    const hasContent =
+      (data.sources?.some(([, value]) => value != null) ?? false) ||
+      (data.groups?.length ?? 0) > 0;
+    // 从没存过画线时不要写空对象；但已经存过就要写空，才能记住「用户删光了」
+    if (!hasContent && !window.localStorage.getItem(drawingsKey(sessionId))) return;
+    window.localStorage.setItem(drawingsKey(sessionId), raw);
+  } catch {
+    /* 存储满时忽略 */
+  }
+}
+
+function applySavedDrawings(chart: IChartWidgetApi, sessionId: string): Promise<void> | null {
+  try {
+    const raw = window.localStorage.getItem(drawingsKey(sessionId));
+    if (!raw) return null;
+    const data = JSON.parse(raw) as {
+      symbol?: string;
+      sources?: [string, unknown][] | null;
+      groups?: [string, unknown][];
+    };
+    return chart.applyLineToolsState({
+      symbol: data.symbol,
+      sources: data.sources ? new Map(data.sources) : null,
+      groups: new Map(data.groups ?? []),
+    } as Parameters<IChartWidgetApi['applyLineToolsState']>[0]);
+  } catch {
+    return null;
+  }
+}
 
 function chartTheme(theme: Theme): 'light' | 'dark' {
   return theme === 'dark' ? 'dark' : 'light';
@@ -50,18 +176,26 @@ export function ReplayChart({
   revision,
   timeframe,
   follow,
-}: {
-  sessionId: string;
-  revision: number;
-  timeframe: string;
-  follow: boolean;
-}) {
+  draft,
+  onDraftChange,
+  onTimeframeChange,
+}: ReplayChartProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<IChartingLibraryWidget | null>(null);
   const datafeedRef = useRef<ReplayDatafeed | null>(null);
   const layerRef = useRef<PriceLineLayer | null>(null);
   const followRef = useRef(follow);
   followRef.current = follow;
+  /** 十字线价格：库的 mouse 事件只给像素坐标，点击图内取价要靠它 */
+  const crosshairPrice = useRef<number | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const draftChangeRef = useRef(onDraftChange);
+  draftChangeRef.current = onDraftChange;
+  const timeframeChangeRef = useRef(onTimeframeChange);
+  timeframeChangeRef.current = onTimeframeChange;
+  const timeframeRef = useRef(timeframe);
+  timeframeRef.current = timeframe;
 
   const [chart, setChart] = useState<IChartWidgetApi | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +218,11 @@ export function ReplayChart({
     datafeedRef.current = feed;
     const initialTheme = useApp.getState().theme;
     let widget: IChartingLibraryWidget | null = null;
+    let saveTimer = 0;
+    let drawingsTimer = 0;
+    let disposed = false;
+    let drawingsReady = false;
+    let lastDrawings = '';
 
     try {
       widget = new tv.widget({
@@ -101,40 +240,148 @@ export function ReplayChart({
           foregroundColor: ACCENT,
         },
         overrides: chartOverrides(initialTheme),
+        // 与交易台一致：左侧画线工具栏、顶部周期栏都保留。
+        // 但复盘只能用会话自己的数据：关掉品种搜索/比较品种，避免拉到实时行情；
+        // 本地存储整格关掉，改由本文件按 sessionId 自己保存图表状态。
+        favorites: {
+          drawingTools: DRAWING_TOOLS,
+          intervals: FAVORITE_INTERVALS,
+        },
+        enabled_features: ['saveload_separate_drawings_storage'],
         disabled_features: [
           'use_localstorage_for_settings',
           'save_chart_properties_to_local_storage',
-          'header_widget',
-          'left_toolbar',
-          'timeframes_toolbar',
+          'header_symbol_search',
+          'header_quick_search',
+          'symbol_search_hot_key',
+          'header_compare',
+          'header_saveload',
+          'header_screenshot',
+          'header_fullscreen_button',
           'symbol_info',
-          'legend_widget',
           'border_around_the_chart',
         ],
-        enabled_features: ['hide_left_toolbar_by_default'],
       });
       widgetRef.current = widget;
 
-      widget.chartReady().then(() => {
+      const scheduleSave = () => {
+        if (disposed) return;
+        window.clearTimeout(saveTimer);
+        saveTimer = window.setTimeout(() => {
+          const current = widgetRef.current;
+          if (!current || disposed) return;
+          current
+            .save()
+            .then((state) => writeChartState(sessionId, state))
+            .catch(() => {});
+          try {
+            writeDrawings(sessionId, current.activeChart());
+          } catch {
+            /* 图表还没就绪 */
+          }
+        }, 600);
+      };
+
+      // 程序化创建/编辑绘图不一定触发 drawing_event，轮询一次状态更稳
+      const saveDrawings = () => {
+        if (disposed || !drawingsReady) return;
+        const current = widgetRef.current;
+        if (!current) return;
+        try {
+          const raw = serializeDrawings(current.activeChart());
+          if (!raw || raw === lastDrawings) return;
+          lastDrawings = raw;
+          window.localStorage.setItem(drawingsKey(sessionId), raw);
+        } catch {
+          /* 图表未就绪或存储被禁用 */
+        }
+      };
+      drawingsTimer = window.setInterval(saveDrawings, 1500);
+
+      // 画线/指标的增删改没有统一的回调，直接听库的事件
+      widget.subscribe('drawing_event', (_sourceId, eventType) => {
+        if (eventType === 'click') return;
+        scheduleSave();
+      });
+      widget.subscribe('study_event', () => scheduleSave());
+
+      widget.chartReady().then(async () => {
         if (widgetRef.current !== widget || !widget) return;
         const active = widget.activeChart();
+
+        // 恢复本会话上次的画线与指标（不影响交易台的 localStorage 布局）
+        const saved = readChartState(sessionId);
+        if (saved) {
+          try {
+            await widget.load(saved);
+          } catch {
+            /* 旧版本状态不兼容时保留默认图表 */
+          }
+          if (disposed || widgetRef.current !== widget) return;
+        }
+
         widget.applyOverrides(chartOverrides(useApp.getState().theme));
+
+        const drawings = applySavedDrawings(active, sessionId);
+        if (drawings) {
+          try {
+            await drawings;
+          } catch {
+            /* 旧版本绘图状态不兼容时忽略 */
+          }
+          if (disposed || widgetRef.current !== widget) return;
+        }
+        lastDrawings = serializeDrawings(active) ?? '';
+        drawingsReady = true;
 
         const layer = new PriceLineLayer(active, (price) => {
           if (!symbolInfo) return price;
-          const tick = symbolInfo.tickSize || symbolInfo.point || 0;
-          return tick
-            ? Number((Math.round(price / tick) * tick).toFixed(symbolInfo.digits))
-            : price;
+          return roundPrice(price, symbolInfo);
         });
         layer.start();
         layerRef.current = layer;
 
+        active.onIntervalChanged().subscribe(null, (interval) => {
+          if (interval === timeframeRef.current) return;
+          timeframeChangeRef.current?.(interval);
+        });
+
+        active.crossHairMoved().subscribe(null, (params) => {
+          if (typeof params?.price === 'number') crosshairPrice.current = params.price;
+        });
+
+        // 画线下单：点击图内把入场价放到十字线价格。
+        // 图表在 same-origin iframe 里，父容器的 click 收不到，只能听库的鼠标事件；
+        // 用按下/松开的位移区分「点一下」和拖动画布。
+        let downAt = 0;
+        let downX = 0;
+        let downY = 0;
+        widget.subscribe('mouse_down', (params) => {
+          downAt = Date.now();
+          downX = params.clientX;
+          downY = params.clientY;
+        });
+        widget.subscribe('mouse_up', (params) => {
+          if (!draftRef.current?.active) return;
+          if (!downAt || Date.now() - downAt > 1500) return;
+          if (Math.abs(params.clientX - downX) > 4 || Math.abs(params.clientY - downY) > 4) {
+            return;
+          }
+          const price = crosshairPrice.current;
+          const info = useReplay
+            .getState()
+            .sessions.find((item) => item.id === sessionId)?.symbolInfo;
+          if (price == null || !info) return;
+          draftChangeRef.current?.({ price: roundPrice(price, info) });
+        });
+
+        // load 可能把区间带回上次的位置；统一按游标尾部重新定位
         const state = useReplay.getState();
         const current = state.sessions.find((item) => item.id === sessionId);
         if (current) {
+          const resolution = active.resolution() || (timeframe as ResolutionString);
           const bars = replayBars(current.id);
-          const series = aggregateBars(bars, timeframe, current.cursorIndex);
+          const series = aggregateBars(bars, resolution, current.cursorIndex);
           const tail = series.slice(-110);
           if (tail.length > 1) {
             active
@@ -144,8 +391,15 @@ export function ReplayChart({
               })
               .catch(() => {});
           }
+          // 恢复的画布可能停在上次的周期；让工作台标题跟着图表走
+          if (active.resolution() !== timeframeRef.current) {
+            timeframeChangeRef.current?.(active.resolution());
+          }
         }
 
+        if (import.meta.env.DEV) {
+          (window as unknown as { __replayTv?: IChartingLibraryWidget }).__replayTv = widget;
+        }
         setChart(active);
         setError(null);
       });
@@ -163,13 +417,31 @@ export function ReplayChart({
     });
 
     return () => {
+      disposed = true;
+      window.clearTimeout(saveTimer);
+      window.clearInterval(drawingsTimer);
       unsubscribe();
       layerRef.current?.dispose();
       layerRef.current = null;
       datafeedRef.current?.resetCache();
       datafeedRef.current = null;
       setChart(null);
-      widgetRef.current?.remove();
+      const current = widgetRef.current;
+      if (current) {
+        // 卸载前再存一次：画线刚改完就切页也不会丢
+        if (drawingsReady) {
+          try {
+            writeDrawings(sessionId, current.activeChart());
+          } catch {
+            /* 图表已销毁 */
+          }
+        }
+        current
+          .save()
+          .then((state) => writeChartState(sessionId, state))
+          .catch(() => {});
+        current.remove();
+      }
       widgetRef.current = null;
     };
     // 只在会话 / 重新开始时重建；周期切换走 setResolution
@@ -203,16 +475,54 @@ export function ReplayChart({
     };
   }, [theme, chart]);
 
-  // 持仓 / 挂单线：入场线与保护线，拖动保护线直接改模拟止损止盈
+  // 持仓 / 挂单 / 画线下单草稿线
   useEffect(() => {
     const layer = layerRef.current;
     if (!chart || !layer || !session) return;
     const specs = new Map<string, PriceLineSpec>();
+    const digits = session.symbolInfo.digits;
+
+    if (draft?.active && draft.price > 0) {
+      const kind = draft.type === 'limit' ? '限价' : draft.type === 'stop' ? '停损' : '市价';
+      const side = draft.side === 'buy' ? '买入' : '卖出';
+      specs.set('draft:entry', {
+        price: draft.price,
+        color: draft.side === 'buy' ? UP : DOWN,
+        text: `${kind}${side} ${draft.volume.toFixed(2)} @ ${draft.price.toFixed(digits)}`,
+        onMove: (price) =>
+          draftChangeRef.current?.({
+            price: roundPrice(price, session.symbolInfo),
+          }),
+      });
+      if (draft.sl != null && draft.sl > 0) {
+        specs.set('draft:sl', {
+          price: draft.sl,
+          color: DOWN,
+          text: 'SL',
+          onMove: (price) =>
+            draftChangeRef.current?.({
+              sl: roundPrice(price, session.symbolInfo),
+            }),
+        });
+      }
+      if (draft.tp != null && draft.tp > 0) {
+        specs.set('draft:tp', {
+          price: draft.tp,
+          color: UP,
+          text: 'TP',
+          onMove: (price) =>
+            draftChangeRef.current?.({
+              tp: roundPrice(price, session.symbolInfo),
+            }),
+        });
+      }
+    }
+
     for (const position of session.positions) {
       specs.set(`position:${position.id}`, {
         price: position.entry,
         color: ACCENT,
-        text: position.side === 'buy' ? '模拟多' : '模拟空',
+        text: `${position.side === 'buy' ? '模拟多' : '模拟空'} ${position.volume.toFixed(2)}`,
         editable: false,
       });
       if (position.sl != null) {
@@ -241,7 +551,7 @@ export function ReplayChart({
       });
     }
     void layer.sync(specs);
-  }, [chart, session, positions, orders]);
+  }, [chart, session, positions, orders, draft]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-console-card">

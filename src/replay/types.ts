@@ -1,4 +1,4 @@
-import type { Bar, OrderType, Side, SymbolInfo } from '../gateway/types';
+import type { Bar, OrderType, Side, SymbolInfo, TemplateStep } from '../gateway/types';
 
 /** 复盘页自己的数据类型；不引用任何实盘订单/持仓类型，避免误用。 */
 export type ReplayStatus =
@@ -40,6 +40,9 @@ export interface ReplayOrder {
   createdAt: number;
   /** 只在下一根 M1 开盘成交（市价单） */
   atNextOpen: boolean;
+  /** 下单时启用的模板阶段；成交后由引擎在到达 R 时执行 */
+  steps?: TemplateStep[];
+  templateName?: string;
 }
 
 export interface ReplayPosition {
@@ -52,12 +55,17 @@ export interface ReplayPosition {
   openTs: number;
   /** 开仓时这一笔的初始风险（账户货币） */
   initialRisk: number | null;
+  /** 开仓时入场到止损的价差；部分平仓后 R 距离不变 */
+  initialRiskPrice?: number | null;
   openCommission: number;
   tag: string;
   mfe: number;
   mae: number;
   /** 模板阶段已执行到第几个，避免重复触发 */
   templateStep: number;
+  /** 这一笔要执行的模板阶段（下单时快照） */
+  steps?: TemplateStep[];
+  templateName?: string;
 }
 
 export interface ReplayTrade {
@@ -73,7 +81,7 @@ export interface ReplayTrade {
   commission: number;
   r: number | null;
   tag: string;
-  closedBy: 'manual' | 'sl' | 'tp' | 'finish' | 'stop_out';
+  closedBy: 'manual' | 'sl' | 'tp' | 'finish' | 'stop_out' | 'template';
   mfe: number;
   mae: number;
 }

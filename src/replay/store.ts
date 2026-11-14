@@ -25,7 +25,7 @@ import type {
   ReplaySession,
   ReplaySettings,
 } from './types';
-import type { OrderType, Side } from '../gateway/types';
+import type { OrderType, Side, TemplateStep } from '../gateway/types';
 
 /** 会话开始前额外载入的 M1，用于指标预热 */
 const WARMUP_BARS = 1000;
@@ -50,6 +50,9 @@ export interface OrderInput {
   sl: number | null;
   tp: number | null;
   tag: string;
+  /** 启用下单模板时随订单保存，成交后由引擎按 R 执行 */
+  steps?: TemplateStep[];
+  templateName?: string;
 }
 
 export interface ReplayLoading {
@@ -757,6 +760,8 @@ export const useReplay = create<ReplayStore>((set, get) => ({
       tag: input.tag.trim().slice(0, 16),
       createdAt: Date.now(),
       atNextOpen: true,
+      steps: input.steps?.map((step) => ({ ...step })),
+      templateName: input.templateName,
     };
     session.orders.push(order);
     session.updatedAt = Date.now();

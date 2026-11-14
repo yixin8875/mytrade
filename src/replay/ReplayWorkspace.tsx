@@ -5,6 +5,7 @@ import {
   Lock,
   MoreHorizontal,
   Pause,
+  PenLine,
   Play,
   RotateCcw,
   StepForward,
@@ -13,8 +14,8 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
+import { templateSummary } from '../lib/template';
 import { activeTemplate, useApp } from '../store/useApp';
-import { aggregateLast, bucketStart } from './datafeed';
 import { calcProfit, marginFor, positionProfit, roundPrice, roundVolume } from './engine';
 import {
   currentBar,
@@ -25,22 +26,20 @@ import {
   useReplay,
 } from './store';
 import { goReplayList, goReplayReport } from './route';
-import { hasReplayBars, replayBars } from './source';
-import { ReplayChart } from './ReplayChart';
+import { hasReplayBars } from './source';
+import { ReplayChart, type ReplayDraft } from './ReplayChart';
 import { Tape } from './Tape';
 import { fmtDate, fmtShort } from './time';
 import type { ReplaySession } from './types';
 import type { OrderType, Side } from '../gateway/types';
 
-const TIMEFRAMES = [
-  { value: '1', label: '1m' },
-  { value: '5', label: '5m' },
-  { value: '15', label: '15m' },
-  { value: '30', label: '30m' },
-  { value: '60', label: '1h' },
-  { value: '240', label: '4h' },
-  { value: '1D', label: '1D' },
-];
+/** 与交易台周期收藏一致：1/5/15 分钟、1/4 小时、日线 */
+function tfLabel(resolution: string): string {
+  if (resolution === '60') return '1h';
+  if (resolution === '240') return '4h';
+  if (resolution === '1D' || resolution === '1W' || resolution === '1M') return resolution;
+  return `${resolution}m`;
+}
 
 const SIDES: { value: Side; label: string }[] = [
   { value: 'buy', label: '买入' },
@@ -90,8 +89,13 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   const addNote = useReplay((s) => s.addNote);
   const removeNote = useReplay((s) => s.removeNote);
   const template = useApp(activeTemplate);
+  const templates = useApp((s) => s.templates);
+  const setActiveTemplate = useApp((s) => s.setActiveTemplate);
 
   const [timeframe, setTimeframe] = useState('15');
+  const [draftActive, setDraftActive] = useState(false);
+  /** 复盘自己的模板开关，不借用交易台的 templateArmed */
+  const [templateArmed, setTemplateArmed] = useState(false);
   const [tab, setTab] = useState<'positions' | 'orders' | 'notes' | 'stats'>('positions');
   const [menu, setMenu] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
@@ -123,6 +127,9 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   const account = session ? sessionAccount(session) : null;
   const stats = useMemo(() => (session ? sessionStats(session) : null), [session]);
   const initial = session?.settings.initialBalance ?? 0;
+  /** 启用模板时用模板的风险比例和 R 倍数，否则用会话设置与默认 2R */
+  const riskPercent = templateArmed ? template.riskPercent : (session?.settings.riskPercent ?? 0);
+  const rewardR = templateArmed ? Math.max(1, template.rewardR) : 2;
 
   useEffect(() => {
     if (!session) return;
@@ -139,7 +146,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
     const distance = defaultStopDistance(info);
     const tickSize = info.tickSize || info.point || 1e-9;
     const riskPerLot = (distance / tickSize) * (info.tickValue || 0);
-    const riskAmount = (session.settings.initialBalance * session.settings.riskPercent) / 100;
+    const riskAmount = (session.settings.initialBalance * riskPercent) / 100;
     const suggested =
       riskPerLot > 0 ? roundVolume(riskAmount / riskPerLot, info) : info.minVolume;
     setVolume(String(suggested));
@@ -150,15 +157,15 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
       String(
         roundPrice(
           side === 'buy'
-            ? reference + distance * Math.max(1, template.rewardR)
-            : reference - distance * Math.max(1, template.rewardR),
+            ? reference + distance * rewardR
+            : reference - distance * rewardR,
           info,
         ),
       ),
     );
     setPrice(String(roundPrice(reference, info)));
     setTicketError(null);
-  }, [session, bar, info, side, ask, bid, template.rewardR]);
+  }, [session, bar, info, side, ask, bid, rewardR, riskPercent]);
 
   // 市价单的止损止盈跟着回放价格走；用户手动改过就不再覆盖
   useEffect(() => {
@@ -175,14 +182,14 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
         String(
           roundPrice(
             side === 'buy'
-              ? reference + distance * Math.max(1, template.rewardR)
-              : reference - distance * Math.max(1, template.rewardR),
+              ? reference + distance * rewardR
+              : reference - distance * rewardR,
             info,
           ),
         ),
       );
     }
-  }, [ask, bid, info, side, type, slTouched, tpTouched, template.rewardR]);
+  }, [ask, bid, info, side, type, slTouched, tpTouched, rewardR]);
 
   if (!session) {
     return (
@@ -226,8 +233,14 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
       sl: sl.trim() ? Number(sl) : null,
       tp: tp.trim() ? Number(tp) : null,
       tag: useApp.getState().orderTag,
+      steps: templateArmed ? template.steps : undefined,
+      templateName: templateArmed ? template.name : undefined,
     });
     setTicketError(error);
+    if (!error) {
+      setDraftActive(false);
+      setTemplateArmed(false);
+    }
   };
 
   const entry = type === 'market' ? (side === 'buy' ? ask : bid) : Number(price) || 0;
@@ -248,6 +261,51 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   const margin =
     info && entry > 0 ? marginFor(Number(volume) || 0, entry, info, session.settings.leverage) : 0;
   const riskPct = initial > 0 && riskAmount != null ? (riskAmount / initial) * 100 : null;
+
+  const toggleDraft = () => {
+    if (draftActive) {
+      setDraftActive(false);
+      return;
+    }
+    if (!info) return;
+    // 与交易台一样：开启画线时先把入场价放在当前价，随后点击图表改价
+    setPrice(String(roundPrice(entry, info)));
+    // 画线期间冻结自动止损止盈，免得线每根 K 线都跟着跑
+    setSlTouched(true);
+    setTpTouched(true);
+    setDraftActive(true);
+  };
+
+  const handleDraftChange = (patch: { price?: number; sl?: number | null; tp?: number | null }) => {
+    if (patch.price != null) setPrice(String(patch.price));
+    if (patch.sl !== undefined) {
+      setSl(patch.sl == null ? '' : String(patch.sl));
+      setSlTouched(true);
+    }
+    if (patch.tp !== undefined) {
+      setTp(patch.tp == null ? '' : String(patch.tp));
+      setTpTouched(true);
+    }
+  };
+
+  const toggleTemplate = () => {
+    setTemplateArmed((value) => !value);
+    setSlTouched(false);
+    setTpTouched(false);
+    // 模板风险比例变了，手数和默认止损按新风险重算
+    ticketInited.current = null;
+  };
+
+  const draft: ReplayDraft = {
+    active: draftActive,
+    side,
+    type,
+    price: Number(price) || 0,
+    sl: slNumber,
+    tp: tpNumber,
+    volume: Number(volume) || 0,
+  };
+
   const latestNote = session.notes[session.notes.length - 1];
   const equity = account?.equity ?? session.equity;
 
@@ -264,7 +322,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
         <div className="min-w-0">
           <div className="truncate text-[15px] font-medium leading-tight">{session.name}</div>
           <div className="mt-1 whitespace-nowrap text-[11px] text-console-muted">
-            {session.symbol} · {timeframe}m · 行情时间{' '}
+            {session.symbol} · {tfLabel(timeframe)} · 行情时间{' '}
             <b className="font-mono font-normal text-console-ink-2">{fmtShort(virtualTime)}</b>
           </div>
         </div>
@@ -377,26 +435,11 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
       <div className="flex min-h-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col border-r border-console-line">
           <div className="flex h-10 shrink-0 items-center gap-2 border-b border-console-line px-4">
-            <div className="flex items-center gap-0.5">
-              {TIMEFRAMES.map((item) => (
-                <button
-                  key={item.value}
-                  onClick={() => setTimeframe(item.value)}
-                  className={clsx(
-                    'h-[26px] rounded-[6px] px-2 font-mono text-[11px] transition-colors',
-                    timeframe === item.value
-                      ? 'bg-console-ink text-console-card'
-                      : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
-                  )}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
+            <span className="font-mono text-[11px] text-console-ink-2">{tfLabel(timeframe)}</span>
             <span className="mx-1 h-4 w-px bg-console-line" />
             <span className="inline-flex items-center gap-1 text-[10px] text-console-muted">
               <Lock size={13} strokeWidth={1.5} />
-              品种与区间已锁定
+              品种与区间已锁定 · 周期在图表上方切换
             </span>
             <div className="flex-1" />
             {session.dataSource === 'demo' && (
@@ -416,9 +459,11 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                 revision={revision}
                 timeframe={timeframe}
                 follow={follow}
+                draft={draft}
+                onDraftChange={handleDraftChange}
+                onTimeframeChange={setTimeframe}
               />
             )}
-            {barsReady && <ChartLegend session={session} timeframe={timeframe} />}
 
             {(!barsReady || preparing || loading?.id === session.id) && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-console-card/90">
@@ -822,10 +867,45 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
           <div className="shrink-0 border-t border-console-line px-5 py-4">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-[12px] font-medium">模拟下单</span>
-              <span className="text-[10px] text-console-muted">
-                按 {session.settings.riskPercent}% 风险
-              </span>
+              <span className="text-[10px] text-console-muted">按 {riskPercent}% 风险</span>
             </div>
+
+            <div className="mt-2.5 flex items-center gap-2">
+              <select
+                value={template.id}
+                onChange={(event) => {
+                  setActiveTemplate(event.target.value);
+                  if (templateArmed) {
+                    setSlTouched(false);
+                    setTpTouched(false);
+                    ticketInited.current = null;
+                  }
+                }}
+                className="console-input h-7 min-w-0 flex-1 text-[11px]"
+                title="下单模板"
+              >
+                {templates.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={toggleTemplate}
+                className={clsx(
+                  'h-7 shrink-0 rounded-[6px] border px-2 text-[11px] transition-colors',
+                  templateArmed
+                    ? 'border-console-accent bg-console-accent-soft text-console-accent'
+                    : 'border-console-line text-console-muted hover:text-console-ink',
+                )}
+              >
+                {templateArmed ? '已启用' : '启用'}
+              </button>
+            </div>
+            <div className="mt-1 truncate text-[10px] text-console-muted">
+              {templateSummary(template)}
+            </div>
+
             <div className="mt-2.5 grid grid-cols-2 gap-0.5 rounded-[8px] bg-console-hover p-0.5">
               {SIDES.map((item) => (
                 <button
@@ -872,6 +952,29 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                   {item.label}
                 </button>
               ))}
+            </div>
+
+            <div className="mt-2 flex items-center justify-between gap-2 text-[10px]">
+              <button
+                onClick={toggleDraft}
+                className={clsx(
+                  'inline-flex items-center gap-1 rounded-[6px] px-1.5 py-1 transition-colors',
+                  draftActive
+                    ? 'bg-console-accent-soft text-console-accent'
+                    : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
+                )}
+              >
+                <PenLine size={12} strokeWidth={1.5} />
+                {draftActive ? '划线中 · 点击图表设价' : '画线下单'}
+              </button>
+              {draftActive && (
+                <button
+                  onClick={() => setDraftActive(false)}
+                  className="text-console-faint hover:text-console-ink"
+                >
+                  清除划线
+                </button>
+              )}
             </div>
 
             <div className="mt-2.5 grid grid-cols-2 gap-2">
@@ -1047,44 +1150,6 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
           跟随游标
         </label>
       </footer>
-    </div>
-  );
-}
-
-/** 图例：只读游标以前的 M1，聚合出当前周期最后一根，不碰未来数据 */
-function ChartLegend({ session, timeframe }: { session: ReplaySession; timeframe: string }) {
-  const legend = useMemo(() => {
-    const bars = replayBars(session.id);
-    const end = Math.min(session.cursorIndex, bars.length);
-    if (end <= 0) return null;
-    const last = aggregateLast(bars, timeframe, end);
-    if (!last) return null;
-    const bucket = bucketStart(bars[end - 1].time, timeframe);
-    let first = end - 1;
-    while (first > 0 && bucketStart(bars[first - 1].time, timeframe) === bucket) first -= 1;
-    const prev = first > 0 ? aggregateLast(bars, timeframe, first) : null;
-    const change = prev && prev.close ? (last.close - prev.close) / prev.close : null;
-    return { last, change };
-  }, [session.id, session.cursorIndex, timeframe]);
-
-  if (!legend) return null;
-  const up = legend.last.close >= legend.last.open;
-  return (
-    <div className="pointer-events-none absolute left-3 top-2.5 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[6px] bg-console-card/80 px-2 py-1 font-mono text-[10px] text-console-muted backdrop-blur-[2px]">
-      <span className="font-medium text-console-ink-2">
-        {session.symbol} · {timeframe}
-      </span>
-      <span>O {fmtPrice(legend.last.open, session.symbolInfo.digits)}</span>
-      <span>H {fmtPrice(legend.last.high, session.symbolInfo.digits)}</span>
-      <span>L {fmtPrice(legend.last.low, session.symbolInfo.digits)}</span>
-      <span className={up ? 'text-console-gain' : 'text-console-loss'}>
-        C {fmtPrice(legend.last.close, session.symbolInfo.digits)}
-      </span>
-      {legend.change != null && (
-        <span className={legend.change >= 0 ? 'text-console-gain' : 'text-console-loss'}>
-          {(legend.change * 100).toFixed(2)}%
-        </span>
-      )}
     </div>
   );
 }

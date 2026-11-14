@@ -118,11 +118,14 @@ function openPosition(
     tp: order.tp,
     openTs: ts,
     initialRisk: risk,
+    initialRiskPrice: order.sl != null ? Math.abs(entry - order.sl) : null,
     openCommission,
     tag: order.tag,
     mfe: 0,
     mae: 0,
     templateStep: 0,
+    steps: order.steps?.map((step) => ({ ...step })),
+    templateName: order.templateName,
   });
   session.orders = session.orders.filter((item) => item.id !== order.id);
 }
@@ -189,6 +192,54 @@ function markExcursion(session: ReplaySession, bar: Bar): void {
         : calcProfit('sell', position.volume, position.entry, bar.high, info);
     position.mfe = Math.max(position.mfe, favorable);
     position.mae = Math.min(position.mae, adverse);
+  }
+}
+
+/**
+ * 订单模板阶段：浮盈达到 atR 时平掉 closePercent，或把止损移到开仓价。
+ * 同一根 M1 内按有利极值判断，触发价用 R 对应的价格，保证结果可复现。
+ * 每个阶段只执行一次（templateStep 记录进度）。
+ */
+function applyTemplateSteps(
+  session: ReplaySession,
+  position: ReplayPosition,
+  bar: Bar,
+  events: string[],
+): void {
+  const steps = position.steps;
+  const riskPrice = position.initialRiskPrice;
+  if (!steps?.length || !position.initialRisk || position.initialRisk <= 0) return;
+  if (!riskPrice || riskPrice <= 0) return;
+  const info = session.symbolInfo;
+  const favorable =
+    position.side === 'buy'
+      ? bar.high
+      : askPrice(bar.low, info, session.settings.spreadPoints);
+  while (position.templateStep < steps.length) {
+    const step = steps[position.templateStep];
+    const profit = calcProfit(position.side, position.volume, position.entry, favorable, info);
+    if (profit / position.initialRisk < step.atR - 1e-9) break;
+    const direction = position.side === 'buy' ? 1 : -1;
+    const trigger = roundPrice(position.entry + direction * riskPrice * step.atR, info);
+    const ts = bar.time + 60;
+    if (step.closePercent != null) {
+      const before = position.volume;
+      const closeVolume = Math.min(
+        roundVolume((before * step.closePercent) / 100, info),
+        before,
+      );
+      if (closeVolume > 0) {
+        closePosition(session, position.id, closeVolume, trigger, ts, 'template');
+        events.push(`模板 ${step.atR}R 平 ${step.closePercent}%`);
+        // 手数太小时按 step 取整可能已把仓位平光
+        if (closeVolume >= before - 1e-9) return;
+      }
+    }
+    if (step.moveBreakeven) {
+      position.sl = position.entry;
+      events.push(`模板 ${step.atR}R 移到保本`);
+    }
+    position.templateStep += 1;
   }
 }
 
@@ -276,7 +327,12 @@ export function stepSession(session: ReplaySession, bar: Bar): StepResult {
     }
   }
 
-  // 4. 收盘估值
+  // 4. 模板阶段（到达 atR 时平仓/移保本）
+  for (const position of [...session.positions]) {
+    applyTemplateSteps(session, position, bar, events);
+  }
+
+  // 5. 收盘估值
   const floating = floatingProfit(session, bar.close);
   session.equity = session.balance + floating;
   session.peakEquity = Math.max(session.peakEquity, session.equity);
@@ -290,7 +346,7 @@ export function stepSession(session: ReplaySession, bar: Bar): StepResult {
     peak: session.peakEquity,
   });
 
-  // 5. 推进游标
+  // 6. 推进游标
   session.cursorIndex += 1;
   session.updatedAt = Date.now();
   if (session.equity <= 0) events.push('模拟账户已爆仓');

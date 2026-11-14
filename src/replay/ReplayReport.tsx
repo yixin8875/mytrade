@@ -17,6 +17,7 @@ function closedByText(reason: ReplaySession['trades'][number]['closedBy']): stri
   if (reason === 'tp') return '止盈';
   if (reason === 'manual') return '手动';
   if (reason === 'stop_out') return '强平';
+  if (reason === 'template') return '模板';
   return '结束';
 }
 
