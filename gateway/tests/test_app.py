@@ -8,6 +8,7 @@ import asyncio
 import concurrent.futures
 import importlib.util
 import json
+import time
 import types
 from pathlib import Path
 
@@ -291,6 +292,11 @@ def test_断开后移除客户端(client, gateway):
 
     manager.__exit__(None, None, None)
 
+    # 服务端收到断开后才会执行 finally，给它一点时间清理
+    for _ in range(100):
+        if not module.clients:
+            break
+        time.sleep(0.01)
     assert module.clients == {}
 
 
