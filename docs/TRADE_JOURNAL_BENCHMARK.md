@@ -123,7 +123,8 @@ LuxAlgo 的 trade-journal 是一个**事后交易日志**：靠券商同步、�
 | MFE / MAE | 持仓期间 M1 高低点折算 | `gateway/journal.py:_excursion` |
 | R 折算 | 订单止损 → 持仓期记录 → 下单意图 → 存档，四级来源 | `gateway/journal.py:_risk_detail` |
 | 标签 | `journal.tag` 可改，按标签统计 | `src/views/Journal.tsx` |
-| 截图 | 平仓后自动截当前图表，按账户分目录 | `gateway/data/shots/<login>/` |
+| 交易图 | 按持仓时段回取 MT5 K 线，重绘入场/出场/止损止盈与持仓区间；周期自动或手选 | `src/components/TradeChart.tsx`、`src/lib/tradeChart.ts` |
+| 截图 | 平仓后自动截当前图表，按账户分目录；交易图弹层的第二页签 | `gateway/data/shots/<login>/` |
 | 统计报表 | 区间汇总、盈亏/R 曲线、模板执行、执行交叉、4 个分组 | `src/views/Reports.tsx` |
 | 执行质量 | 点差、滑点、延迟 P50/P90、拒单原因 | `src/views/Executions.tsx` |
 | 复盘会话 | 历史行情里模拟交易，有订单、笔记、R 分布、报告、CSV | `src/replay/` |
@@ -164,7 +165,7 @@ LuxAlgo 的 trade-journal 是一个**事后交易日志**：靠券商同步、�
 3. **模板执行**：分批止盈阶段是否按计划执行、每次减仓的价格与 R。
 4. **风控上下文**：当日亏损额度、连亏冷却、开仓次数、是否急停。
 5. **复盘会话**：在历史行情里重新做决策的完整订单、笔记、R 分布。
-6. **图表截图 + 坐标元数据**：平仓瞬间的图，不只是价格。
+6. **可重建的交易图**：按持仓时段回取 K 线重绘入场/出场/止损止盈，截图只是当时的旁证。
 
 复盘层应该围绕这 6 项设计，而不是复刻一个通用交易日志。
 

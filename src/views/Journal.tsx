@@ -1,21 +1,15 @@
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
-import { RefreshCw } from 'lucide-react';
+import { Camera, RefreshCw } from 'lucide-react';
 import { gateway } from '../gateway/client';
+import { TradeDetailModal } from '../components/TradeDetailModal';
 import { TradeReviewDrawer } from '../components/TradeReviewDrawer';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
 import type { JournalBreakdown, JournalRecord, JournalStats } from '../gateway/types';
-import { isShotMeta, shotY, type ShotMeta } from '../chart/tv/shotMeta';
 
-const SHOT_BASE = 'http://127.0.0.1:8765/shots';
 const RANGES = [7, 30, 90];
-
-/** 截图按账户分目录；旧版平铺文件由网关路由自动回退 */
-function shotUrl(record: JournalRecord, ext = 'jpg'): string {
-  return `${SHOT_BASE}/${record.login || 0}/${record.position_id}.${ext}`;
-}
 
 const CLOSED_BY: Record<string, string> = {
   sl: '止损',
@@ -63,8 +57,7 @@ export function JournalView() {
   const [records, setRecords] = useState<JournalRecord[]>([]);
   const [tab, setTab] = useState<BreakdownTab>('symbol');
   const [editing, setEditing] = useState<{ id: number; value: string } | null>(null);
-  const [shot, setShot] = useState<JournalRecord | null>(null);
-  const [shotMeta, setShotMeta] = useState<ShotMeta | null>(null);
+  const [shot, setShot] = useState<{ record: JournalRecord; tab: 'chart' | 'shot' } | null>(null);
   const [reviewing, setReviewing] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,27 +86,11 @@ export function JournalView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days, activeLogin]);
 
-  // 切换账户后关闭上一笔交易的截图，避免把旧账户的图配到新记录上
+  // 切换账户后关闭上一笔交易的详情，避免把旧账户的图配到新记录上
   useEffect(() => {
     setShot(null);
     setEditing(null);
   }, [activeLogin]);
-
-  // 截图旁边的坐标元数据；旧截图没有这个文件，按无标注处理
-  useEffect(() => {
-    setShotMeta(null);
-    if (!shot) return;
-    let alive = true;
-    fetch(shotUrl(shot, 'json'))
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (alive && isShotMeta(data)) setShotMeta(data);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [shot]);
 
   const summary = stats?.summary;
   const breakdown: JournalBreakdown[] =
@@ -123,8 +100,6 @@ export function JournalView() {
         ? (stats?.byHour ?? [])
         : (stats?.byTag ?? []);
   const breakdownMax = breakdown.reduce((max, row) => Math.max(max, Math.abs(row.pnl)), 0);
-  const shotDigits =
-    shotMeta?.digits ?? (shot && Math.abs(shot.entry_price) >= 100 ? 2 : 5);
 
   const saveTag = async (record: JournalRecord, value: string) => {
     setEditing(null);
@@ -394,16 +369,25 @@ export function JournalView() {
                         )}
                       </td>
                       <td className="px-2 py-2.5">
-                        {record.has_shot ? (
+                        <div className="flex items-center gap-1">
                           <button
-                            onClick={() => setShot(record)}
+                            onClick={() => setShot({ record, tab: 'chart' })}
+                            title="按行情重绘这笔交易的 K 线"
                             className="h-7 rounded-md border border-console-line bg-console-card px-2 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover"
                           >
-                            查看
+                            图表
                           </button>
-                        ) : (
-                          <span className="text-console-faint">—</span>
-                        )}
+                          {record.has_shot ? (
+                            <button
+                              onClick={() => setShot({ record, tab: 'shot' })}
+                              title="查看成交时的图表截图"
+                              aria-label="查看成交截图"
+                              className="flex h-7 w-7 items-center justify-center rounded-md border border-console-line bg-console-card text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+                            >
+                              <Camera size={12} strokeWidth={1.6} />
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <button
@@ -429,109 +413,15 @@ export function JournalView() {
       />
 
       {shot && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-6"
-          onClick={() => setShot(null)}
-        >
-          <div className="relative max-h-full max-w-full">
-            <img
-              src={shotUrl(shot)}
-              alt={`交易 ${shot.position_id} 的图表截图`}
-              className="block max-h-[calc(100vh-3rem)] max-w-[calc(100vw-3rem)] rounded-lg border border-console-line object-contain shadow-2xl"
-            />
-            {shotMeta && <ShotAnnotations meta={shotMeta} record={shot} />}
-          </div>
-          {!shotMeta && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-lg bg-black/75 px-3 py-1.5 text-[11px] text-white/90">
-              入场 <span className="num">{fmtPrice(shot.entry_price, shotDigits)}</span>
-              <span className="mx-1.5 text-white/40">·</span>
-              出场 <span className="num">{fmtPrice(shot.exit_price, shotDigits)}</span>
-              <span className="ml-2 text-[11px] text-white/60">旧截图无坐标信息，无法在图上定位</span>
-            </div>
-          )}
-        </div>
+        <TradeDetailModal
+          record={shot.record}
+          initialTab={shot.tab}
+          onClose={() => setShot(null)}
+        />
       )}
     </div>
   );
 }
-
-/** 在截图上按价格锚点画入场 / 出场水平线；价格在画面外时贴边并加箭头 */
-function ShotAnnotations({ meta, record }: { meta: ShotMeta; record: JournalRecord }) {
-  const entry = shotY(record.entry_price, meta);
-  const exit = shotY(record.exit_price, meta);
-  if (!entry || !exit) return null;
-
-  return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg">
-      <PriceMarker
-        y={entry.y}
-        edge={entry.edge}
-        color="#1f5fd6"
-        side="left"
-        label={`入场 ${fmtPrice(record.entry_price, meta.digits)}`}
-      />
-      <PriceMarker
-        y={exit.y}
-        edge={exit.edge}
-        color={record.profit >= 0 ? '#0f7a55' : '#c2413a'}
-        side="right"
-        label={`出场 ${fmtPrice(record.exit_price, meta.digits)}`}
-      />
-    </div>
-  );
-}
-
-function PriceMarker({
-  y,
-  edge,
-  color,
-  side,
-  label,
-}: {
-  y: number;
-  edge: 'above' | 'below' | null;
-  color: string;
-  side: 'left' | 'right';
-  label: string;
-}) {
-  const arrow = edge === 'above' ? ' ↑' : edge === 'below' ? ' ↓' : '';
-  const tag = (
-    <span
-      className={clsx(
-        'shrink-0 px-2 py-0.5 text-[11px] font-medium text-white shadow-sm',
-        side === 'left' ? 'rounded-r-md' : 'rounded-l-md',
-      )}
-      style={{ backgroundColor: color }}
-      title={edge ? '该价格在截图可视区间之外' : undefined}
-    >
-      {label}
-      {arrow}
-    </span>
-  );
-  const line = (
-    <span className="h-px flex-1" style={{ backgroundColor: color, opacity: 0.85 }} />
-  );
-
-  return (
-    <div
-      className="absolute inset-x-0 flex -translate-y-1/2 items-center gap-1"
-      style={{ top: `${y * 100}%` }}
-    >
-      {side === 'left' ? (
-        <>
-          {tag}
-          {line}
-        </>
-      ) : (
-        <>
-          {line}
-          {tag}
-        </>
-      )}
-    </div>
-  );
-}
-
 function StatCard({
   label,
   value,

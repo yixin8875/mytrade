@@ -341,6 +341,13 @@ export interface JournalRecord {
   mae: number | null;
   tag: string | null;
   closed_by: 'sl' | 'tp' | 'stop_out' | 'manual' | string | null;
+  /** 开仓订单上的止损价，没有就为空 */
+  sl: number | null;
+  /** 开仓订单上的止盈价，没有就为空 */
+  tp: number | null;
+  /** 初始风险（账户货币），用于把盈亏折成 R */
+  risk: number | null;
+  risk_source: string | null;
   has_shot: number;
   recorded_at: number;
 }

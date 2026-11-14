@@ -185,7 +185,9 @@ class TradeJournal:
         self.store = store
         self._last_sync = 0.0
         self._risk_cache: dict[tuple, float | None] = {}
-        self._orders_cache: tuple[int, float, dict[int, float]] | None = None
+        self._orders_cache: (
+            tuple[int, float, dict[int, tuple[float | None, float | None]]] | None
+        ) = None
         self._plan_cache: tuple[int, float, dict, dict] | None = None
         self.shots_dir = store.base_dir / "data" / "shots"
         self.shots_dir.mkdir(parents=True, exist_ok=True)
@@ -214,9 +216,10 @@ class TradeJournal:
             groups.setdefault(position_id, []).append(deal)
 
         # 成交记录本身不带止损，开仓订单的历史记录带 sl/tp；
-        # 按 position_id 取最早一张带止损的订单，作为这一笔的初始止损。
-        order_sls = self._order_sl_map(login)
+        # 按 position_id 取最早一张带止损/止盈的订单，作为这一笔的计划价位。
+        order_levels = self._order_levels(login)
         backfill: dict[int, tuple[float, str]] = {}
+        level_backfill: dict[int, tuple[float | None, float | None]] = {}
         written = 0
         for position_id, deals in groups.items():
             existing = self.store.journal_get(position_id, login)
@@ -226,17 +229,24 @@ class TradeJournal:
                     login, position_id
                 ).is_file():
                     self.store.journal_set_shot(position_id, login)
-                # 老记录没有风险时，用订单止损补一次，让历史交易也能进 R 统计
-                if not existing.get("risk") and position_id in order_sls:
-                    risk = self._risk_money(
-                        str(existing["symbol"]),
-                        str(existing["side"]),
-                        float(existing["volume"]),
-                        float(existing["entry_price"]),
-                        float(order_sls[position_id]),
-                    )
-                    if risk is not None and risk > 0:
-                        backfill[position_id] = (risk, "order")
+                levels = order_levels.get(position_id)
+                if levels:
+                    # 老记录没有止损/止盈价时补一次，交易图才有计划价位可画
+                    if (existing.get("sl") is None and levels[0] is not None) or (
+                        existing.get("tp") is None and levels[1] is not None
+                    ):
+                        level_backfill[position_id] = levels
+                    # 老记录没有风险时，用订单止损补一次，让历史交易也能进 R 统计
+                    if not existing.get("risk") and levels[0] is not None:
+                        risk = self._risk_money(
+                            str(existing["symbol"]),
+                            str(existing["side"]),
+                            float(existing["volume"]),
+                            float(existing["entry_price"]),
+                            float(levels[0]),
+                        )
+                        if risk is not None and risk > 0:
+                            backfill[position_id] = (risk, "order")
                 continue
             entries = [d for d in deals if int(getattr(d, "entry", 0) or 0) == 0]
             exits = [d for d in deals if int(getattr(d, "entry", 0) or 0) in (1, 3)]
@@ -264,7 +274,7 @@ class TradeJournal:
             mfe, mae = self._excursion(
                 symbol, side, in_volume, entry_price, open_time, close_time
             )
-            order_sl = order_sls.get(position_id)
+            order_sl, order_tp = order_levels.get(position_id, (None, None))
             risk = (
                 self._risk_money(symbol, side, in_volume, entry_price, order_sl)
                 if order_sl is not None
@@ -291,6 +301,8 @@ class TradeJournal:
                     "closed_by": _close_kind(str(getattr(last_exit, "comment", "") or "")),
                     "risk": risk if risk and risk > 0 else None,
                     "risk_source": "order" if risk and risk > 0 else None,
+                    "sl": order_sl,
+                    "tp": order_tp,
                 }
             )
             # 截图可能在日志记录之前就上传了（成交后立刻截图，收盘后才配对完成），
@@ -300,10 +312,14 @@ class TradeJournal:
             written += 1
         if backfill:
             self.store.journal_set_risks(login, backfill)
+        if level_backfill:
+            self.store.journal_set_levels(login, level_backfill)
         return written
 
-    def _order_sl_map(self, login: int) -> dict[int, float]:
-        """开仓订单历史里的止损；同一持仓取最早一张带止损的订单。"""
+    def _order_levels(
+        self, login: int
+    ) -> dict[int, tuple[float | None, float | None]]:
+        """开仓订单历史里的止损/止盈价；两者各取该持仓最早一张带价位的订单。"""
         now = time.monotonic()
         if (
             self._orders_cache is not None
@@ -317,17 +333,26 @@ class TradeJournal:
             )
         except Exception:  # noqa: BLE001 - 读不到就退回下单意图里的止损
             orders = None
-        earliest: dict[int, tuple[int, float]] = {}
+        earliest: dict[int, dict[str, tuple[int, float]]] = {}
         for order in orders or []:
             position_id = int(getattr(order, "position_id", 0) or 0)
-            sl = float(getattr(order, "sl", 0) or 0)
-            if position_id <= 0 or sl <= 0:
+            if position_id <= 0:
                 continue
             created = int(getattr(order, "time_setup", 0) or 0)
-            current = earliest.get(position_id)
-            if current is None or created < current[0]:
-                earliest[position_id] = (created, sl)
-        out = {ticket: sl for ticket, (_, sl) in earliest.items()}
+            for key in ("sl", "tp"):
+                price = float(getattr(order, key, 0) or 0)
+                if price <= 0:
+                    continue
+                current = earliest.setdefault(position_id, {}).get(key)
+                if current is None or created < current[0]:
+                    earliest[position_id][key] = (created, price)
+        out = {
+            ticket: (
+                levels.get("sl", (0, None))[1],
+                levels.get("tp", (0, None))[1],
+            )
+            for ticket, levels in earliest.items()
+        }
         self._orders_cache = (login, now, out)
         return out
 
@@ -738,4 +763,9 @@ class TradeJournal:
         }
 
     def shot_path(self, login: int, position_id: int) -> Path:
-        return self.shots_dir / str(int(login or 0)) / f"{int(position_id)}.jpg"
+        """截图文件位置；按账户找不到时回退到旧版平铺目录。"""
+        current = self.shots_dir / str(int(login or 0)) / f"{int(position_id)}.jpg"
+        if current.is_file():
+            return current
+        legacy = self.shots_dir / f"{int(position_id)}.jpg"
+        return legacy if legacy.is_file() else current

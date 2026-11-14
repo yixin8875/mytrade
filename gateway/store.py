@@ -10,6 +10,15 @@ from pathlib import Path
 from typing import Any
 
 
+def _positive_or_none(value: Any) -> float | None:
+    """止损/止盈价只存正数，0 或坏值当没设置。"""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
 def _json_list(value: Any) -> list[Any]:
     """复盘字段里的 JSON 数组；坏数据一律当成空数组。"""
     if isinstance(value, str):
@@ -321,6 +330,11 @@ class Store:
             self._db.execute("ALTER TABLE journal ADD COLUMN risk REAL")
         if "risk_source" not in journal_columns:
             self._db.execute("ALTER TABLE journal ADD COLUMN risk_source TEXT")
+        # 交易图要画出开仓订单的止损/止盈线
+        if "sl" not in journal_columns:
+            self._db.execute("ALTER TABLE journal ADD COLUMN sl REAL")
+        if "tp" not in journal_columns:
+            self._db.execute("ALTER TABLE journal ADD COLUMN tp REAL")
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_journal_login ON journal(login, close_time)"
         )
@@ -540,8 +554,8 @@ class Store:
                 INSERT INTO journal
                     (login, position_id, symbol, side, volume, entry_price, exit_price, profit,
                      swap, commission, open_time, close_time, duration_sec, mfe, mae,
-                     tag, closed_by, risk, risk_source, recorded_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     tag, closed_by, risk, risk_source, sl, tp, recorded_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(login, position_id) DO UPDATE SET
                     exit_price=excluded.exit_price,
                     profit=excluded.profit,
@@ -559,6 +573,8 @@ class Store:
                     risk_source=CASE
                         WHEN journal.risk IS NULL OR journal.risk <= 0
                         THEN excluded.risk_source ELSE journal.risk_source END,
+                    sl=COALESCE(journal.sl, excluded.sl),
+                    tp=COALESCE(journal.tp, excluded.tp),
                     tag=COALESCE(journal.tag, excluded.tag)
                 """,
                 (
@@ -581,6 +597,8 @@ class Store:
                     record.get("closed_by"),
                     record.get("risk"),
                     record.get("risk_source"),
+                    _positive_or_none(record.get("sl")),
+                    _positive_or_none(record.get("tp")),
                     int(time.time()),
                 ),
             )
@@ -677,6 +695,25 @@ class Store:
                     (float(risk), source, int(login), int(ticket))
                     for ticket, (risk, source) in values.items()
                     if risk is not None and risk > 0
+                ],
+            )
+            self._db.commit()
+
+    def journal_set_levels(
+        self, login: int, values: dict[int, tuple[float | None, float | None]]
+    ) -> None:
+        """批量补写开仓订单的止损/止盈价：只填空值，不覆盖已有的。"""
+        if not values:
+            return
+        with self._lock:
+            self._db.executemany(
+                """UPDATE journal SET
+                       sl=COALESCE(sl, ?),
+                       tp=COALESCE(tp, ?)
+                   WHERE login=? AND position_id=?""",
+                [
+                    (_positive_or_none(sl), _positive_or_none(tp), int(login), int(ticket))
+                    for ticket, (sl, tp) in values.items()
                 ],
             )
             self._db.commit()
