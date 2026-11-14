@@ -1,15 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { Camera, RefreshCw } from 'lucide-react';
+import { ChartCandlestick, NotebookPen, RefreshCw } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { TradeDetailModal } from '../components/TradeDetailModal';
 import { TradeReviewDrawer } from '../components/TradeReviewDrawer';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
+import { priceDigits } from '../lib/tradeChart';
 import type { JournalBreakdown, JournalRecord, JournalStats } from '../gateway/types';
 
 const RANGES = [7, 30, 90];
+const PAGE_SIZE = 50;
 
 const CLOSED_BY: Record<string, string> = {
   sl: '止损',
@@ -59,6 +61,7 @@ export function JournalView() {
   const [editing, setEditing] = useState<{ id: number; value: string } | null>(null);
   const [shot, setShot] = useState<{ record: JournalRecord; tab: 'chart' | 'shot' } | null>(null);
   const [reviewing, setReviewing] = useState<number | null>(null);
+  const [visible, setVisible] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,6 +94,14 @@ export function JournalView() {
     setShot(null);
     setEditing(null);
   }, [activeLogin]);
+
+  // 换区间或账户时回到第一页
+  useEffect(() => {
+    setVisible(PAGE_SIZE);
+  }, [days, activeLogin]);
+
+  const shown = records.slice(0, visible);
+  const price = (value: number) => fmtPrice(value, priceDigits(value));
 
   const summary = stats?.summary;
   const breakdown: JournalBreakdown[] =
@@ -202,8 +213,8 @@ export function JournalView() {
           />
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-          <section className="console-card flex flex-col overflow-hidden">
+        <div className="mt-4 grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+          <section className="console-card flex flex-col overflow-hidden xl:sticky xl:top-4">
             <div className="flex items-center gap-1 border-b border-console-line px-3 py-2">
               {BREAKDOWN_TABS.map((item) => (
                 <button
@@ -221,7 +232,7 @@ export function JournalView() {
               ))}
             </div>
 
-            <div className="min-h-[120px] flex-1 overflow-auto p-2">
+            <div className="max-h-[360px] min-h-[120px] flex-1 overflow-auto p-2">
               {breakdown.length === 0 && (
                 <div className="px-2 py-8 text-center text-[12px] text-console-faint">
                   {loading ? '读取中…' : '暂无数据'}
@@ -261,147 +272,148 @@ export function JournalView() {
           </section>
 
           <section className="console-card min-w-0 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[880px] border-collapse text-[12px]">
-                <thead>
-                  <tr className="border-b border-console-line text-left text-[11px] text-console-faint">
-                    <th className="px-4 py-2 font-normal">平仓时间</th>
-                    <th className="px-2 py-2 font-normal">品种 / 方向</th>
-                    <th className="px-2 py-2 text-right font-normal">手数</th>
-                    <th className="px-3 py-2 text-right font-normal">开 → 平</th>
-                    <th className="px-3 py-2 text-right font-normal">盈亏</th>
-                    <th className="px-2 py-2 text-right font-normal">持仓</th>
-                    <th className="px-3 py-2 text-right font-normal">MFE / MAE</th>
-                    <th className="px-2 py-2 font-normal">出场</th>
-                    <th className="px-2 py-2 font-normal">标签</th>
-                    <th className="px-2 py-2 font-normal">图</th>
-                    <th className="px-4 py-2 font-normal" />
+            <div className="max-h-[calc(100vh-320px)] min-h-[240px] overflow-auto">
+              <table className="w-full min-w-[760px] border-collapse text-[12px]">
+                <thead className="sticky top-0 z-10 bg-console-card">
+                  <tr className="text-left text-[11px] text-console-faint shadow-[inset_0_-1px_0_var(--color-console-line)]">
+                    <th className="w-[116px] px-4 py-2 font-normal">平仓时间</th>
+                    <th className="w-[96px] px-2 py-2 font-normal">品种 / 方向</th>
+                    <th className="w-[48px] px-2 py-2 text-right font-normal">手数</th>
+                    <th className="w-[150px] px-3 py-2 text-right font-normal">开 → 平</th>
+                    <th className="w-[112px] px-3 py-2 text-right font-normal">盈亏</th>
+                    <th className="w-[62px] px-2 py-2 text-right font-normal">持仓</th>
+                    <th className="w-[110px] px-2 py-2 font-normal">标签</th>
+                    <th className="w-[72px] px-2 py-2 text-right font-normal">操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {records.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="px-4 py-14 text-center text-[12px] text-console-faint">
+                      <td colSpan={8} className="px-4 py-14 text-center text-[12px] text-console-faint">
                         {loading ? '读取中…' : '这段时间还没有已平仓交易'}
                       </td>
                     </tr>
                   )}
-                  {records.map((record) => (
-                    <tr
-                      key={`${record.login}-${record.position_id}`}
-                      className="border-t border-console-line/70 transition-colors hover:bg-console-hover/50"
-                    >
-                      <td className="num whitespace-nowrap px-4 py-2.5 font-mono text-[11px] text-console-muted">
-                        {fmtTime(record.close_time)}
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-2.5">
-                        <span className="font-medium text-console-ink">{record.symbol}</span>
-                        <span
-                          className={clsx(
-                            'ml-1.5 inline-flex items-center gap-1 text-[11px]',
-                            record.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
+                  {shown.map((record) => {
+                    const rMultiple = record.risk && record.risk > 0 ? record.profit / record.risk : null;
+                    const closedBy = CLOSED_BY[String(record.closed_by)] ?? null;
+                    return (
+                      <tr
+                        key={`${record.login}-${record.position_id}`}
+                        onClick={() => setShot({ record, tab: 'chart' })}
+                        className="cursor-pointer border-t border-console-line/70 transition-colors hover:bg-console-hover/50"
+                      >
+                        <td className="num whitespace-nowrap px-4 py-1.5 font-mono text-[11px] text-console-muted">
+                          {fmtTime(record.close_time)}
+                          {closedBy && (
+                            <span className="ml-1.5 text-[10px] text-console-faint">· {closedBy}</span>
                           )}
-                        >
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-1.5">
+                          <span className="font-medium text-console-ink">{record.symbol}</span>
                           <span
                             className={clsx(
-                              'h-1.5 w-1.5 rounded-full',
-                              record.side === 'buy' ? 'bg-console-gain' : 'bg-console-loss',
+                              'ml-1.5 inline-flex items-center gap-1 text-[11px]',
+                              record.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
                             )}
-                          />
-                          {record.side === 'buy' ? '多' : '空'}
-                        </span>
-                      </td>
-                      <td className="num px-2 py-2.5 text-right font-mono text-[11px] text-console-ink-2">
-                        {fmtVolume(record.volume)}
-                      </td>
-                      <td className="num whitespace-nowrap px-3 py-2.5 text-right font-mono text-[11px] text-console-muted">
-                        {fmtPrice(record.entry_price)} → {fmtPrice(record.exit_price)}
-                      </td>
-                      <td
-                        className={clsx(
-                          'num px-3 py-2.5 text-right font-mono font-medium',
-                          signedClass(record.profit),
-                        )}
-                      >
-                        {fmtSigned(record.profit)}
-                      </td>
-                      <td className="num whitespace-nowrap px-2 py-2.5 text-right font-mono text-[11px] text-console-muted">
-                        {fmtDuration(record.duration_sec)}
-                      </td>
-                      <td className="num whitespace-nowrap px-3 py-2.5 text-right font-mono text-[11px]">
-                        <span className="text-console-gain">
-                          {record.mfe != null ? fmtSigned(record.mfe) : '—'}
-                        </span>
-                        <span className="text-console-faint"> / </span>
-                        <span className="text-console-loss">
-                          {record.mae != null ? fmtSigned(record.mae) : '—'}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-2.5 text-[11px] text-console-muted">
-                        {CLOSED_BY[String(record.closed_by)] ?? record.closed_by ?? '—'}
-                      </td>
-                      <td className="px-2 py-2.5">
-                        {editing?.id === record.position_id ? (
-                          <input
-                            autoFocus
-                            value={editing.value}
-                            maxLength={40}
-                            onChange={(event) =>
-                              setEditing({ id: record.position_id, value: event.target.value })
-                            }
-                            onBlur={() => void saveTag(record, editing.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') void saveTag(record, editing.value);
-                              if (event.key === 'Escape') setEditing(null);
-                            }}
-                            className="console-input h-7 w-24 px-1.5 text-[12px]"
-                          />
-                        ) : (
-                          <button
-                            onClick={() =>
-                              setEditing({ id: record.position_id, value: record.tag ?? '' })
-                            }
-                            className="h-7 rounded-md px-1.5 text-left text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
-                            title="点击修改策略标签"
                           >
-                            {record.tag || <span className="text-console-faint">未标记</span>}
-                          </button>
-                        )}
-                      </td>
-                      <td className="px-2 py-2.5">
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => setShot({ record, tab: 'chart' })}
-                            title="按行情重绘这笔交易的 K 线"
-                            className="h-7 rounded-md border border-console-line bg-console-card px-2 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover"
-                          >
-                            图表
-                          </button>
-                          {record.has_shot ? (
-                            <button
-                              onClick={() => setShot({ record, tab: 'shot' })}
-                              title="查看成交时的图表截图"
-                              aria-label="查看成交截图"
-                              className="flex h-7 w-7 items-center justify-center rounded-md border border-console-line bg-console-card text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
-                            >
-                              <Camera size={12} strokeWidth={1.6} />
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <button
-                          onClick={() => setReviewing(record.position_id)}
-                          className="h-7 rounded-md border border-console-line bg-console-card px-2 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover"
+                            <span
+                              className={clsx(
+                                'h-1.5 w-1.5 rounded-full',
+                                record.side === 'buy' ? 'bg-console-gain' : 'bg-console-loss',
+                              )}
+                            />
+                            {record.side === 'buy' ? '多' : '空'}
+                          </span>
+                        </td>
+                        <td className="num px-2 py-1.5 text-right font-mono text-[11px] text-console-ink-2">
+                          {fmtVolume(record.volume)}
+                        </td>
+                        <td className="num whitespace-nowrap px-3 py-1.5 text-right font-mono text-[11px] text-console-muted">
+                          {price(record.entry_price)} → {price(record.exit_price)}
+                        </td>
+                        <td
+                          className={clsx(
+                            'num whitespace-nowrap px-3 py-1.5 text-right font-mono font-medium',
+                            signedClass(record.profit),
+                          )}
                         >
-                          复盘
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                          {fmtSigned(record.profit)}
+                          {rMultiple != null && (
+                            <span className="ml-1.5 text-[10px] font-normal text-console-faint">
+                              {rMultiple >= 0 ? '+' : ''}
+                              {rMultiple.toFixed(2)}R
+                            </span>
+                          )}
+                        </td>
+                        <td className="num whitespace-nowrap px-2 py-1.5 text-right font-mono text-[11px] text-console-muted">
+                          {fmtDuration(record.duration_sec)}
+                        </td>
+                        <td className="px-2 py-1.5" onClick={(event) => event.stopPropagation()}>
+                          {editing?.id === record.position_id ? (
+                            <input
+                              autoFocus
+                              value={editing.value}
+                              maxLength={40}
+                              onChange={(event) =>
+                                setEditing({ id: record.position_id, value: event.target.value })
+                              }
+                              onBlur={() => void saveTag(record, editing.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') void saveTag(record, editing.value);
+                                if (event.key === 'Escape') setEditing(null);
+                              }}
+                              className="console-input h-6 w-24 px-1.5 text-[12px]"
+                            />
+                          ) : (
+                            <button
+                              onClick={() =>
+                                setEditing({ id: record.position_id, value: record.tag ?? '' })
+                              }
+                              className="h-6 max-w-[104px] truncate rounded-md px-1.5 text-left text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
+                              title="点击修改策略标签"
+                            >
+                              {record.tag || <span className="text-console-faint">未标记</span>}
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <div className="flex items-center justify-end gap-0.5">
+                            <RowAction
+                              label="交易图"
+                              onClick={() => setShot({ record, tab: 'chart' })}
+                            >
+                              <ChartCandlestick size={14} strokeWidth={1.6} />
+                            </RowAction>
+                            <RowAction
+                              label="复盘"
+                              onClick={() => setReviewing(record.position_id)}
+                            >
+                              <NotebookPen size={13} strokeWidth={1.6} />
+                            </RowAction>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
+            {records.length > 0 && (
+              <div className="flex items-center justify-between border-t border-console-line bg-console-card/60 px-4 py-1.5 text-[11px] text-console-faint">
+                <span>
+                  已显示 {shown.length} / {records.length} 条
+                </span>
+                {shown.length < records.length && (
+                  <button
+                    onClick={() => setVisible((value) => value + PAGE_SIZE)}
+                    className="h-7 rounded-md border border-console-line bg-console-card px-2.5 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover"
+                  >
+                    显示更多
+                  </button>
+                )}
+              </div>
+            )}
           </section>
         </div>
       </div>
@@ -422,6 +434,31 @@ export function JournalView() {
     </div>
   );
 }
+/** 行内图标按钮：拦住行点击，避免看截图/复盘时又弹出图表 */
+function RowAction({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      title={label}
+      aria-label={label}
+      className="flex h-6 w-6 items-center justify-center rounded-md text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+    >
+      {children}
+    </button>
+  );
+}
+
 function StatCard({
   label,
   value,
