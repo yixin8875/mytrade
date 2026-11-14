@@ -39,6 +39,7 @@ function exportCsv(session: ReplaySession): void {
     '净盈亏',
     'R',
     '平仓方式',
+    '模板',
     '标签',
   ];
   const rows = session.trades.map((trade, index) => [
@@ -52,6 +53,7 @@ function exportCsv(session: ReplaySession): void {
     trade.profit.toFixed(2),
     trade.r == null ? '' : trade.r.toFixed(2),
     closedByText(trade.closedBy),
+    trade.templateName ?? '',
     trade.tag,
   ]);
   const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
@@ -407,7 +409,7 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
               </p>
             ) : (
               <div className="-mx-1 mt-2 overflow-x-auto">
-                <table className="w-full min-w-[720px] text-[11px]">
+                <table className="w-full min-w-[800px] text-[11px]">
                   <thead>
                     <tr className="text-left text-[10px] text-console-muted">
                       <th className="px-1 pb-1.5 font-normal">#</th>
@@ -418,6 +420,7 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
                       <th className="px-1 pb-1.5 font-normal">平仓</th>
                       <th className="px-1 pb-1.5 text-right font-normal">R</th>
                       <th className="px-1 pb-1.5 text-right font-normal">净盈亏</th>
+                      <th className="px-1 pb-1.5 font-normal">模板</th>
                       <th className="px-1 pb-1.5 font-normal">标签</th>
                     </tr>
                   </thead>
@@ -464,6 +467,9 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
                           )}
                         >
                           {fmtSigned(trade.profit)}
+                        </td>
+                        <td className="px-1 py-1.5 text-console-muted">
+                          {trade.templateName || '—'}
                         </td>
                         <td className="px-1 py-1.5 text-console-muted">{trade.tag || '未分类'}</td>
                       </tr>

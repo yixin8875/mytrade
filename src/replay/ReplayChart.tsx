@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
+import { fmtSigned, fmtVolume } from '../lib/format';
 import { useApp, type Theme } from '../store/useApp';
-import type { OrderType, Side } from '../gateway/types';
+import type { OrderType, Side, SymbolInfo } from '../gateway/types';
 import { aggregateBars, ReplayDatafeed } from './datafeed';
 import { replayBars, sourceFor } from './source';
 import { useReplay } from './store';
-import { roundPrice } from './engine';
+import { calcProfit, roundPrice } from './engine';
 import type {
   ChartingLibraryWidgetOptions,
   ChartPropertiesOverrides,
@@ -170,6 +171,25 @@ type TvGlobal = {
     widget: new (options: ChartingLibraryWidgetOptions) => IChartingLibraryWidget;
   };
 };
+
+/** 止损/止盈的金额后缀，格式与交易台一致：「  -49.06 CAD」 */
+function lineMoney(amount: number | null, currency: string): string {
+  if (amount == null || !Number.isFinite(amount)) return '';
+  return `  ${fmtSigned(amount)}${currency ? ` ${currency}` : ''}`;
+}
+
+/** 打到该价位时的账户货币盈亏；参数不完整时返回 null，线上只显示手数 */
+function stopAmount(
+  side: Side,
+  volume: number,
+  entry: number,
+  stop: number,
+  info: SymbolInfo,
+): number | null {
+  if (!(volume > 0) || !(entry > 0) || !(stop > 0)) return null;
+  if (!(info.tickValue > 0)) return null;
+  return calcProfit(side, volume, entry, stop, info);
+}
 
 export function ReplayChart({
   sessionId,
@@ -481,6 +501,8 @@ export function ReplayChart({
     if (!chart || !layer || !session) return;
     const specs = new Map<string, PriceLineSpec>();
     const digits = session.symbolInfo.digits;
+    const { currency } = session.settings;
+    const volumeText = (value: number) => fmtVolume(value, session.symbolInfo.volumeStep);
 
     if (draft?.active && draft.price > 0) {
       const kind = draft.type === 'limit' ? '限价' : draft.type === 'stop' ? '停损' : '市价';
@@ -495,10 +517,18 @@ export function ReplayChart({
           }),
       });
       if (draft.sl != null && draft.sl > 0) {
+        // 与交易台一致：止损线直接标出按当前手数打到这里的亏损金额
+        const amount = stopAmount(
+          draft.side,
+          draft.volume,
+          draft.price,
+          draft.sl,
+          session.symbolInfo,
+        );
         specs.set('draft:sl', {
           price: draft.sl,
           color: DOWN,
-          text: 'SL',
+          text: `${volumeText(draft.volume)}${lineMoney(amount, currency)}`,
           onMove: (price) =>
             draftChangeRef.current?.({
               sl: roundPrice(price, session.symbolInfo),
@@ -506,10 +536,17 @@ export function ReplayChart({
         });
       }
       if (draft.tp != null && draft.tp > 0) {
+        const amount = stopAmount(
+          draft.side,
+          draft.volume,
+          draft.price,
+          draft.tp,
+          session.symbolInfo,
+        );
         specs.set('draft:tp', {
           price: draft.tp,
           color: UP,
-          text: 'TP',
+          text: `${volumeText(draft.volume)}${lineMoney(amount, currency)}`,
           onMove: (price) =>
             draftChangeRef.current?.({
               tp: roundPrice(price, session.symbolInfo),
@@ -522,22 +559,38 @@ export function ReplayChart({
       specs.set(`position:${position.id}`, {
         price: position.entry,
         color: ACCENT,
-        text: `${position.side === 'buy' ? '模拟多' : '模拟空'} ${position.volume.toFixed(2)}`,
+        text: `${position.side === 'buy' ? '模拟多' : '模拟空'} ${position.volume.toFixed(2)}${
+          position.templateName ? ` · ${position.templateName}` : ''
+        }`,
         editable: false,
       });
       if (position.sl != null) {
+        const amount = stopAmount(
+          position.side,
+          position.volume,
+          position.entry,
+          position.sl,
+          session.symbolInfo,
+        );
         specs.set(`position:${position.id}:sl`, {
           price: position.sl,
           color: DOWN,
-          text: 'SL',
+          text: `${volumeText(position.volume)}${lineMoney(amount, currency)}`,
           onMove: (price) => useReplay.getState().modifyStops(position.id, { sl: price }),
         });
       }
       if (position.tp != null) {
+        const amount = stopAmount(
+          position.side,
+          position.volume,
+          position.entry,
+          position.tp,
+          session.symbolInfo,
+        );
         specs.set(`position:${position.id}:tp`, {
           price: position.tp,
           color: UP,
-          text: 'TP',
+          text: `${volumeText(position.volume)}${lineMoney(amount, currency)}`,
           onMove: (price) => useReplay.getState().modifyStops(position.id, { tp: price }),
         });
       }

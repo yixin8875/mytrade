@@ -312,7 +312,14 @@ describe('订单模板阶段', () => {
   function openWithTemplate() {
     const session = makeSession();
     session.orders.push(
-      makeOrder({ side: 'buy', type: 'market', volume: 1, sl: 1990, steps }),
+      makeOrder({
+        side: 'buy',
+        type: 'market',
+        volume: 1,
+        sl: 1990,
+        steps,
+        templateName: '日内',
+      }),
     );
     stepSession(session, makeBar(T0, 2000, 2000.5, 1999.5, 2000));
     return session;
@@ -334,6 +341,8 @@ describe('订单模板阶段', () => {
     expect(closed.volume).toBe(0.5);
     expect(closed.profit).toBeCloseTo(505, 10);
     expect(closed.r).toBeCloseTo(505 / 510, 10);
+    // 平仓记录带上模板名，报告和 CSV 才能按模板汇总
+    expect(closed.templateName).toBe('日内');
 
     expect(session.positions).toHaveLength(1);
     const rest = session.positions[0];

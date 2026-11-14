@@ -605,9 +605,12 @@ describe('成交后的交易路径', () => {
     expect(session.trades[0].closedBy).toBe('template');
     expect(session.trades[0].volume).toBe(0.5);
     expect(session.trades[0].exit).toBeCloseTo(2010.4, 10);
+    expect(session.trades[0].templateName).toBe('日内');
     expect(session.positions).toHaveLength(1);
     expect(session.positions[0].volume).toBe(0.5);
     expect(session.positions[0].sl).toBeCloseTo(2000.2, 10);
     expect(session.positions[0].templateStep).toBe(1);
+    // 最新事件留给界面提示，模板阶段不再悄无声息
+    expect(useReplay.getState().lastEvent).toBe('模板 1R 移到保本');
   });
 });

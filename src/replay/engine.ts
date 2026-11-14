@@ -170,6 +170,7 @@ function closePosition(
     closedBy,
     mfe: position.mfe,
     mae: position.mae,
+    templateName: position.templateName,
   });
 
   if (closeVolume >= position.volume - 1e-9) {

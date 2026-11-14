@@ -84,6 +84,8 @@ export interface ReplayTrade {
   closedBy: 'manual' | 'sl' | 'tp' | 'finish' | 'stop_out' | 'template';
   mfe: number;
   mae: number;
+  /** 这一笔成交时绑定的模板，复盘报告按它汇总 */
+  templateName?: string;
 }
 
 export interface ReplayNote {

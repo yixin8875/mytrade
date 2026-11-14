@@ -540,12 +540,13 @@ export const useReplay = create<ReplayStore>((set, get) => ({
     if (!bars.length) return;
     const end = endIndex(session);
     let last: Bar | null = null;
+    const events: string[] = [];
     const limit = Math.max(1, Math.floor(count));
     for (let index = 0; index < limit; index += 1) {
       if (session.cursorIndex >= end) break;
       const bar = bars[session.cursorIndex];
       if (!bar || bar.time > session.endTs) break;
-      stepSession(session, bar);
+      events.push(...stepSession(session, bar).events);
       last = bar;
     }
     if (!last) {
@@ -564,6 +565,9 @@ export const useReplay = create<ReplayStore>((set, get) => ({
       return;
     }
     session.cursorTs = last.time;
+    // 模板阶段是异步发生在回放里的，记下最近一条，界面才能说明「模板确实执行了」
+    const lastEvent = events.length ? events[events.length - 1] : null;
+    const templateEvent = [...events].reverse().find((event) => event.startsWith('模板'));
     const finished = session.cursorIndex >= end;
     const busted = !finished && session.equity <= 0;
     if (finished) {
@@ -578,8 +582,10 @@ export const useReplay = create<ReplayStore>((set, get) => ({
     }
     set((current) => ({
       playing: finished || busted ? false : current.playing,
+      lastEvent: lastEvent ?? current.lastEvent,
       sessions: current.sessions.map((item) => (item.id === session.id ? { ...item } : item)),
     }));
+    if (templateEvent) useApp.getState().notify('info', templateEvent);
     sourceFor(session.id).emit({ kind: 'tick', bar: last, time: last.time });
     schedulePersist();
   },
@@ -783,9 +789,11 @@ export const useReplay = create<ReplayStore>((set, get) => ({
       .getState()
       .notify(
         'success',
-        input.type === 'market'
-          ? `模拟${input.side === 'buy' ? '买入' : '卖出'}已提交，下一根 M1 开盘成交`
-          : '模拟挂单已提交，等待价格触发',
+        `${
+          input.type === 'market'
+            ? `模拟${input.side === 'buy' ? '买入' : '卖出'}已提交，下一根 M1 开盘成交`
+            : '模拟挂单已提交，等待价格触发'
+        }${input.templateName ? ` · 模板「${input.templateName}」` : ''}`,
       );
     return null;
   },

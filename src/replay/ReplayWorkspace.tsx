@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
-import { templateSummary } from '../lib/template';
+import { stepSummary, templateSummary } from '../lib/template';
 import { activeTemplate, useApp } from '../store/useApp';
 import { calcProfit, marginFor, positionProfit, roundPrice, roundVolume } from './engine';
 import {
@@ -94,8 +94,8 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
 
   const [timeframe, setTimeframe] = useState('15');
   const [draftActive, setDraftActive] = useState(false);
-  /** 复盘自己的模板开关，不借用交易台的 templateArmed */
-  const [templateArmed, setTemplateArmed] = useState(false);
+  /** 复盘默认按模板下单：选了模板就直接生效，不用再点一次「启用」 */
+  const [templateArmed, setTemplateArmed] = useState(true);
   const [tab, setTab] = useState<'positions' | 'orders' | 'notes' | 'stats'>('positions');
   const [menu, setMenu] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
@@ -239,7 +239,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
     setTicketError(error);
     if (!error) {
       setDraftActive(false);
-      setTemplateArmed(false);
+      // 模板保持启用：复盘常连续下单，每笔都按同一模板执行
     }
   };
 
@@ -289,11 +289,20 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   };
 
   const toggleTemplate = () => {
-    setTemplateArmed((value) => !value);
+    const next = !templateArmed;
+    setTemplateArmed(next);
     setSlTouched(false);
     setTpTouched(false);
     // 模板风险比例变了，手数和默认止损按新风险重算
     ticketInited.current = null;
+    useApp
+      .getState()
+      .notify(
+        'info',
+        next
+          ? `模板「${template.name}」已启用：${templateSummary(template)}`
+          : `模板「${template.name}」已停用，按手工手数与止盈止损下单`,
+      );
   };
 
   const draft: ReplayDraft = {
@@ -621,6 +630,25 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                           {fmtSigned(profit)}
                         </span>
                       </div>
+                      {position.templateName && (
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-console-muted">
+                          <span className="rounded-[4px] bg-console-hover px-1.5">模板</span>
+                          <span className="text-console-ink-2">{position.templateName}</span>
+                          {position.steps?.length ? (
+                            <span className="num font-mono">
+                              {Math.min(position.templateStep, position.steps.length)}/
+                              {position.steps.length} 阶段
+                            </span>
+                          ) : null}
+                          {position.steps?.length ? (
+                            position.templateStep < position.steps.length ? (
+                              <span>下档 {stepSummary(position.steps[position.templateStep])}</span>
+                            ) : (
+                              <span>阶段已执行完</span>
+                            )
+                          ) : null}
+                        </div>
+                      )}
                       <div className="mt-1.5 flex items-center gap-4 text-[10px] text-console-muted">
                         <span>
                           入场{' '}
@@ -760,6 +788,14 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                       <span>SL {fmtPrice(order.sl, digits)}</span>
                       <span>TP {fmtPrice(order.tp, digits)}</span>
                     </div>
+                    {order.templateName && (
+                      <div className="mt-1 text-[10px] text-console-muted">
+                        模板 {order.templateName}
+                        {order.steps?.length
+                          ? ` · ${order.steps.map(stepSummary).join(' · ')}`
+                          : ''}
+                      </div>
+                    )}
                     <div className="mt-1 text-[10px] text-console-faint">
                       {order.type === 'market'
                         ? '下一根 M1 开盘按对手价成交'
@@ -875,11 +911,11 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                 value={template.id}
                 onChange={(event) => {
                   setActiveTemplate(event.target.value);
-                  if (templateArmed) {
-                    setSlTouched(false);
-                    setTpTouched(false);
-                    ticketInited.current = null;
-                  }
+                  // 选中模板即视为启用，避免选了模板却仍按手工参数下单
+                  if (!templateArmed) setTemplateArmed(true);
+                  setSlTouched(false);
+                  setTpTouched(false);
+                  ticketInited.current = null;
                 }}
                 className="console-input h-7 min-w-0 flex-1 text-[11px]"
                 title="下单模板"
