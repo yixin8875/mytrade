@@ -191,6 +191,9 @@ class AccountManager:
         raw_login = payload.get("login", existing.get("login", 0))
         if isinstance(raw_login, bool):
             raise AccountError("登录号必须是正整数")
+        # 1.5 会被 int() 悄悄截成 1，等于把账户连到另一个登录号
+        if isinstance(raw_login, float) and not raw_login.is_integer():
+            raise AccountError("登录号必须是正整数")
         try:
             login = int(raw_login)
         except (TypeError, ValueError) as exc:

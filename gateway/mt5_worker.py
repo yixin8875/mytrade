@@ -1715,7 +1715,10 @@ class Mt5Worker:
         p_test = mt5.order_calc_profit(base, position.symbol, volume, entry, test_price)
         if p_entry is None or p_test is None:
             return None
-        slope = (float(p_test) - float(p_entry)) / delta
+        # test_price 对多头是向下、对空头是向上，斜率的分母要跟着方向取符号，
+        # 否则多头算出的强平价会跑到入场价上方被当成无效值丢掉。
+        move = -delta if buy else delta
+        slope = (float(p_test) - float(p_entry)) / move
         if abs(slope) < 1e-12:
             return None
         price = entry + (target - float(p_entry)) / slope
