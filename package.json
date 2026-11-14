@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "check": "tsc --noEmit && python -m pytest -q",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "tsc --noEmit && vitest run && python -m pytest -q",
     "preview": "vite preview",
     "gateway": "python gateway/app.py",
     "gateway:setup": "python -m venv build/gateway-venv && build/gateway-venv/Scripts/python -m pip install -r gateway/requirements-build.txt",
@@ -33,8 +35,10 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "jsdom": "^31.0.1",
     "tailwindcss": "^4.3.4",
     "typescript": "~5.9.2",
-    "vite": "^7.1.0"
+    "vite": "^7.1.0",
+    "vitest": "^5.1.0"
   }
 }

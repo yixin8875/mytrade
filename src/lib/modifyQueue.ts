@@ -117,7 +117,10 @@ function drain(job: Job): void {
   job.pending = null;
   job.inFlight = true;
 
-  send(price)
+  // 包一层 Promise：send 同步抛错或返回非 Promise 时也要走 catch/finally，
+  // 否则 inFlight 永远为 true，这个通道之后再也发不出改单
+  Promise.resolve()
+    .then(() => send(price))
     .then(() => {
       job.lastSent = price;
     })

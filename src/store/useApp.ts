@@ -254,11 +254,12 @@ interface TemplateBundle {
 
 /** 读模板列表；没有就按旧版单模板迁移，再不行用默认 0.5% / 2R / 1R 保本 */
 function loadTemplates(): TemplateBundle {
-  const saved = readJson<{ activeId?: unknown; list?: unknown }>(TEMPLATES_KEY, {});
-  const list = Array.isArray(saved.list) ? saved.list.map((item) => makeTemplate(item)) : [];
+  // 存进去的可能是 "null"（手动改坏、旧版本恢复备份等），这里必须容忍
+  const saved = readJson<{ activeId?: unknown; list?: unknown } | null>(TEMPLATES_KEY, null);
+  const list = Array.isArray(saved?.list) ? saved.list.map((item) => makeTemplate(item)) : [];
   if (list.length > 0) {
     const active =
-      typeof saved.activeId === 'string' && list.some((item) => item.id === saved.activeId)
+      typeof saved?.activeId === 'string' && list.some((item) => item.id === saved.activeId)
         ? saved.activeId
         : list[0].id;
     return { templates: list, activeTemplateId: active };
@@ -353,9 +354,9 @@ const defaultLayoutSync: ChartSync = {
 };
 
 function loadLayoutSync(): ChartSync {
-  const raw = readJson<Partial<ChartSync>>(LAYOUT_SYNC_KEY, {});
+  const raw = readJson<Partial<ChartSync> | null>(LAYOUT_SYNC_KEY, null);
   const flag = (key: keyof ChartSync) =>
-    typeof raw[key] === 'boolean' ? (raw[key] as boolean) : defaultLayoutSync[key];
+    typeof raw?.[key] === 'boolean' ? (raw[key] as boolean) : defaultLayoutSync[key];
   return {
     symbol: flag('symbol'),
     interval: flag('interval'),
@@ -376,8 +377,8 @@ interface AlertPrefs {
 }
 
 function loadPrefs(): AlertPrefs {
-  const raw = readJson<Partial<AlertPrefs>>(PREFS_KEY, {});
-  return { sound: raw.sound !== false, desktop: raw.desktop === true };
+  const raw = readJson<Partial<AlertPrefs> | null>(PREFS_KEY, null);
+  return { sound: raw?.sound !== false, desktop: raw?.desktop === true };
 }
 
 const CALENDAR_OVERLAY_KEY = 'mytrade.calendarOverlay';

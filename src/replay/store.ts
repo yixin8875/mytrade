@@ -633,21 +633,27 @@ export const useReplay = create<ReplayStore>((set, get) => ({
   archive: (id) => {
     const session = sessionById(get().sessions, id);
     if (!session) return;
+    const active = get().activeId === id;
+    // 归档当前会话就停止播放，别留一个还在空转的计时器
+    if (active) stopPlayTimer();
     session.status = 'archived';
     session.updatedAt = Date.now();
     set((state) => ({
+      playing: active ? false : state.playing,
       sessions: state.sessions.map((item) => (item.id === id ? { ...item } : item)),
     }));
     persistNow();
   },
 
   remove: (id) => {
-    stopPlayTimer();
+    const active = get().activeId === id;
+    // 删除别的会话不能顺手中断当前回放
+    if (active) stopPlayTimer();
     dropReplaySource(id);
     set((state) => ({
       sessions: state.sessions.filter((item) => item.id !== id),
-      activeId: state.activeId === id ? null : state.activeId,
-      playing: state.activeId === id ? false : state.playing,
+      activeId: active ? null : state.activeId,
+      playing: active ? false : state.playing,
     }));
     persistNow();
   },
@@ -714,6 +720,8 @@ export const useReplay = create<ReplayStore>((set, get) => ({
     if (session.status === 'finished' || session.status === 'archived') return '复盘已结束';
     if (session.status === 'preparing') return '行情还在准备中';
     const info = session.symbolInfo;
+    // 先挡掉 0/负数：roundVolume 会把它们抬到最小手数，等于偷偷下单
+    if (!Number.isFinite(input.volume) || input.volume <= 0) return '手数无效';
     const volume = roundVolume(input.volume, info);
     if (!(volume > 0)) return '手数无效';
     const spread = session.settings.spreadPoints * info.point;

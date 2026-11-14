@@ -50,8 +50,12 @@ export class GatewayClient {
       window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.ws?.close();
+    const ws = this.ws;
     this.ws = null;
+    ws?.close();
+    this.setState('closed');
+    // 浏览器的 close 事件是异步的；主动停止时立刻结束在途请求，别让它们等到超时
+    this.rejectAll('网关已停止');
   }
 
   on(event: string, handler: EventHandler): () => void {
@@ -120,7 +124,9 @@ export class GatewayClient {
     };
 
     ws.onclose = () => {
-      if (this.ws === ws) this.ws = null;
+      // 已经换过连接（stop 后重新 start、或重连已建立）时，旧连接迟到的 close 不再影响当前状态
+      if (this.ws !== ws) return;
+      this.ws = null;
       this.setState('closed');
       this.rejectAll('网关连接已断开');
       this.scheduleReconnect();

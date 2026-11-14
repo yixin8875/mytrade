@@ -181,15 +181,27 @@ function closePosition(
 
 function markExcursion(session: ReplaySession, bar: Bar): void {
   const info = session.symbolInfo;
+  const spread = session.settings.spreadPoints;
   for (const position of session.positions) {
-    const favorable =
-      position.side === 'buy'
-        ? calcProfit('buy', position.volume, position.entry, bar.high, info)
-        : calcProfit('sell', position.volume, position.entry, bar.low, info);
-    const adverse =
-      position.side === 'buy'
-        ? calcProfit('buy', position.volume, position.entry, bar.low, info)
-        : calcProfit('sell', position.volume, position.entry, bar.high, info);
+    // 与浮动盈亏/平仓价同一口径：多头按 bid，空头按 ask（加回点差）
+    const favorablePrice =
+      position.side === 'buy' ? bar.high : askPrice(bar.low, info, spread);
+    const adversePrice =
+      position.side === 'buy' ? bar.low : askPrice(bar.high, info, spread);
+    const favorable = calcProfit(
+      position.side,
+      position.volume,
+      position.entry,
+      favorablePrice,
+      info,
+    );
+    const adverse = calcProfit(
+      position.side,
+      position.volume,
+      position.entry,
+      adversePrice,
+      info,
+    );
     position.mfe = Math.max(position.mfe, favorable);
     position.mae = Math.min(position.mae, adverse);
   }
@@ -264,11 +276,13 @@ export function stepSession(session: ReplaySession, bar: Bar): StepResult {
     if (order.type === 'market') continue;
     const price = roundPrice(order.price, info);
     let fill: number | null = null;
-    if (order.type === 'limit' && order.side === 'buy' && bar.low + spread <= price) {
+    // 买入侧按 ask 判断：spreadPoints 是「点」，必须先换成价格（× point），
+    // 不能把 20 个点直接加到 3980 这类价格上。
+    if (order.type === 'limit' && order.side === 'buy' && ask(bar.low) <= price) {
       fill = Math.min(price, ask(bar.open));
     } else if (order.type === 'limit' && order.side === 'sell' && bar.high >= price) {
       fill = Math.max(price, bar.open);
-    } else if (order.type === 'stop' && order.side === 'buy' && bar.high + spread >= price) {
+    } else if (order.type === 'stop' && order.side === 'buy' && ask(bar.high) >= price) {
       fill = Math.max(price, ask(bar.open));
     } else if (order.type === 'stop' && order.side === 'sell' && bar.low <= price) {
       fill = Math.min(price, bar.open);
