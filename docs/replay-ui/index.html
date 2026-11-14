@@ -1,0 +1,1389 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tally 复盘 · UI 设计稿</title>
+<style>
+  :root {
+    --canvas: #f6f3ec;
+    --sidebar: #f1ece2;
+    --card: #fffdf8;
+    --ink: #211c16;
+    --ink-2: #4e473d;
+    --muted: #6f675b;
+    --faint: #9a9183;
+    --line: #e5dfd4;
+    --line-2: #d5cec0;
+    --hover: #eee8dd;
+    --selected: #e9e1d3;
+    --accent: #1f5fd6;
+    --accent-soft: #e9effc;
+    --gain: #0f7a55;
+    --gain-soft: #e7f4ee;
+    --loss: #c2413a;
+    --loss-soft: #fbecea;
+    --warn: #a9691a;
+    --sans: "Segoe UI", -apple-system, BlinkMacSystemFont, "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: "Cascadia Mono", ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+    --r-control: 8px;
+    --r-card: 12px;
+    --r-panel: 16px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    min-width: 1488px;
+    background: #ded8cb;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input { font: inherit; color: inherit; }
+  button { border: 0; background: none; cursor: pointer; }
+  a { color: inherit; text-decoration: none; }
+  .num { font-variant-numeric: tabular-nums; }
+  .gain { color: var(--gain); }
+  .loss { color: var(--loss); }
+  .muted { color: var(--muted); }
+  .faint { color: var(--faint); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; animation: none !important; }
+  }
+  .icon { width: 16px; height: 16px; flex: 0 0 auto; display: block; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .icon-sm { width: 14px; height: 14px; }
+  .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+  /* ---------- 设计稿外壳：不属于产品界面 ---------- */
+  .design-bar {
+    position: sticky; top: 0; z-index: 80;
+    height: 48px; display: flex; align-items: center; gap: 28px;
+    padding: 0 24px; background: #1b1712; color: #f2ede3;
+  }
+  .design-brand { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 500; }
+  .design-mark { position: relative; width: 18px; height: 14px; display: flex; align-items: flex-end; gap: 2px; }
+  .design-mark i { display: block; width: 2px; height: 12px; background: #f2ede3; border-radius: 1px; }
+  .design-mark::after { content: ""; position: absolute; left: -2px; top: 6px; width: 22px; height: 2px; background: #e58a00; transform: rotate(-28deg); border-radius: 1px; }
+  .design-tag { color: #9c9182; font-weight: 400; }
+  .design-tabs { display: flex; align-items: center; gap: 2px; }
+  .design-tabs button { height: 28px; padding: 0 10px; border-radius: 6px; color: #b8ae9f; font-size: 12px; }
+  .design-tabs button:hover { color: #f2ede3; background: #2a241c; }
+  .design-tabs button.active { color: #1b1712; background: #f2ede3; font-weight: 500; }
+  .design-meta { margin-left: auto; color: #8f8577; font-size: 11px; letter-spacing: .01em; }
+
+  .stage { padding: 24px; display: flex; justify-content: center; }
+  .screen {
+    display: none; width: 1440px; height: 900px; overflow: hidden;
+    background: var(--canvas); border-radius: 12px; position: relative;
+    box-shadow: 0 1px 2px rgba(33,28,22,.10), 0 28px 72px rgba(33,28,22,.16);
+  }
+  .screen.active { display: flex; }
+  .app { display: flex; width: 100%; height: 100%; background: var(--canvas); }
+
+  /* ---------- 侧边栏 ---------- */
+  .sidebar {
+    width: 240px; flex: 0 0 240px; height: 100%;
+    display: flex; flex-direction: column;
+    background: var(--sidebar); border-right: 1px solid var(--line);
+  }
+  .brand { height: 64px; display: flex; align-items: center; gap: 12px; padding: 0 16px; flex: 0 0 64px; }
+  .brand-mark { position: relative; width: 20px; height: 18px; display: flex; align-items: flex-end; gap: 3px; }
+  .brand-mark i { display: block; width: 3px; height: 15px; background: var(--ink); border-radius: 1px; }
+  .brand-mark::after { content: ""; position: absolute; left: -3px; top: 8px; width: 25px; height: 2.5px; background: #e58a00; transform: rotate(-30deg); border-radius: 1px; }
+  .brand-name { font-size: 15px; font-weight: 600; line-height: 1; }
+  .brand-sub { margin-top: 4px; font-size: 11px; line-height: 1; color: var(--muted); }
+  .search {
+    margin: 0 12px 12px; height: 32px; display: flex; align-items: center; gap: 8px;
+    padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r-control);
+    background: var(--card); color: var(--muted); font-size: 12px;
+  }
+  .search:hover { background: var(--hover); color: var(--ink); }
+  .search .icon { color: var(--muted); }
+  .search span { flex: 1; text-align: left; }
+  .kbd { border: 1px solid var(--line-2); border-radius: 4px; padding: 1px 4px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+
+  .context {
+    margin: 0 12px 20px; padding: 12px;
+    border: 1px solid var(--line); border-radius: var(--r-card); background: var(--card);
+  }
+  .context-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .context-label { font-size: 11px; color: var(--muted); }
+  .sim-chip {
+    display: inline-flex; align-items: center; height: 18px; padding: 0 6px;
+    border: 1px solid var(--line-2); border-radius: 4px;
+    font-size: 10px; color: var(--muted); white-space: nowrap;
+  }
+  .context-value { margin-top: 8px; font-family: var(--mono); font-size: 22px; font-weight: 500; letter-spacing: -.01em; }
+  .context-meta { margin-top: 4px; display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+  .mini-tape { margin-top: 10px; width: 100%; height: 14px; }
+  .mini-tape svg { display: block; width: 100%; height: 100%; }
+  .context-foot { margin-top: 6px; display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+
+  .nav { padding: 0 12px; }
+  .nav-group + .nav-group { margin-top: 24px; }
+  .nav-label { padding: 0 10px 8px; font-size: 11px; color: var(--muted); }
+  .nav-item {
+    width: 100%; height: 34px; display: flex; align-items: center; gap: 10px;
+    padding: 0 10px; border-radius: var(--r-control);
+    font-size: 13px; color: var(--ink-2); text-align: left;
+    transition: background-color .15s ease, color .15s ease;
+  }
+  .nav-item:hover { background: var(--hover); }
+  .nav-item .icon { color: var(--muted); }
+  .nav-item.active { background: var(--selected); color: var(--ink); font-weight: 500; }
+  .nav-item.active .icon { color: var(--ink); }
+  .nav-badge { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .sidebar-foot { margin-top: auto; padding: 12px; border-top: 1px solid var(--line); }
+  .side-status { margin-top: 10px; padding: 0 10px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+  .side-status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .side-status .ver { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--faint); }
+
+  /* ---------- 主区 ---------- */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--canvas); }
+  .topbar {
+    height: 56px; flex: 0 0 56px; display: flex; align-items: center; gap: 12px;
+    padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--canvas);
+  }
+  .icon-btn {
+    width: 32px; height: 32px; display: grid; place-items: center;
+    border-radius: var(--r-control); color: var(--muted);
+    transition: background-color .15s ease, color .15s ease;
+  }
+  .icon-btn:hover { background: var(--hover); color: var(--ink); }
+  .topbar-title { min-width: 0; }
+  .session-title { font-size: 15px; font-weight: 500; line-height: 1.1; }
+  .session-meta { margin-top: 4px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .session-meta b { font-family: var(--mono); font-weight: 400; color: var(--ink-2); }
+  .topbar-status { margin-left: 10px; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .topbar-status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line-2); }
+  .topbar-progress { margin-left: 4px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .topbar-spacer { flex: 1; }
+  .btn {
+    height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 0 14px; border-radius: var(--r-control); font-size: 12px; font-weight: 500;
+    transition: background-color .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease;
+  }
+  .btn-primary { background: var(--ink); color: var(--card); }
+  .btn-primary:hover { opacity: .9; }
+  .btn-secondary { border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  .btn-secondary:hover { background: var(--hover); }
+
+  .workspace { flex: 1; min-height: 0; display: flex; }
+  .chart-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+  .chart-toolbar {
+    height: 40px; flex: 0 0 40px; display: flex; align-items: center; gap: 8px;
+    padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--canvas);
+  }
+  .tf-group { display: flex; align-items: center; gap: 2px; }
+  .tf { height: 26px; padding: 0 8px; border-radius: 6px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .tf:hover { background: var(--hover); color: var(--ink); }
+  .tf.active { background: var(--ink); color: var(--card); }
+  .tool-sep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
+  .tool-btn { height: 28px; padding: 0 8px; display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; font-size: 11px; color: var(--muted); }
+  .tool-btn:hover { background: var(--hover); color: var(--ink); }
+  .toolbar-spacer { flex: 1; }
+  .locked { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--muted); }
+  .chart-body { flex: 1; min-height: 0; position: relative; background: var(--card); overflow: hidden; }
+  .chart-body > svg { display: block; width: 100%; height: 100%; }
+  .chart-legend {
+    position: absolute; top: 12px; left: 16px; z-index: 2;
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    font-size: 10px; color: var(--muted); pointer-events: none;
+  }
+  .legend-symbol { font-size: 12px; font-weight: 500; color: var(--ink); }
+  .legend-tf { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .legend-sep { width: 1px; height: 10px; background: var(--line-2); align-self: center; }
+  .chart-legend b { font-family: var(--mono); font-weight: 400; color: var(--ink-2); }
+  .chart-watermark {
+    position: absolute; right: 72px; bottom: 34px; z-index: 2;
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10px; color: var(--faint); pointer-events: none;
+  }
+
+  /* ---------- 右侧栏 ---------- */
+  .right-rail { width: 336px; flex: 0 0 336px; display: flex; flex-direction: column; background: var(--card); }
+  .account { padding: 16px 20px 14px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+  .account-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .account-title { font-size: 12px; font-weight: 500; }
+  .account-meta { font-size: 10px; color: var(--muted); }
+  .account-equity { margin-top: 10px; display: flex; align-items: baseline; gap: 8px; }
+  .account-equity .label { font-size: 11px; color: var(--muted); }
+  .account-equity .value { font-family: var(--mono); font-size: 24px; font-weight: 500; letter-spacing: -.01em; line-height: 1; }
+  .account-equity .delta { font-family: var(--mono); font-size: 11px; }
+  .account-row { margin-top: 8px; display: flex; align-items: center; gap: 14px; font-size: 10px; color: var(--muted); }
+  .account-row b { font-family: var(--mono); font-weight: 400; color: var(--ink-2); }
+
+  .tabs { height: 40px; flex: 0 0 40px; display: flex; align-items: stretch; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+  .tab { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: 12px; color: var(--muted); }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--ink); font-weight: 500; }
+  .tab.active::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; background: var(--ink); border-radius: 2px 2px 0 0; }
+  .tab-count { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .tab-body { flex: 1; min-height: 0; overflow: auto; }
+  .pos-row { padding: 12px 20px; border-bottom: 1px solid var(--line); }
+  .pos-row.selected { background: var(--selected); }
+  .pos-line1 { display: flex; align-items: center; gap: 8px; }
+  .side { font-size: 11px; font-weight: 500; }
+  .side-buy { color: var(--gain); }
+  .side-sell { color: var(--loss); }
+  .pos-symbol { font-size: 13px; font-weight: 500; }
+  .pos-volume { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .pos-pnl { margin-left: auto; font-family: var(--mono); font-size: 13px; font-weight: 500; }
+  .pos-line2 { margin-top: 6px; display: flex; align-items: center; gap: 16px; font-size: 10px; color: var(--muted); }
+  .pos-line2 b { font-family: var(--mono); font-weight: 400; color: var(--ink-2); }
+  .pos-line3 { margin-top: 8px; display: flex; align-items: center; gap: 12px; font-size: 10px; color: var(--muted); }
+  .pos-line3 b { font-family: var(--mono); font-weight: 400; color: var(--ink-2); }
+  .note-preview { padding: 12px 20px; border-bottom: 1px solid var(--line); }
+  .note-preview .note-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--muted); }
+  .note-preview p { margin: 6px 0 0; font-size: 11px; line-height: 1.55; color: var(--ink-2); }
+  .row-spacer { flex: 1; }
+  .link-btn { font-size: 10px; color: var(--muted); }
+  .link-btn:hover { color: var(--ink); }
+
+  .ticket { margin-top: auto; flex: 0 0 auto; border-top: 1px solid var(--line); padding: 16px 20px; background: var(--card); }
+  .ticket-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .ticket-title { font-size: 12px; font-weight: 500; }
+  .ticket-meta { font-size: 10px; color: var(--muted); }
+  .side-toggle { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border-radius: var(--r-control); background: var(--hover); }
+  .side-btn { height: 30px; border-radius: 6px; font-size: 12px; color: var(--muted); }
+  .side-btn:hover { color: var(--ink); }
+  .side-btn.active-buy { background: var(--gain-soft); color: var(--gain); font-weight: 500; }
+  .side-btn.active-sell { background: var(--loss-soft); color: var(--loss); font-weight: 500; }
+  .field-row { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .field label { display: block; margin-bottom: 4px; font-size: 10px; color: var(--muted); }
+  .input {
+    width: 100%; height: 32px; padding: 0 10px; display: flex; align-items: center;
+    border: 1px solid var(--line); border-radius: var(--r-control); background: var(--card);
+    font-family: var(--mono); font-size: 11px; color: var(--ink-2); outline: none;
+  }
+  input.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31,95,214,.12); }
+  .risk-line { margin-top: 10px; display: flex; justify-content: space-between; gap: 12px; font-size: 10px; color: var(--muted); }
+  .submit { width: 100%; height: 36px; margin-top: 10px; border-radius: var(--r-control); background: var(--ink); color: var(--card); font-size: 12px; font-weight: 500; }
+  .submit:hover { opacity: .9; }
+  .expand { width: 100%; height: 24px; margin-top: 6px; display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 10px; color: var(--muted); }
+  .expand:hover { color: var(--ink); }
+
+  /* ---------- 回放控制条 ---------- */
+  .playback {
+    height: 72px; flex: 0 0 72px; display: flex; align-items: center; gap: 16px;
+    padding: 0 20px; border-top: 1px solid var(--line); background: var(--card);
+  }
+  .transport { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+  .play-btn { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; background: var(--ink); color: var(--card); }
+  .play-btn:hover { opacity: .9; }
+  .speed { margin-left: 8px; display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--r-control); background: var(--hover); }
+  .speed button { height: 26px; padding: 0 8px; border-radius: 6px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .speed button:hover { color: var(--ink); }
+  .speed button.active { background: var(--card); color: var(--ink); box-shadow: 0 1px 1px rgba(33,28,22,.06); }
+  .tape-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .tape-labels { position: relative; height: 12px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .tape-labels span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+  .tape-labels span:first-child { transform: none; }
+  .tape-labels span:last-child { transform: translateX(-100%); }
+  .tape { height: 22px; position: relative; }
+  .tape svg { display: block; width: 100%; height: 100%; }
+  .time-readout { flex: 0 0 auto; min-width: 102px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .time-readout .time { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+  .time-readout .meta { font-size: 10px; color: var(--muted); }
+  .follow { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--muted); }
+  .switch { width: 28px; height: 16px; border-radius: 8px; background: var(--line-2); position: relative; transition: background-color .15s ease; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--card); transition: transform .15s ease; }
+  .switch.on { background: var(--ink); }
+  .switch.on::after { transform: translateX(12px); }
+
+  /* ---------- 列表页 ---------- */
+  .page { flex: 1; min-height: 0; overflow: auto; padding: 32px; background: var(--canvas); }
+  .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+  .page-title { font-size: 24px; font-weight: 500; letter-spacing: -.01em; line-height: 1; }
+  .page-sub { margin-top: 8px; font-size: 13px; color: var(--muted); }
+  .page-actions { display: flex; align-items: center; gap: 8px; }
+  .readout {
+    margin-top: 24px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--line);
+  }
+  .readout-cell { background: var(--card); padding: 16px 20px; }
+  .readout-label { font-size: 12px; color: var(--muted); }
+  .readout-value { margin-top: 6px; font-family: var(--mono); font-size: 24px; font-weight: 500; letter-spacing: -.01em; line-height: 1; }
+  .readout-hint { margin-top: 8px; font-size: 10px; color: var(--muted); }
+  .session-card {
+    margin-top: 16px; display: grid; grid-template-columns: minmax(0, 1fr) 300px;
+    border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--card); overflow: hidden;
+  }
+  .session-main { padding: 20px 24px; }
+  .session-kicker { font-size: 10px; color: var(--muted); }
+  .session-name { margin-top: 6px; font-size: 15px; font-weight: 500; }
+  .session-meta { margin-top: 8px; display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--muted); }
+  .session-meta b { font-family: var(--mono); font-weight: 400; color: var(--ink-2); }
+  .session-stats { margin-top: 16px; display: flex; align-items: flex-end; gap: 28px; }
+  .stat label { display: block; font-size: 10px; color: var(--muted); }
+  .stat .v { margin-top: 4px; font-family: var(--mono); font-size: 15px; font-weight: 500; color: var(--ink); }
+  .session-side { padding: 20px 24px; border-left: 1px solid var(--line); display: flex; flex-direction: column; justify-content: space-between; gap: 16px; }
+  .session-side .mini-tape { height: 18px; margin-top: 0; }
+  .session-side .side-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .side-foot .meta { font-size: 10px; color: var(--muted); }
+  .table-card { margin-top: 16px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--card); overflow: hidden; }
+  .table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .table th { padding: 10px 16px; text-align: left; font-size: 10px; font-weight: 400; color: var(--muted); border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .table td { padding: 12px 16px; border-bottom: 1px solid var(--line); color: var(--ink-2); vertical-align: middle; }
+  .table tr:last-child td { border-bottom: 0; }
+  .table tbody tr:hover td { background: var(--hover); }
+  .table .name { font-size: 12px; font-weight: 500; color: var(--ink); white-space: nowrap; }
+  .table .mono { font-family: var(--mono); font-size: 11px; }
+  .table .right { text-align: right; }
+  .local-card { margin-top: 16px; display: flex; align-items: center; gap: 24px; padding: 16px 20px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--card); }
+  .local-main { min-width: 190px; }
+  .local-title { font-size: 12px; font-weight: 500; }
+  .local-meta { margin-top: 4px; font-size: 10px; color: var(--muted); }
+  .local-bars { flex: 1; display: flex; gap: 2px; }
+  .local-bars span { flex: 1; height: 6px; border-radius: 2px; background: var(--gain); }
+  .local-bars span.partial { background: var(--warn); }
+  .local-bars span.empty { background: var(--line); }
+  .local-note { font-size: 10px; color: var(--muted); white-space: nowrap; }
+  .status-text { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .status-text .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line-2); }
+  .status-text.running .dot { background: var(--accent); }
+  .status-text.done .dot { background: var(--gain); }
+  .progress-cell { display: flex; align-items: center; gap: 8px; }
+  .progress-cell .mini-tape { width: 64px; height: 10px; margin-top: 0; }
+  .progress-cell .pct { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .row-actions { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+  .row-actions .link-btn { font-size: 11px; }
+
+  /* ---------- 报告页 ---------- */
+  .report { flex: 1; min-height: 0; overflow: auto; padding: 24px 32px; background: var(--canvas); }
+  .back-link { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+  .back-link:hover { color: var(--ink); }
+  .report-head { margin-top: 6px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+  .report-title { font-size: 24px; font-weight: 500; letter-spacing: -.01em; line-height: 1.1; }
+  .report-meta { margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .report-meta b { font-family: var(--mono); font-weight: 400; color: var(--ink-2); }
+  .report-actions { display: flex; align-items: center; gap: 8px; }
+  .report-readout { margin-top: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .report-readout .readout-cell { padding: 14px 16px; }
+  .report-readout .readout-value { font-size: 20px; }
+  .report-grid { margin-top: 8px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; }
+  .card { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--card); }
+  .chart-card { padding: 20px 24px; }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .card-title { font-size: 12px; font-weight: 500; }
+  .card-meta { font-size: 10px; color: var(--muted); }
+  .equity-svg { margin-top: 8px; display: block; width: 100%; height: 236px; }
+  .side-stack { display: flex; flex-direction: column; gap: 12px; }
+  .mini-card { padding: 14px; }
+  .mini-card .card-head { align-items: flex-start; }
+  .histogram { margin-top: 8px; display: block; width: 100%; height: 96px; }
+  .bd-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px 44px; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 10px; color: var(--muted); }
+  .bd-row:first-of-type { border-top: 0; padding-top: 2px; color: var(--muted); }
+  .bd-row .num { text-align: right; }
+  .bd-row .strong { color: var(--ink-2); }
+  .trade-card { margin-top: 8px; overflow: hidden; }
+  .trade-card .table th { padding-top: 10px; padding-bottom: 10px; }
+  .trade-card .table td { padding-top: 9px; padding-bottom: 9px; }
+  .tag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 4px; background: var(--hover); font-size: 10px; color: var(--muted); }
+  .notes-card { margin-top: 8px; padding: 12px 20px; }
+  .notes-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .notes-list { margin-top: 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+  .note-item { padding: 8px 20px 0 0; border-right: 1px solid var(--line); }
+  .note-item:last-child { border-right: 0; padding-right: 0; }
+  .note-time { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .note-text { margin: 4px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-2); }
+  .note-tag { margin-top: 6px; }
+
+  /* ---------- 新建会话 ---------- */
+  .modal-stage { position: absolute; inset: 0; pointer-events: none; }
+  .modal-stage .app { width: 100%; height: 100%; }
+  .modal-backdrop { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; background: rgba(33,28,22,.32); }
+  .modal {
+    width: 640px; max-height: 792px; display: flex; flex-direction: column; overflow: hidden;
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r-panel);
+    box-shadow: 0 24px 64px rgba(33,28,22,.22);
+  }
+  .modal-head { padding: 20px 24px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); }
+  .modal-title { font-size: 15px; font-weight: 500; }
+  .modal-sub { margin-top: 5px; font-size: 11px; color: var(--muted); }
+  .modal-body { padding: 0 24px; overflow: auto; }
+  .form-section { padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .form-section:last-child { border-bottom: 0; }
+  .form-section h3 { margin: 0 0 12px; font-size: 12px; font-weight: 500; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .form-grid .full { grid-column: 1 / -1; }
+  .form-field label { display: block; margin-bottom: 4px; font-size: 10px; color: var(--muted); }
+  .form-field .input { width: 100%; }
+  .inline-link { margin-top: 8px; font-size: 10px; color: var(--muted); text-align: left; }
+  .inline-link:hover { color: var(--ink); }
+  .advanced-row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0; text-align: left; }
+  .advanced-row h3 { margin: 0; font-size: 12px; font-weight: 500; }
+  .advanced-row p { margin: 4px 0 0; font-size: 10px; color: var(--muted); }
+  .advanced-row .icon { color: var(--muted); }
+  .seg { display: flex; gap: 2px; padding: 2px; border-radius: var(--r-control); background: var(--hover); }
+  .seg button { flex: 1; height: 28px; border-radius: 6px; font-size: 11px; color: var(--muted); }
+  .seg button:hover { color: var(--ink); }
+  .seg button.active { background: var(--card); color: var(--ink); box-shadow: 0 1px 1px rgba(33,28,22,.06); }
+  .coverage { margin-top: 10px; display: flex; gap: 2px; }
+  .coverage span { flex: 1; height: 8px; border-radius: 2px; background: var(--gain); }
+  .coverage span.partial { background: var(--warn); }
+  .coverage span.empty { background: var(--line); }
+  .coverage-labels { margin-top: 6px; display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .estimate { margin-top: 10px; display: flex; align-items: center; gap: 14px; font-size: 10px; color: var(--muted); }
+  .modal-actions { padding: 16px 24px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); }
+  .modal-actions .note { margin-right: auto; font-size: 10px; color: var(--muted); }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 6px; background-clip: content-box; background-color: #d5cec0; }
+  ::-webkit-scrollbar-thumb:hover { background-color: #b9b0a0; }
+</style>
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+  <symbol id="i-candle" viewBox="0 0 24 24"><path d="M9 3v3M9 16v5M15 2v4M15 15v7"/><rect x="6" y="6" width="6" height="10" rx="1"/><rect x="12" y="6" width="6" height="9" rx="1"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7" rx="1"/><rect x="12" y="6" width="3" height="11" rx="1"/><rect x="17" y="13" width="3" height="4" rx="1"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><circle cx="12" cy="15" r="3"/><path d="M12 14v2l1 1"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5 19 12 7 19.5z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-step" viewBox="0 0 24 24"><path d="M6 4.5 16 12 6 19.5z" fill="currentColor" stroke="none"/><path d="M19 5v14"/></symbol>
+  <symbol id="i-restart" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+  <symbol id="i-arrow-up-right" viewBox="0 0 24 24"><path d="M7 17 17 7M7 7h10v10"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-wall" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></symbol>
+</svg>
+
+<header class="design-bar">
+  <div class="design-brand">
+    <span class="design-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+    Tally 复盘
+    <span class="design-tag">UI 设计稿</span>
+  </div>
+  <nav class="design-tabs" aria-label="设计稿切换">
+    <button data-screen="list">复盘列表</button>
+    <button data-screen="create">新建复盘</button>
+    <button data-screen="workspace" class="active">回放工作台</button>
+    <button data-screen="report">复盘报告</button>
+  </nav>
+  <div class="design-meta">1440 × 900 · 暖纸浅色 · 非产品界面</div>
+</header>
+
+<main class="stage">
+
+  <!-- ================= 回放工作台 ================= -->
+  <section class="screen active" id="screen-workspace">
+    <div class="app">
+      <aside class="sidebar" data-sidebar="session"></aside>
+      <div class="main">
+        <header class="topbar">
+          <button class="icon-btn" title="返回复盘列表"><svg class="icon"><use href="#i-chevron-left"/></svg></button>
+          <div class="topbar-title">
+            <div class="session-title">XAUUSD · 10 月复盘</div>
+            <div class="session-meta">15m · 行情时间 <b>2026-10-08 14:30</b></div>
+          </div>
+          <div class="topbar-status"><span class="dot"></span>暂停</div>
+          <div class="topbar-progress">24%</div>
+          <div class="topbar-spacer"></div>
+          <span class="sim-chip">模拟撮合</span>
+          <button class="btn btn-secondary">结束复盘</button>
+          <button class="icon-btn" title="更多"><svg class="icon"><use href="#i-more"/></svg></button>
+        </header>
+
+        <div class="workspace">
+          <section class="chart-pane">
+            <div class="chart-toolbar">
+              <div class="tf-group">
+                <button class="tf">1m</button>
+                <button class="tf">5m</button>
+                <button class="tf active">15m</button>
+                <button class="tf">30m</button>
+                <button class="tf">1h</button>
+                <button class="tf">4h</button>
+                <button class="tf">1D</button>
+              </div>
+              <span class="tool-sep"></span>
+              <button class="tool-btn"><svg class="icon icon-sm"><use href="#i-chart"/></svg>指标</button>
+              <button class="tool-btn"><svg class="icon icon-sm"><use href="#i-pencil"/></svg>画线</button>
+              <div class="toolbar-spacer"></div>
+              <span class="locked"><svg class="icon icon-sm"><use href="#i-lock"/></svg>品种已锁定</span>
+            </div>
+            <div class="chart-body">
+              <div class="chart-legend">
+                <span class="legend-symbol">XAUUSD</span>
+                <span class="legend-tf">15m</span>
+                <span class="legend-sep"></span>
+                <span>O <b id="lg-o">—</b></span>
+                <span>H <b id="lg-h">—</b></span>
+                <span>L <b id="lg-l">—</b></span>
+                <span>C <b id="lg-c">—</b></span>
+                <span id="lg-change" class="gain">—</span>
+              </div>
+              <div class="chart-watermark"><svg class="icon icon-sm"><use href="#i-lock"/></svg>复盘 · 模拟</div>
+              <svg id="chart-svg" viewBox="0 0 864 732" aria-label="XAUUSD 15 分钟 K 线回放图"></svg>
+            </div>
+          </section>
+
+          <aside class="right-rail">
+            <div class="account">
+              <div class="account-head">
+                <span class="account-title">模拟账户</span>
+                <span class="account-meta">USD · 1:100</span>
+              </div>
+              <div class="account-equity">
+                <span class="label">净值</span>
+                <span class="value num">10,310.40</span>
+                <span class="delta gain">+64.00</span>
+              </div>
+              <div class="account-row">
+                <span>余额 <b>10,246.40</b></span>
+                <span>保证金 <b>399.26</b></span>
+                <span>可用 <b>9,911.14</b></span>
+              </div>
+            </div>
+
+            <div class="tabs">
+              <button class="tab active">持仓 <span class="tab-count">1</span></button>
+              <button class="tab">挂单 <span class="tab-count">1</span></button>
+              <button class="tab">笔记 <span class="tab-count">3</span></button>
+              <button class="tab">统计</button>
+            </div>
+
+            <div class="tab-body">
+              <div class="pos-row selected">
+                <div class="pos-line1">
+                  <span class="side side-buy">买入</span>
+                  <span class="pos-symbol">XAUUSD</span>
+                  <span class="pos-volume">0.10 手</span>
+                  <span class="pos-pnl gain" id="pos-profit">+64.00</span>
+                </div>
+                <div class="pos-line2">
+                  <span>入场 <b id="pos-entry">3,986.2</b></span>
+                  <span>现价 <b id="pos-current">3,992.6</b></span>
+                  <span class="gain" id="pos-r">+1.23R</span>
+                </div>
+                <div class="pos-line3">
+                  <span>SL <b id="pos-sl">3,981.0</b></span>
+                  <span>TP <b id="pos-tp">4,000.0</b></span>
+                  <span class="row-spacer"></span>
+                  <button class="link-btn">平仓</button>
+                  <button class="link-btn">改止损</button>
+                </div>
+              </div>
+              <div class="note-preview">
+                <div class="note-head"><span>最新笔记</span><span class="num">10-08 13:05</span></div>
+                <p>减半仓后让利润奔跑，止损移到成本上方，保留 1.2R 空间。</p>
+              </div>
+            </div>
+
+            <div class="ticket">
+              <div class="ticket-head">
+                <span class="ticket-title">模拟下单</span>
+                <span class="ticket-meta">按 0.5% 风险</span>
+              </div>
+              <div class="side-toggle">
+                <button class="side-btn">卖出</button>
+                <button class="side-btn active-buy">买入</button>
+              </div>
+              <div class="field-row">
+                <div class="field"><label>手数</label><input class="input" value="0.10" aria-label="手数"></div>
+                <div class="field"><label>风险</label><div class="input" id="risk-amount">$52.00</div></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><label>止损</label><input class="input" id="ticket-sl" value="3,981.0" aria-label="止损"></div>
+                <div class="field"><label>止盈</label><input class="input" id="ticket-tp" value="4,000.0" aria-label="止盈"></div>
+              </div>
+              <div class="risk-line"><span>风险 0.50% · R 2.6</span><span>保证金 ≈ 399.26</span></div>
+              <button class="submit">模拟买入 0.10 手</button>
+              <button class="expand">展开完整下单票 <svg class="icon icon-sm"><use href="#i-chevron-down"/></svg></button>
+            </div>
+          </aside>
+        </div>
+
+        <footer class="playback">
+          <div class="transport">
+            <button class="icon-btn" title="重新开始"><svg class="icon"><use href="#i-restart"/></svg></button>
+            <button class="icon-btn" title="单步"><svg class="icon"><use href="#i-step"/></svg></button>
+            <button class="play-btn" title="播放"><svg class="icon"><use href="#i-play"/></svg></button>
+            <div class="speed">
+              <button>1x</button>
+              <button>2x</button>
+              <button>5x</button>
+              <button class="active">10x</button>
+            </div>
+          </div>
+          <div class="tape-wrap">
+            <div class="tape-labels">
+              <span style="left:0">10-01</span>
+              <span style="left:33.3%">10-11</span>
+              <span style="left:66.6%">10-21</span>
+              <span style="right:0">10-31</span>
+            </div>
+            <div class="tape" data-tape="24" data-count="96" data-height="22"></div>
+          </div>
+          <div class="time-readout">
+            <span class="time">10-08 14:30</span>
+            <span class="meta">24% · 8,070 / 33,120 根</span>
+          </div>
+          <label class="follow"><span class="switch on"></span>跟随游标</label>
+        </footer>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 复盘列表 ================= -->
+  <section class="screen" id="screen-list">
+    <div class="app">
+      <aside class="sidebar" data-sidebar="list"></aside>
+      <div class="main">
+        <div class="page">
+          <header class="page-head">
+            <div>
+              <h1 class="page-title">复盘</h1>
+              <p class="page-sub">用历史行情练习决策，所有成交均为模拟</p>
+            </div>
+            <div class="page-actions">
+              <button class="btn btn-primary"><svg class="icon icon-sm"><use href="#i-plus"/></svg>新建复盘</button>
+            </div>
+          </header>
+
+          <div class="readout">
+            <div class="readout-cell">
+              <div class="readout-label">进行中</div>
+              <div class="readout-value">2</div>
+              <div class="readout-hint">最近一次 2 小时前</div>
+            </div>
+            <div class="readout-cell">
+              <div class="readout-label">累计模拟盈亏</div>
+              <div class="readout-value gain">+2,846.20</div>
+              <div class="readout-hint">全部已完成会话 · USD</div>
+            </div>
+            <div class="readout-cell">
+              <div class="readout-label">交易笔数</div>
+              <div class="readout-value">86</div>
+              <div class="readout-hint">已平仓 · 平均 +0.42R</div>
+            </div>
+            <div class="readout-cell">
+              <div class="readout-label">已完成复盘</div>
+              <div class="readout-value">12</div>
+              <div class="readout-hint">累计回放 41 小时</div>
+            </div>
+          </div>
+
+          <section class="session-card">
+            <div class="session-main">
+              <div class="session-kicker">进行中</div>
+              <div class="session-name">XAUUSD · 10 月复盘</div>
+              <div class="session-meta">
+                <span>15m</span>
+                <span>2026-10-01 ~ 10-31</span>
+                <span>游标 <b>10-08 14:30</b></span>
+              </div>
+              <div class="session-stats">
+                <div class="stat"><label>模拟盈亏</label><div class="v gain">+310.40</div></div>
+                <div class="stat"><label>持仓</label><div class="v">1</div></div>
+                <div class="stat"><label>交易</label><div class="v">12</div></div>
+                <div class="stat"><label>最大回撤</label><div class="v loss">-3.2%</div></div>
+              </div>
+            </div>
+            <div class="session-side">
+              <div class="mini-tape" data-tape="24" data-count="48" data-height="18"></div>
+              <div class="side-foot">
+                <span class="meta">已回放 24% · 8,070 根</span>
+                <button class="btn btn-primary">继续复盘</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-card">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>品种 / 周期</th>
+                  <th>区间</th>
+                  <th>进度</th>
+                  <th>状态</th>
+                  <th class="right">模拟盈亏</th>
+                  <th class="right">交易</th>
+                  <th class="right">最大回撤</th>
+                  <th>更新时间</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="name">XAUUSD · 10 月复盘</td>
+                  <td class="mono">XAUUSD · 15m</td>
+                  <td class="mono">10-01 ~ 10-31</td>
+                  <td><div class="progress-cell"><div class="mini-tape" data-tape="24" data-count="24" data-height="10"></div><span class="pct">24%</span></div></td>
+                  <td><span class="status-text running"><span class="dot"></span>进行中</span></td>
+                  <td class="right mono gain">+310.40</td>
+                  <td class="right mono">12</td>
+                  <td class="right mono loss">-3.2%</td>
+                  <td class="mono">2 小时前</td>
+                  <td><div class="row-actions"><button class="link-btn">继续</button><button class="icon-btn" style="width:24px;height:24px"><svg class="icon icon-sm"><use href="#i-more"/></svg></button></div></td>
+                </tr>
+                <tr>
+                  <td class="name">EURUSD · 9 月下半月</td>
+                  <td class="mono">EURUSD · 5m</td>
+                  <td class="mono">09-15 ~ 09-30</td>
+                  <td><div class="progress-cell"><div class="mini-tape" data-tape="100" data-count="24" data-height="10"></div><span class="pct">完成</span></div></td>
+                  <td><span class="status-text done"><span class="dot"></span>已完成</span></td>
+                  <td class="right mono loss">-86.20</td>
+                  <td class="right mono">18</td>
+                  <td class="right mono loss">-5.8%</td>
+                  <td class="mono">昨天</td>
+                  <td><div class="row-actions"><button class="link-btn">报告</button><button class="icon-btn" style="width:24px;height:24px"><svg class="icon icon-sm"><use href="#i-more"/></svg></button></div></td>
+                </tr>
+                <tr>
+                  <td class="name">US500 · 8 月趋势</td>
+                  <td class="mono">US500 · 1h</td>
+                  <td class="mono">08-01 ~ 08-31</td>
+                  <td><div class="progress-cell"><div class="mini-tape" data-tape="100" data-count="24" data-height="10"></div><span class="pct">完成</span></div></td>
+                  <td><span class="status-text done"><span class="dot"></span>已完成</span></td>
+                  <td class="right mono gain">+1,024.40</td>
+                  <td class="right mono">24</td>
+                  <td class="right mono loss">-2.1%</td>
+                  <td class="mono">10-02</td>
+                  <td><div class="row-actions"><button class="link-btn">报告</button><button class="icon-btn" style="width:24px;height:24px"><svg class="icon icon-sm"><use href="#i-more"/></svg></button></div></td>
+                </tr>
+                <tr>
+                  <td class="name">XAUUSD · 7 月上半月</td>
+                  <td class="mono">XAUUSD · 15m</td>
+                  <td class="mono">07-01 ~ 07-15</td>
+                  <td><div class="progress-cell"><div class="mini-tape" data-tape="100" data-count="24" data-height="10"></div><span class="pct">完成</span></div></td>
+                  <td><span class="status-text"><span class="dot"></span>已归档</span></td>
+                  <td class="right mono gain">+152.80</td>
+                  <td class="right mono">7</td>
+                  <td class="right mono loss">-1.4%</td>
+                  <td class="mono">09-18</td>
+                  <td><div class="row-actions"><button class="link-btn">报告</button><button class="icon-btn" style="width:24px;height:24px"><svg class="icon icon-sm"><use href="#i-more"/></svg></button></div></td>
+                </tr>
+                <tr>
+                  <td class="name">GBPUSD · 6 月区间</td>
+                  <td class="mono">GBPUSD · 30m</td>
+                  <td class="mono">06-01 ~ 06-30</td>
+                  <td><div class="progress-cell"><div class="mini-tape" data-tape="100" data-count="24" data-height="10"></div><span class="pct">完成</span></div></td>
+                  <td><span class="status-text done"><span class="dot"></span>已完成</span></td>
+                  <td class="right mono gain">+64.80</td>
+                  <td class="right mono">9</td>
+                  <td class="right mono loss">-2.6%</td>
+                  <td class="mono">08-30</td>
+                  <td><div class="row-actions"><button class="link-btn">报告</button><button class="icon-btn" style="width:24px;height:24px"><svg class="icon icon-sm"><use href="#i-more"/></svg></button></div></td>
+                </tr>
+                <tr>
+                  <td class="name">XAUUSD · 5 月回踩</td>
+                  <td class="mono">XAUUSD · 15m</td>
+                  <td class="mono">05-01 ~ 05-15</td>
+                  <td><div class="progress-cell"><div class="mini-tape" data-tape="100" data-count="24" data-height="10"></div><span class="pct">完成</span></div></td>
+                  <td><span class="status-text"><span class="dot"></span>已归档</span></td>
+                  <td class="right mono loss">-42.60</td>
+                  <td class="right mono">5</td>
+                  <td class="right mono loss">-1.9%</td>
+                  <td class="mono">07-12</td>
+                  <td><div class="row-actions"><button class="link-btn">报告</button><button class="icon-btn" style="width:24px;height:24px"><svg class="icon icon-sm"><use href="#i-more"/></svg></button></div></td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="local-card">
+            <div class="local-main">
+              <div class="local-title">本地数据</div>
+              <div class="local-meta">XAUUSD · EURUSD · US500 · 1.2 GB</div>
+            </div>
+            <div class="local-bars" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span class="partial"></span><span></span><span></span><span class="empty"></span>
+            </div>
+            <span class="local-note">复盘数据保存在本机，不进入实盘日志</span>
+            <button class="link-btn">管理</button>
+          </section>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 新建会话 ================= -->
+  <section class="screen" id="screen-create">
+    <div class="modal-stage" id="create-bg"></div>
+    <div class="modal-backdrop">
+      <div class="modal" role="dialog" aria-label="新建复盘">
+        <div class="modal-head">
+          <div>
+            <div class="modal-title">新建复盘</div>
+            <div class="modal-sub">选择区间后会检查本地数据覆盖，不会立即开始回放</div>
+          </div>
+          <button class="icon-btn" title="关闭"><svg class="icon"><use href="#i-x"/></svg></button>
+        </div>
+        <div class="modal-body">
+          <section class="form-section">
+            <h3>品种与区间</h3>
+            <div class="form-grid">
+              <div class="form-field full">
+                <label>品种</label>
+                <div class="input" style="justify-content:space-between"><span>XAUUSD · 黄金美元</span><span style="color:var(--muted);font-family:var(--sans);font-size:10px">只列有历史的品种</span></div>
+              </div>
+              <div class="form-field full">
+                <label>区间</label>
+                <div class="seg">
+                  <button>1 周</button>
+                  <button class="active">1 个月</button>
+                  <button>3 个月</button>
+                  <button>自定义</button>
+                </div>
+              </div>
+              <div class="form-field"><label>开始时间</label><div class="input">2026-10-01 00:00</div></div>
+              <div class="form-field"><label>结束时间</label><div class="input">2026-10-31 23:59</div></div>
+              <div class="form-field"><label>默认显示周期</label><div class="input" style="justify-content:space-between"><span>15m</span><svg class="icon icon-sm faint"><use href="#i-chevron-down"/></svg></div></div>
+              <div class="form-field"><label>预热根数</label><div class="input">1,000 根</div></div>
+            </div>
+          </section>
+
+          <section class="form-section">
+            <h3>数据覆盖</h3>
+            <div class="coverage">
+              <span></span><span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span class="partial"></span><span></span><span></span>
+            </div>
+            <div class="coverage-labels"><span>2025-11</span><span>2026-02</span><span>2026-05</span><span>2026-08</span><span>2026-10</span></div>
+            <div class="estimate"><span>预计 3.3 万根 M1</span><span>约 2.5 MB</span><span>10x 下约 55 分钟</span></div>
+          </section>
+
+          <section class="form-section">
+            <h3>初始账户</h3>
+            <div class="form-grid three">
+              <div class="form-field"><label>初始资金</label><div class="input">10,000.00</div></div>
+              <div class="form-field"><label>杠杆</label><div class="input" style="justify-content:space-between"><span>1:100</span><svg class="icon icon-sm faint"><use href="#i-chevron-down"/></svg></div></div>
+              <div class="form-field"><label>账户货币</label><div class="input">USD</div></div>
+            </div>
+            <button class="inline-link">使用上次复盘余额 10,246.40</button>
+          </section>
+
+          <section class="form-section">
+            <button class="advanced-row">
+              <div>
+                <h3>成本与撮合</h3>
+                <p>点差 18 points · 佣金 0.00 · 滑点 0 points · 标准撮合</p>
+              </div>
+              <svg class="icon icon-sm"><use href="#i-chevron-right"/></svg>
+            </button>
+          </section>
+        </div>
+        <div class="modal-actions">
+          <span class="note">创建后可随时在会话设置中调整训练规则</span>
+          <button class="btn btn-secondary">取消</button>
+          <button class="btn btn-primary">创建并准备数据</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 复盘报告 ================= -->
+  <section class="screen" id="screen-report">
+    <div class="app">
+      <aside class="sidebar" data-sidebar="report"></aside>
+      <div class="main">
+        <div class="report">
+          <button class="back-link"><svg class="icon icon-sm"><use href="#i-chevron-left"/></svg>复盘列表</button>
+          <header class="report-head">
+            <div>
+              <h1 class="report-title">XAUUSD · 9 月复盘</h1>
+              <div class="report-meta">15m · 2026-09-01 ~ 09-30 · 初始资金 <b>10,000.00</b> · 已回放 <b>3.2 万根</b> M1</div>
+            </div>
+            <div class="report-actions">
+              <button class="btn btn-secondary"><svg class="icon icon-sm"><use href="#i-restart"/></svg>重新挑战</button>
+              <button class="btn btn-secondary">导出</button>
+            </div>
+          </header>
+
+          <div class="readout report-readout">
+            <div class="readout-cell"><div class="readout-label">净盈亏</div><div class="readout-value gain">+1,248.60</div></div>
+            <div class="readout-cell"><div class="readout-label">收益率</div><div class="readout-value gain">+12.49%</div></div>
+            <div class="readout-cell"><div class="readout-label">最大回撤</div><div class="readout-value loss">-3.8%</div></div>
+            <div class="readout-cell"><div class="readout-label">胜率</div><div class="readout-value">61.1%</div></div>
+            <div class="readout-cell"><div class="readout-label">盈亏比</div><div class="readout-value">1.84</div></div>
+            <div class="readout-cell"><div class="readout-label">平均 R</div><div class="readout-value gain">+0.48</div></div>
+          </div>
+
+          <div class="report-grid">
+            <section class="card chart-card">
+              <div class="card-head">
+                <span class="card-title">净值曲线</span>
+                <span class="card-meta">逐 M1 收盘 · 含浮动盈亏</span>
+              </div>
+              <svg class="equity-svg" id="equity-svg" viewBox="0 0 760 280" aria-label="净值与回撤曲线"></svg>
+            </section>
+
+            <div class="side-stack">
+              <section class="card mini-card">
+                <div class="card-head">
+                  <span class="card-title">R 分布</span>
+                  <span class="card-meta">18 笔有初始风险</span>
+                </div>
+                <svg class="histogram" id="histogram-svg" viewBox="0 0 260 104" aria-label="R 倍数分布"></svg>
+              </section>
+              <section class="card mini-card">
+                <div class="card-head">
+                  <span class="card-title">按标签</span>
+                  <span class="card-meta">胜率 / 总 R</span>
+                </div>
+                <div style="margin-top:10px">
+                  <div class="bd-row"><span>标签</span><span class="num">交易</span><span class="num">总 R</span></div>
+                  <div class="bd-row"><span class="strong">突破</span><span class="num">9</span><span class="num gain">+6.2</span></div>
+                  <div class="bd-row"><span class="strong">回调</span><span class="num">6</span><span class="num gain">+3.8</span></div>
+                  <div class="bd-row"><span class="strong">追单</span><span class="num">3</span><span class="num loss">-1.4</span></div>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <section class="card trade-card">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>平仓时间</th>
+                  <th>方向</th>
+                  <th>手数</th>
+                  <th class="right">入场</th>
+                  <th class="right">出场</th>
+                  <th class="right">盈亏</th>
+                  <th class="right">R</th>
+                  <th>标签</th>
+                  <th>出场方式</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="mono">09-08 13:15</td>
+                  <td><span class="side side-buy">买入</span></td>
+                  <td class="mono">0.10</td>
+                  <td class="right mono">3,978.4</td>
+                  <td class="right mono">3,984.1</td>
+                  <td class="right mono gain">+57.00</td>
+                  <td class="right mono gain">+1.1R</td>
+                  <td><span class="tag">突破</span></td>
+                  <td class="mono">手动</td>
+                </tr>
+                <tr>
+                  <td class="mono">09-07 21:30</td>
+                  <td><span class="side side-sell">卖出</span></td>
+                  <td class="mono">0.05</td>
+                  <td class="right mono">3,991.2</td>
+                  <td class="right mono">3,986.8</td>
+                  <td class="right mono gain">+22.00</td>
+                  <td class="right mono gain">+0.8R</td>
+                  <td><span class="tag">回调</span></td>
+                  <td class="mono">止盈</td>
+                </tr>
+                <tr>
+                  <td class="mono">09-06 16:45</td>
+                  <td><span class="side side-buy">买入</span></td>
+                  <td class="mono">0.08</td>
+                  <td class="right mono">3,972.6</td>
+                  <td class="right mono">3,968.2</td>
+                  <td class="right mono loss">-35.20</td>
+                  <td class="right mono loss">-0.7R</td>
+                  <td><span class="tag">追单</span></td>
+                  <td class="mono">止损</td>
+                </tr>
+                <tr>
+                  <td class="mono">09-03 14:00</td>
+                  <td><span class="side side-buy">买入</span></td>
+                  <td class="mono">0.10</td>
+                  <td class="right mono">3,965.0</td>
+                  <td class="right mono">3,978.6</td>
+                  <td class="right mono gain">+136.00</td>
+                  <td class="right mono gain">+2.6R</td>
+                  <td><span class="tag">突破</span></td>
+                  <td class="mono">止盈</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="card notes-card">
+            <div class="notes-head">
+              <span class="card-title">复盘笔记</span>
+              <button class="link-btn">查看全部 3 条</button>
+            </div>
+            <div class="notes-list">
+              <div class="note-item">
+                <div class="note-time">09-03 14:02</div>
+                <p class="note-text">突破回踩不破，按计划入场；止损放结构下方。</p>
+                <span class="tag note-tag">突破</span>
+              </div>
+              <div class="note-item">
+                <div class="note-time">09-06 16:40</div>
+                <p class="note-text">追单，入场离结构太远；下次等回踩。</p>
+                <span class="tag note-tag">追单</span>
+              </div>
+              <div class="note-item">
+                <div class="note-time">09-08 13:05</div>
+                <p class="note-text">减半仓后让利润奔跑，止损移到成本上方。</p>
+                <span class="tag note-tag">持仓</span>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+  const fmt = (n, d = 1) => Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const pad2 = n => String(n).padStart(2, '0');
+
+  /* ---------- 侧边栏 ---------- */
+  function sidebar(kind) {
+    const context = kind === 'list'
+      ? `<div class="context">
+          <div class="context-head"><span class="context-label">复盘总览</span><span class="sim-chip">模拟</span></div>
+          <div class="context-value num">+2,846.20</div>
+          <div class="context-meta"><span>2 个进行中</span><span>12 已完成</span></div>
+            <div class="mini-tape" data-tape="42" data-count="48" data-height="14"></div>
+          <div class="context-foot"><span>累计模拟盈亏</span><span>USD</span></div>
+        </div>`
+      : kind === 'report'
+      ? `<div class="context">
+          <div class="context-head"><span class="context-label">本次复盘</span><span class="sim-chip">已结束</span></div>
+          <div class="context-value num gain">+1,248.60</div>
+          <div class="context-meta"><span>收益率 +12.49%</span><span>最大回撤 -3.8%</span></div>
+          <div class="mini-tape" data-tape="100" data-count="48" data-height="14"></div>
+          <div class="context-foot"><span>XAUUSD · 15m</span><span>09-30</span></div>
+        </div>`
+      : `<div class="context">
+          <div class="context-head"><span class="context-label">本轮会话</span><span class="sim-chip">模拟</span></div>
+          <div class="context-value num">10,310.40</div>
+          <div class="context-meta"><span>余额 10,246.40</span><span class="gain">浮盈 +64.00</span></div>
+          <div class="mini-tape" data-tape="24" data-count="48" data-height="14"></div>
+          <div class="context-foot"><span>XAUUSD · 15m</span><span>24%</span></div>
+        </div>`;
+
+    return `
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <div><div class="brand-name">Tally</div><div class="brand-sub">MT5 交易终端</div></div>
+      </div>
+      <button class="search"><svg class="icon"><use href="#i-search"/></svg><span>搜索命令</span><kbd class="kbd">Ctrl K</kbd></button>
+      ${context}
+      <nav class="nav">
+        <div class="nav-group">
+          <div class="nav-label">工作台</div>
+          <button class="nav-item"><svg class="icon"><use href="#i-dashboard"/></svg>概览</button>
+          <button class="nav-item"><svg class="icon"><use href="#i-candle"/></svg>交易台</button>
+          <button class="nav-item active"><svg class="icon"><use href="#i-history"/></svg>复盘</button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-label">记录</div>
+          <button class="nav-item"><svg class="icon"><use href="#i-book"/></svg>交易日志</button>
+          <button class="nav-item"><svg class="icon"><use href="#i-chart"/></svg>统计报表</button>
+          <button class="nav-item"><svg class="icon"><use href="#i-shield"/></svg>执行质量</button>
+          <button class="nav-item"><svg class="icon"><use href="#i-file"/></svg>审计日志</button>
+        </div>
+      </nav>
+      <div class="sidebar-foot">
+        <button class="nav-item"><svg class="icon"><use href="#i-settings"/></svg>设置</button>
+        <div class="side-status"><span class="dot"></span>复盘模式 · 不连接实盘<span class="ver">v0.6.0</span></div>
+      </div>`;
+  }
+
+  $$('[data-sidebar]').forEach(el => { el.innerHTML = sidebar(el.dataset.sidebar); });
+
+  /* ---------- 设计稿切换 ---------- */
+  $$('.design-tabs [data-screen]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      $$('.design-tabs [data-screen]').forEach(b => b.classList.toggle('active', b === btn));
+      $$('.screen').forEach(s => s.classList.toggle('active', s.id === `screen-${btn.dataset.screen}`));
+    });
+  });
+
+  /* ---------- 新建会话背景：复用列表页 ---------- */
+  const listApp = $('#screen-list .app');
+  if (listApp && !$('#create-bg .app')) {
+    $('#create-bg').appendChild(listApp.cloneNode(true));
+  }
+
+  /* ---------- 行情纸带 ---------- */
+  function renderTape(el) {
+    const progress = Number(el.dataset.tape || 0) / 100;
+    const count = Number(el.dataset.count || 96);
+    const height = Number(el.dataset.height || 22);
+    const w = 240;
+    const step = w / count;
+    const barW = Math.max(0.8, step * 0.52);
+    let out = `<svg viewBox="0 0 ${w} ${height}" preserveAspectRatio="none" aria-hidden="true">`;
+    for (let i = 0; i < count; i += 1) {
+      const played = i / count <= progress;
+      const h = 5 + ((i * 7) % 5) * (height / 20);
+      const x = i * step + (step - barW) / 2;
+      out += `<rect x="${x.toFixed(2)}" y="${(height - h).toFixed(2)}" width="${barW.toFixed(2)}" height="${h.toFixed(2)}" fill="${played ? 'var(--ink)' : 'var(--line-2)'}" opacity="${played ? .88 : .75}"/>`;
+    }
+    const px = progress * w;
+    out += `<line x1="${px}" y1="0" x2="${px}" y2="${height}" stroke="var(--accent)" stroke-width="1.4"/>`;
+    out += `<path d="M${px - 3} 0 h6 l-3 4 z" fill="var(--accent)"/>`;
+    out += '</svg>';
+    el.innerHTML = out;
+  }
+  $$('[data-tape]').forEach(renderTape);
+
+  /* ---------- K 线数据：可复现的合成行情 ---------- */
+  function makeBars() {
+    let seed = 20261008;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const closes = [];
+    let p = 3978.4;
+    for (let i = 0; i < 84; i += 1) {
+      let drift;
+      if (i < 20) drift = 0.42;
+      else if (i < 32) drift = -0.55;
+      else if (i < 50) drift = 0.18;
+      else if (i < 70) drift = 0.48;
+      else drift = -0.04;
+      p += drift + (rnd() - 0.5) * 1.15;
+      p = Math.max(3976.5, Math.min(3997.5, p));
+      closes.push(p);
+    }
+    const entryIndex = 54;
+    const entryTarget = 3986.2;
+    const currentTarget = 3992.6;
+    const shift = entryTarget - closes[entryIndex];
+    for (let i = 0; i < closes.length; i += 1) closes[i] += shift;
+    const ramp = (currentTarget - closes[83]) / (83 - entryIndex);
+    for (let i = entryIndex; i < 84; i += 1) closes[i] += ramp * (i - entryIndex);
+    for (let i = entryIndex; i < 84; i += 1) closes[i] = Math.max(closes[i], 3982.4);
+    closes[83] = currentTarget;
+    return closes.map((close, i) => {
+      const open = i === 0 ? close - 0.4 : closes[i - 1];
+      let high = Math.max(open, close) + rnd() * 0.9;
+      let low = Math.min(open, close) - rnd() * 0.9;
+      if (i >= entryIndex) low = Math.max(low, 3982.0);
+      return { open, close, high, low, volume: 36 + rnd() * 90 };
+    });
+  }
+
+  function renderChart() {
+    const bars = makeBars();
+    const W = 864, H = 732;
+    const padL = 16, padR = 64, padT = 24, padB = 30, volH = 64;
+    const plotW = W - padL - padR;
+    const priceTop = padT;
+    const priceBottom = H - padB - volH - 14;
+    const priceH = priceBottom - priceTop;
+    const entryIndex = 54;
+    const entry = bars[entryIndex].close;
+    const sl = entry - 5.2;
+    const tp = entry + 13.8;
+    const lo = Math.min(...bars.map(b => b.low), sl) - 2;
+    const hi = Math.max(...bars.map(b => b.high), tp) + 2;
+    const y = p => priceTop + ((hi - p) / (hi - lo)) * priceH;
+    const band = plotW / bars.length;
+    const x = i => padL + (i + 0.5) * band;
+    const out = [];
+
+    for (let k = 0; k <= 5; k += 1) {
+      const price = lo + ((hi - lo) * k) / 5;
+      const yy = y(price);
+      out.push(`<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>`);
+      out.push(`<text x="${W - padR + 8}" y="${yy + 3.5}" font-family="var(--mono)" font-size="10" fill="var(--muted)">${fmt(price, 1)}</text>`);
+    }
+
+    const end = Date.UTC(2026, 9, 8, 14, 30);
+    const start = end - 83 * 15 * 60 * 1000;
+    for (let i = 0; i < bars.length; i += 14) {
+      const xx = x(i);
+      out.push(`<line x1="${xx}" y1="${padT}" x2="${xx}" y2="${H - padB}" stroke="var(--line)" stroke-width="1" opacity=".55"/>`);
+      const d = new Date(start + i * 15 * 60 * 1000);
+      const label = i === 0 ? `${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}` : `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
+      out.push(`<text x="${xx}" y="${H - 10}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--muted)">${label}</text>`);
+    }
+
+    const maxVol = Math.max(...bars.map(b => b.volume));
+    bars.forEach((b, i) => {
+      const up = b.close >= b.open;
+      const h = (b.volume / maxVol) * volH;
+      out.push(`<rect x="${x(i) - band * 0.28}" y="${priceBottom + 14 + volH - h}" width="${band * 0.56}" height="${h}" fill="${up ? 'var(--gain)' : 'var(--loss)'}" opacity=".13"/>`);
+    });
+
+    bars.forEach((b, i) => {
+      const up = b.close >= b.open;
+      const color = up ? 'var(--gain)' : 'var(--loss)';
+      const cx = x(i);
+      const bw = Math.max(3, band * 0.52);
+      out.push(`<line x1="${cx}" y1="${y(b.high)}" x2="${cx}" y2="${y(b.low)}" stroke="${color}" stroke-width="1"/>`);
+      const top = y(Math.max(b.open, b.close));
+      const height = Math.max(1, Math.abs(y(b.open) - y(b.close)));
+      out.push(`<rect x="${cx - bw / 2}" y="${top}" width="${bw}" height="${height}" fill="${color}" rx="1"/>`);
+    });
+
+    const lineEnd = W - padR;
+    function tradeLine(price, color, label) {
+      const yy = y(price);
+      out.push(`<line x1="${x(entryIndex)}" y1="${yy}" x2="${lineEnd}" y2="${yy}" stroke="${color}" stroke-width="1" stroke-dasharray="4 3" opacity=".85"/>`);
+      out.push(`<rect x="${lineEnd - 90}" y="${yy - 9}" width="86" height="18" rx="4" fill="var(--card)" stroke="${color}" stroke-opacity=".32"/>`);
+      out.push(`<text x="${lineEnd - 47}" y="${yy + 3.5}" text-anchor="middle" font-family="var(--sans)" font-size="10" fill="${color}">${label}</text>`);
+    }
+    tradeLine(entry, 'var(--accent)', `入场 ${fmt(entry, 1)}`);
+    tradeLine(sl, 'var(--loss)', `SL ${fmt(sl, 1)}`);
+    tradeLine(tp, 'var(--gain)', `TP ${fmt(tp, 1)}`);
+
+    const mx = x(entryIndex), my = y(entry);
+    out.push(`<path d="M${mx} ${my + 9} l4 7 h-8 z" fill="var(--gain)"/>`);
+    out.push(`<rect x="${mx - 26}" y="${my + 18}" width="52" height="17" rx="4" fill="var(--gain-soft)" stroke="var(--gain)" stroke-opacity=".22"/>`);
+    out.push(`<text x="${mx}" y="${my + 30}" text-anchor="middle" font-family="var(--sans)" font-size="10" fill="var(--gain)">买 0.10</text>`);
+
+    const last = bars[bars.length - 1].close;
+    out.push(`<line x1="${padL}" y1="${y(last)}" x2="${lineEnd}" y2="${y(last)}" stroke="var(--accent)" stroke-width="1" stroke-dasharray="2 3" opacity=".55"/>`);
+    out.push(`<rect x="${W - padR + 2}" y="${y(last) - 9}" width="58" height="18" rx="4" fill="var(--accent)"/>`);
+    out.push(`<text x="${W - padR + 31}" y="${y(last) + 3.5}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#fff">${fmt(last, 1)}</text>`);
+
+    const cx = x(bars.length - 1) + band * 0.5;
+    out.push(`<line x1="${cx}" y1="${padT}" x2="${cx}" y2="${H - padB}" stroke="var(--accent)" stroke-width="1.5"/>`);
+    out.push(`<rect x="${Math.min(cx - 42, W - padR - 84)}" y="${padT - 18}" width="84" height="16" rx="4" fill="var(--accent)"/>`);
+    out.push(`<text x="${Math.min(cx, W - padR - 42)}" y="${padT - 7}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#fff">10-08 14:30</text>`);
+
+    $('#chart-svg').innerHTML = out.join('');
+
+    const lastBar = bars[bars.length - 1];
+    const prev = bars[bars.length - 2].close;
+    const diff = lastBar.close - prev;
+    const pct = (diff / prev) * 100;
+    $('#lg-o').textContent = fmt(lastBar.open, 1);
+    $('#lg-h').textContent = fmt(lastBar.high, 1);
+    $('#lg-l').textContent = fmt(lastBar.low, 1);
+    $('#lg-c').textContent = fmt(lastBar.close, 1);
+    $('#lg-change').textContent = `${diff >= 0 ? '+' : ''}${fmt(diff, 1)} (${pct >= 0 ? '+' : ''}${fmt(pct, 2)}%)`;
+    $('#lg-change').className = diff >= 0 ? 'gain' : 'loss';
+
+    const profit = (lastBar.close - entry) * 10;
+    const r = (lastBar.close - entry) / 5.2;
+    $('#pos-entry').textContent = fmt(entry, 1);
+    $('#pos-current').textContent = fmt(lastBar.close, 1);
+    $('#pos-profit').textContent = `${profit >= 0 ? '+' : ''}${fmt(profit, 2)}`;
+    $('#pos-r').textContent = `${r >= 0 ? '+' : ''}${fmt(r, 2)}R`;
+    $('#pos-r').className = r >= 0 ? 'gain' : 'loss';
+    $('#pos-sl').textContent = fmt(sl, 1);
+    $('#pos-tp').textContent = fmt(tp, 1);
+    $('#risk-amount').textContent = `$${fmt(Math.abs(entry - sl) * 10, 2)}`;
+    $('#ticket-sl').value = fmt(sl, 1);
+    $('#ticket-tp').value = fmt(tp, 1);
+  }
+  renderChart();
+
+  /* ---------- 净值与回撤 ---------- */
+  function renderEquity() {
+    const W = 760, H = 280;
+    const padL = 8, padR = 52, padT = 12, padB = 28;
+    let seed = 88;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const vals = [];
+    let v = 10000;
+    for (let i = 0; i < 30; i += 1) {
+      v += (rnd() - 0.42) * 110;
+      if (i === 7) v -= 210;
+      if (i === 15) v += 260;
+      if (i === 22) v -= 150;
+      vals.push(v);
+    }
+    const startValue = 10000;
+    const endValue = 11248.6;
+    const rawStart = vals[0];
+    const rawEnd = vals[vals.length - 1];
+    for (let i = 0; i < vals.length; i += 1) {
+      const t = i / (vals.length - 1);
+      const rawBase = rawStart + (rawEnd - rawStart) * t;
+      vals[i] = vals[i] - rawBase + startValue + (endValue - startValue) * t;
+    }
+    vals[0] = startValue;
+    vals[vals.length - 1] = endValue;
+    const lo = Math.min(...vals) - 120;
+    const hi = Math.max(...vals) + 120;
+    const eqTop = padT;
+    const eqBottom = 194;
+    const x = i => padL + (i * (W - padL - padR)) / (vals.length - 1);
+    const y = v => eqTop + ((hi - v) / (hi - lo)) * (eqBottom - eqTop);
+
+    const out = [];
+    for (let k = 0; k <= 3; k += 1) {
+      const price = lo + ((hi - lo) * k) / 3;
+      const yy = y(price);
+      out.push(`<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>`);
+      out.push(`<text x="${W - padR + 8}" y="${yy + 3.5}" font-family="var(--mono)" font-size="10" fill="var(--muted)">${fmt(price, 0)}</text>`);
+    }
+
+    const line = vals.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
+    const area = `${line} L${x(vals.length - 1).toFixed(1)} ${eqBottom} L${x(0).toFixed(1)} ${eqBottom} Z`;
+    out.push(`<path d="${area}" fill="var(--accent)" opacity=".055"/>`);
+    out.push(`<path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`);
+
+    const lastX = x(vals.length - 1);
+    const lastY = y(vals[vals.length - 1]);
+    out.push(`<circle cx="${lastX}" cy="${lastY}" r="3" fill="var(--accent)"/>`);
+    out.push(`<text x="${lastX - 6}" y="${lastY - 9}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--accent)">11,248.60</text>`);
+
+    const dd = [];
+    let peak = -Infinity;
+    vals.forEach(v => { peak = Math.max(peak, v); dd.push(v - peak); });
+    const ddTop = 212;
+    const ddBottom = 254;
+    const ddLo = Math.min(...dd) - 20;
+    const dy = v => ddTop + (v / ddLo) * (ddBottom - ddTop);
+    const ddLine = dd.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)} ${dy(v).toFixed(1)}`).join(' ');
+    const ddArea = `${ddLine} L${x(dd.length - 1).toFixed(1)} ${ddTop} L${x(0).toFixed(1)} ${ddTop} Z`;
+    out.push(`<path d="${ddArea}" fill="var(--loss)" opacity=".07"/>`);
+    out.push(`<path d="${ddLine}" fill="none" stroke="var(--loss)" stroke-width="1" opacity=".8"/>`);
+    out.push(`<text x="${padL}" y="${ddTop - 4}" font-family="var(--sans)" font-size="10" fill="var(--muted)">回撤</text>`);
+
+    const dates = ['09-01', '09-08', '09-15', '09-22', '09-30'];
+    dates.forEach((label, i) => {
+      const xx = padL + (i * (W - padL - padR)) / (dates.length - 1);
+      out.push(`<text x="${xx}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === dates.length - 1 ? 'end' : 'middle'}" font-family="var(--mono)" font-size="10" fill="var(--muted)">${label}</text>`);
+    });
+
+    $('#equity-svg').innerHTML = out.join('');
+  }
+  renderEquity();
+
+  /* ---------- R 分布 ---------- */
+  function renderHistogram() {
+    const W = 260, H = 104;
+    const labels = ['-2R', '-1R', '0', '+1R', '+2R', '+3R', '+4R'];
+    const counts = [2, 5, 8, 14, 11, 6, 3];
+    const max = Math.max(...counts);
+    const zero = 62;
+    const gap = 12;
+    const barW = 24;
+    const out = [];
+    out.push(`<line x1="4" y1="${zero}" x2="${W - 4}" y2="${zero}" stroke="var(--line-2)" stroke-width="1"/>`);
+    counts.forEach((count, i) => {
+      const x = 8 + i * (barW + gap);
+      const negative = i < 2;
+      const h = (count / max) * (negative ? 28 : 42);
+      const color = negative ? 'var(--loss)' : i === 2 ? 'var(--line-2)' : 'var(--gain)';
+      out.push(`<rect x="${x}" y="${negative ? zero : zero - h}" width="${barW}" height="${h}" rx="2" fill="${color}" opacity=".82"/>`);
+      out.push(`<text x="${x + barW / 2}" y="${H - 4}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--muted)">${labels[i]}</text>`);
+    });
+    $('#histogram-svg').innerHTML = out.join('');
+  }
+  renderHistogram();
+</script>
+</body>
+</html>

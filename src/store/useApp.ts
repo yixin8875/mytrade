@@ -44,6 +44,7 @@ export const THEMES: Theme[] = ['light', 'white', 'dark'];
 export type Page =
   | 'overview'
   | 'trade'
+  | 'replay'
   | 'journal'
   | 'reports'
   | 'executions'
@@ -53,6 +54,7 @@ export type Page =
 export const PAGES: Page[] = [
   'overview',
   'trade',
+  'replay',
   'journal',
   'reports',
   'executions',
@@ -76,7 +78,9 @@ export type SettingsSection =
 /** 用 hash 记住当前页，刷新或从图表 iframe 回来都不会丢 */
 export function routeFromHash(): Page {
   const raw = window.location.hash.replace(/^#\/?/, '');
-  return (PAGES as string[]).includes(raw) ? (raw as Page) : 'overview';
+  // 复盘页用 #/replay/<id> 保存当前会话，取第一段判断页面
+  const head = raw.split('/')[0];
+  return (PAGES as string[]).includes(head) ? (head as Page) : 'overview';
 }
 
 interface AppStore {
@@ -433,7 +437,9 @@ export const useApp = create<AppStore>((set, get) => ({
 
   setPage: (page) => {
     const hash = `#/${page}`;
-    if (window.location.hash !== hash) window.location.hash = hash;
+    // 复盘内部路由（#/replay/<id>）由复盘页自己维护，这里不要覆盖
+    const keepSubRoute = page === 'replay' && /^#\/replay\//.test(window.location.hash);
+    if (!keepSubRoute && window.location.hash !== hash) window.location.hash = hash;
     set({ page });
   },
   setConn: (conn) => set({ conn }),

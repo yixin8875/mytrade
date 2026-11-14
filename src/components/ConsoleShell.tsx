@@ -4,6 +4,7 @@ import {
   BookOpen,
   ChartCandlestick,
   FileClock,
+  History,
   LayoutDashboard,
   RefreshCw,
   Search,
@@ -13,6 +14,9 @@ import {
 import { clsx } from 'clsx';
 import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
 import { fmtMoney } from '../lib/format';
+import { goReplayList, routeSessionId, useReplayRoute } from '../replay/route';
+import { sessionProgress, useReplaySession } from '../replay/store';
+import { Tape } from '../replay/Tape';
 import { useApp, type Page } from '../store/useApp';
 
 const NAV: { label: string; items: { page: Page; label: string; icon: typeof LayoutDashboard }[] }[] =
@@ -22,6 +26,7 @@ const NAV: { label: string; items: { page: Page; label: string; icon: typeof Lay
       items: [
         { page: 'overview', label: '概览', icon: LayoutDashboard },
         { page: 'trade', label: '交易台', icon: ChartCandlestick },
+        { page: 'replay', label: '历史复盘', icon: History },
       ],
     },
     {
@@ -59,6 +64,8 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   const orders = useApp((s) => s.orders);
   const risk = useApp((s) => s.riskStatus);
   const setPaletteOpen = useApp((s) => s.setPaletteOpen);
+  const replayRoute = useReplayRoute();
+  const replaySession = useReplaySession(routeSessionId(replayRoute));
 
   const mode = health?.tradeMode ?? 'readonly';
   const modeLabel = mode === 'readonly' ? '只读' : mode === 'demo' ? '模拟' : '实盘';
@@ -101,20 +108,59 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
         </div>
 
         <div className="border-y border-console-line px-4 py-3">
-          <div className="flex items-center justify-between text-[11px] text-console-muted">
-            <span>余额</span>
-            <span className="flex items-center gap-1.5">
-              <span className={clsx('h-1.5 w-1.5 rounded-full', modeTone)} />
-              {modeLabel}
-            </span>
-          </div>
-          <div className="num mt-1 font-mono text-[20px] font-medium leading-none tracking-tight">
-            {fmtMoney(account?.balance)}
-          </div>
-          <div className="mt-2 flex items-center justify-between text-[11px] text-console-muted">
-            <span>净值</span>
-            <span className="num font-mono text-console-ink-2">{fmtMoney(account?.equity)}</span>
-          </div>
+          {page === 'replay' ? (
+            <>
+              <div className="flex items-center justify-between text-[11px] text-console-muted">
+                <span>复盘 · 模拟账户</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-console-warn" />
+                  不连实盘
+                </span>
+              </div>
+              {replaySession ? (
+                <>
+                  <div className="mt-1 truncate text-[12px] leading-tight text-console-ink">
+                    {replaySession.name}
+                  </div>
+                  <div className="mt-1.5 flex items-baseline justify-between gap-2">
+                    <span className="num font-mono text-[19px] font-medium leading-none tracking-tight">
+                      {fmtMoney(replaySession.equity)}
+                    </span>
+                    <span className="num font-mono text-[10px] text-console-muted">
+                      {Math.round(sessionProgress(replaySession) * 100)}%
+                    </span>
+                  </div>
+                  <Tape
+                    session={replaySession}
+                    height={16}
+                    count={64}
+                    className="mt-1.5 h-4 w-full"
+                  />
+                </>
+              ) : (
+                <div className="mt-1 text-[11px] text-console-muted">未选择复盘会话</div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between text-[11px] text-console-muted">
+                <span>余额</span>
+                <span className="flex items-center gap-1.5">
+                  <span className={clsx('h-1.5 w-1.5 rounded-full', modeTone)} />
+                  {modeLabel}
+                </span>
+              </div>
+              <div className="num mt-1 font-mono text-[20px] font-medium leading-none tracking-tight">
+                {fmtMoney(account?.balance)}
+              </div>
+              <div className="mt-2 flex items-center justify-between text-[11px] text-console-muted">
+                <span>净值</span>
+                <span className="num font-mono text-console-ink-2">
+                  {fmtMoney(account?.equity)}
+                </span>
+              </div>
+            </>
+          )}
         </div>
 
         <nav className="mt-5 px-3">
@@ -133,7 +179,11 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
                   return (
                     <button
                       key={item.page}
-                      onClick={() => setPage(item.page)}
+                      onClick={() => {
+                        // 复盘页有自己的子路由，点导航回列表
+                        if (item.page === 'replay') goReplayList();
+                        setPage(item.page);
+                      }}
                       className={clsx('console-nav', page === item.page && 'console-nav-active')}
                       aria-current={page === item.page ? 'page' : undefined}
                     >
@@ -188,13 +238,27 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
               <span
                 className={clsx(
                   'h-1.5 w-1.5 rounded-full',
-                  terminal ? 'bg-console-gain' : online ? 'bg-console-warn' : 'bg-console-loss',
+                  page === 'replay'
+                    ? 'bg-console-warn'
+                    : terminal
+                      ? 'bg-console-gain'
+                      : online
+                        ? 'bg-console-warn'
+                        : 'bg-console-loss',
                 )}
               />
-              {terminal ? '网关与终端已连接' : online ? '等待 MT5 终端' : '网关未连接'}
+              {page === 'replay'
+                ? '复盘模式 · 不连接实盘'
+                : terminal
+                  ? '网关与终端已连接'
+                  : online
+                    ? '等待 MT5 终端'
+                    : '网关未连接'}
             </div>
             <div className="flex items-center justify-between">
-              <span className={risk?.halted ? 'text-console-loss' : undefined}>{statusText}</span>
+              <span className={risk?.halted && page !== 'replay' ? 'text-console-loss' : undefined}>
+                {page === 'replay' ? '复盘不写实盘日志' : statusText}
+              </span>
               <span className="num font-mono text-console-faint">v{health?.version ?? '—'}</span>
             </div>
           </div>

@@ -9,6 +9,7 @@ import { useApp, type Page, type SettingsSection } from '../store/useApp';
 const PAGE_LABELS: Record<Page, string> = {
   overview: '概览',
   trade: '交易台',
+  replay: '历史复盘',
   journal: '交易日志',
   reports: '统计报表',
   executions: '执行质量',

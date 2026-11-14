@@ -15,6 +15,7 @@ import { TopBar } from './components/TopBar';
 import { UpdatePanel } from './components/UpdatePanel';
 import { WatchlistPanel } from './components/WatchlistPanel';
 import { Overview } from './views/Overview';
+import { ReplayView } from './replay/ReplayView';
 import { JournalView } from './views/Journal';
 import { ReportsView } from './views/Reports';
 import { ExecutionsView } from './views/Executions';
@@ -335,6 +336,7 @@ export default function App() {
         </div>
       )}
 
+      {page === 'replay' && <ReplayView />}
       {page === 'journal' && <JournalView />}
       {page === 'reports' && <ReportsView />}
       {page === 'executions' && <ExecutionsView />}
