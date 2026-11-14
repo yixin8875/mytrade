@@ -91,6 +91,12 @@ export function OrderTicket() {
   const stepsText = templateStepsSummary(template);
   const summaryText = templateSummary(template);
   const riskDeviated = templateArmed && isRiskDeviated(template, risk);
+  // R 标尺的入场价：市价单跟随当前报价，挂单用草稿价。
+  // 市价草稿在图上没有入场线，止损止盈和 R 都以这个价为准。
+  const rulerEntry =
+    draft.type === 'market'
+      ? ((draft.side === 'buy' ? quote?.ask : quote?.bid) ?? 0) || draft.price
+      : draft.price;
 
   useEffect(() => {
     if (!ready || !info || !draft.active) {
@@ -206,7 +212,7 @@ export function OrderTicket() {
     if (!templateArmed || tpTouched || !info || !draft.active) return;
     const target = templateTpTarget({
       side: draft.side,
-      price: draft.price,
+      price: rulerEntry,
       sl: draft.sl,
       rewardR: template.rewardR,
       tick,
@@ -404,11 +410,6 @@ export function OrderTicket() {
         ? '只读模式 · 不会下单'
         : `${draft.side === 'buy' ? '买入' : '卖出'} ${fmtVolume(draft.volume, step)}`;
 
-  // R 标尺的入场价：市价单跟随当前报价，挂单用草稿价
-  const rulerEntry =
-    draft.type === 'market'
-      ? ((draft.side === 'buy' ? quote?.ask : quote?.bid) ?? 0)
-      : draft.price;
   const tpTarget = templateTpTarget({
     side: draft.side,
     price: rulerEntry,
@@ -841,7 +842,9 @@ export function OrderTicket() {
         </div>
 
         <p className="text-[11px] leading-relaxed text-tv-muted">
-          图表上的止损 / 止盈参考线可直接拖动；拖动后才写入，并自动计算手数。
+          {draft.type === 'market'
+            ? '市价单按当前报价成交，图上不设入场点；直接拖动止损 / 止盈线即可，拖动后才写入并自动计算手数。'
+            : '图表上的止损 / 止盈参考线可直接拖动；拖动后才写入，并自动计算手数。'}
         </p>
 
         <div className="space-y-1.5 rounded-lg bg-tv-raised px-3 py-2.5 text-[12px]">

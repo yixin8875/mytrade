@@ -27,8 +27,8 @@ export interface ChartBand {
   color: string;
   label?: string;
   labelColor?: string;
-  /** 区间内的刻度线，例如 1R/2R/3R */
-  marks?: { price: number; text: string }[];
+  /** 区间内的刻度线，例如 1R/2R/3R；priceText 是该价位在价格轴旁的精确价格 */
+  marks?: { price: number; text: string; priceText?: string }[];
 }
 
 interface Position {
@@ -41,7 +41,7 @@ interface BandPosition {
   left: number;
   width: number;
   height: number;
-  marks: { key: string; y: number; text: string }[];
+  marks: { key: string; y: number; text: string; priceText?: string }[];
 }
 
 interface GhostPosition {
@@ -390,7 +390,14 @@ export function ChartChips({
                 marks: (band.marks ?? []).flatMap((mark) => {
                   const y = box.coord(mark.price);
                   if (y == null || y < top - 1 || y > bottom + 1) return [];
-                  return [{ key: `${band.key}:${mark.text}`, y: paneTop + y, text: mark.text }];
+                  return [
+                    {
+                      key: `${band.key}:${mark.text}`,
+                      y: paneTop + y,
+                      text: mark.text,
+                      priceText: mark.priceText,
+                    },
+                  ];
                 }),
               };
             }
@@ -484,17 +491,41 @@ export function ChartChips({
                 {band.label}
               </span>
             )}
-            {pos.marks.map((mark) => (
-              <div
-                key={mark.key}
-                className="absolute inset-x-0 border-t border-white/10"
-                style={{ top: mark.y - pos.top }}
-              >
-                <span className="absolute left-2 -top-[9px] font-mono text-[11px] text-tv-muted">
-                  {mark.text}
-                </span>
-              </div>
-            ))}
+            {pos.marks.map((mark, index) => {
+              // 刻度挨得太近时不标价格，免得两行数字叠在一起
+              const prev = pos.marks[index - 1];
+              const next = pos.marks[index + 1];
+              const tight =
+                (prev != null && Math.abs(mark.y - prev.y) < 13) ||
+                (next != null && Math.abs(next.y - mark.y) < 13);
+              return (
+                <div
+                  key={mark.key}
+                  className="absolute inset-x-0 border-t border-white/15"
+                  style={{ top: mark.y - pos.top }}
+                >
+                  <span className="absolute left-2 -top-[9px] font-mono text-[11px] text-tv-muted">
+                    {mark.text}
+                  </span>
+                  {/* 贴住价格轴一侧的短横线：明确点出这个 R 对应的价位 */}
+                  <span
+                    className="absolute right-0 top-0 w-7 border-t"
+                    style={{
+                      borderColor: band.labelColor ?? 'rgba(255,255,255,0.55)',
+                      opacity: 0.7,
+                    }}
+                  />
+                  {mark.priceText && !tight && (
+                    <span
+                      data-r-price={mark.text}
+                      className="absolute right-9 -top-[7px] whitespace-nowrap font-mono text-[10px] tabular-nums text-tv-muted"
+                    >
+                      {mark.priceText}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         );
       })}

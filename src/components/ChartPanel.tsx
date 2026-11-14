@@ -410,10 +410,11 @@ export function ChartPanel({
     : draft.side === 'buy'
       ? (quote?.ask ?? 0)
       : (quote?.bid ?? 0);
-  const draftEntry = draft.type === 'market' ? marketEntry || draft.price : draft.price;
+  // 市价单没有可画的入场点：计价基准直接取对手价（成交预览价优先）
+  const draftAnchor = draft.type === 'market' ? marketEntry || draft.price : draft.price;
   // 预览回来之前先用 tick 价值估算，拖动时金额不会凭空消失
-  const draftRiskEstimate = estimateProfit(info, draft.volume, draftEntry, draft.sl ?? 0);
-  const draftRewardEstimate = estimateProfit(info, draft.volume, draftEntry, draft.tp ?? 0);
+  const draftRiskEstimate = estimateProfit(info, draft.volume, draftAnchor, draft.sl ?? 0);
+  const draftRewardEstimate = estimateProfit(info, draft.volume, draftAnchor, draft.tp ?? 0);
   const draftRisk = previewMatched ? (preview?.riskAmount ?? draftRiskEstimate) : draftRiskEstimate;
   const draftReward = previewMatched
     ? (preview?.rewardAmount ?? draftRewardEstimate)
@@ -421,17 +422,20 @@ export function ChartPanel({
   const draftRiskApprox = !previewMatched || preview?.riskAmount == null;
   const draftRewardApprox = !previewMatched || preview?.rewardAmount == null;
 
-  if (draft.active && draft.price > 0) {
+  if (draft.active && draftAnchor > 0) {
     const side = draft.side === 'buy' ? '买入' : '卖出';
-    const kind = draft.type === 'limit' ? '限价' : draft.type === 'stop' ? '停损' : '市价';
-    chips.push({
-      key: 'draft:entry',
-      price: draft.price,
-      color: sideColor(draft.side),
-      text: `${kind}${side} ${volume(draft.volume)} @ ${fmtPrice(draft.price, digits)}`,
-      onMove: (price) => patchDraft({ price: roundPrice(price) }),
-      onRemove: () => patchDraft({ active: false }),
-    });
+    // 市价单成交价由行情决定，图上不放入场点，只留止损/止盈
+    if (draft.type !== 'market') {
+      const kind = draft.type === 'limit' ? '限价' : '停损';
+      chips.push({
+        key: 'draft:entry',
+        price: draft.price,
+        color: sideColor(draft.side),
+        text: `${kind}${side} ${volume(draft.volume)} @ ${fmtPrice(draft.price, digits)}`,
+        onMove: (price) => patchDraft({ price: roundPrice(price) }),
+        onRemove: () => patchDraft({ active: false }),
+      });
+    }
     if (draft.sl != null && draft.sl > 0) {
       chips.push({
         key: 'draft:sl',
@@ -493,10 +497,17 @@ export function ChartPanel({
         risk > 0
           ? Array.from(
               { length: Math.min(10, Math.floor(reward / risk + 1e-9)) },
-              (_, index) => ({
-                price: entry + Math.sign(target - entry) * risk * (index + 1),
-                text: `${index + 1}R`,
-              }),
+              (_, index) => {
+                const price = roundPrice(
+                  entry + Math.sign(target - entry) * risk * (index + 1),
+                );
+                return {
+                  price,
+                  text: `${index + 1}R`,
+                  // 刻度旁直接给出价位，拖动止盈时能确定具体价格
+                  priceText: fmtPrice(price, digits),
+                };
+              },
             )
           : [];
       const text = amountText(rewardAmount, rewardApprox);
@@ -516,11 +527,11 @@ export function ChartPanel({
     }
   };
 
-  if (draft.active && draft.price > 0) {
-    // 区间仍按图上入场线绘制，金额用对手价估算（市价单两者可能差一个点差）
+  if (draft.active && draftAnchor > 0) {
+    // 区间从计价基准画起：限价/停损用委托价，市价用对手价
     addBands(
       'draft',
-      draft.price,
+      draftAnchor,
       draft.sl,
       draft.tp,
       draftRisk,
@@ -953,7 +964,10 @@ export function ChartPanel({
   const handleChartClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (!(event.target instanceof HTMLCanvasElement)) return;
     const state = useApp.getState();
-    if (!state.draft.active || crosshairPrice.current == null) return;
+    // 市价单不设委托价：点图表不再改价，只用来拖动止损/止盈
+    if (!state.draft.active || state.draft.type === 'market' || crosshairPrice.current == null) {
+      return;
+    }
     const current = state.symbols.find((item) => item.name === state.symbol);
     state.patchDraft({
       price: shiftRef.current
@@ -970,24 +984,27 @@ export function ChartPanel({
     // 线本身不写字：文字/金额由右边缘的 ChartChips 显示
     const specs = new Map<string, PriceLineSpec>();
 
-    if (draft.active && draft.price > 0) {
-      specs.set('draft:entry', {
-        price: draft.price,
-        color: sideColor(draft.side),
-        text: '',
-        onMove: (price) => {
-          const state = useApp.getState();
-          if (state.draft.active && Math.abs(state.draft.price - price) > 1e-9) {
-            state.patchDraft({ price });
-          }
-        },
-      });
+    if (draft.active && draftAnchor > 0) {
+      // 市价单没有可落的入场点：不画入场线，也不允许拖动它
+      if (draft.type !== 'market') {
+        specs.set('draft:entry', {
+          price: draft.price,
+          color: sideColor(draft.side),
+          text: '',
+          onMove: (price) => {
+            const state = useApp.getState();
+            if (state.draft.active && Math.abs(state.draft.price - price) > 1e-9) {
+              state.patchDraft({ price });
+            }
+          },
+        });
+      }
       const hasSl = draft.sl != null && draft.sl > 0;
       const hasTp = draft.tp != null && draft.tp > 0;
       specs.set('draft:sl', {
         price: hasSl
           ? (draft.sl as number)
-          : guidePrice(chart, draft.price, draft.side === 'buy', info, 1),
+          : guidePrice(chart, draftAnchor, draft.side === 'buy', info, 1),
         color: SIDE_SELL,
         text: hasSl ? '' : '拖动设置止损',
         showPrice: hasSl,
@@ -996,7 +1013,7 @@ export function ChartPanel({
       specs.set('draft:tp', {
         price: hasTp
           ? (draft.tp as number)
-          : guidePrice(chart, draft.price, draft.side !== 'buy', info, 2),
+          : guidePrice(chart, draftAnchor, draft.side !== 'buy', info, 2),
         color: SIDE_BUY,
         text: hasTp ? '' : '拖动设置止盈',
         showPrice: hasTp,
@@ -1051,6 +1068,8 @@ export function ChartPanel({
     }
 
     layer.sync(specs);
+    // draftAnchor 不放进依赖：市价草稿每跳都变，会把价格线同步刷爆。
+    // 止损/止盈引导线只在开启划线时按当时报价定位，用户拖动后以拖动结果为准。
   }, [chart, draft, orders, positions, notify]);
 
   const waiting = conn !== 'open' || !health?.connected || !symbol;

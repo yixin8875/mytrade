@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
-import { fmtSigned, fmtVolume } from '../lib/format';
+import { ChartChips, type ChartBand } from '../components/ChartChips';
+import { fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
 import { useApp, type Theme } from '../store/useApp';
 import type { OrderType, Side, SymbolInfo } from '../gateway/types';
 import { aggregateBars, ReplayDatafeed } from './datafeed';
@@ -20,6 +21,7 @@ import type {
 const UP = '#0f7a55';
 const DOWN = '#c2413a';
 const ACCENT = '#1f5fd6';
+const RULE = '#9a9286';
 
 /** 与交易台主图相同的画线工具与周期收藏 */
 const DRAWING_TOOLS: DrawingToolIdentifier[] = [
@@ -43,9 +45,13 @@ export interface ReplayDraft {
   side: Side;
   type: OrderType;
   price: number;
+  /** 市价单的对手价；图上不画入场线，止损止盈和 R 都以它为准 */
+  reference?: number;
   sl: number | null;
   tp: number | null;
   volume: number;
+  /** 模板最高阶段 R；止盈之外也把阶段刻度画出来 */
+  stepsR?: number;
 }
 
 export interface ReplayDraftPatch {
@@ -226,6 +232,61 @@ export function ReplayChart({
   const orders = session?.orders ?? [];
   const symbolInfo = session?.symbolInfo;
 
+  // R 刻度用交易台同款画法：价格轴一侧短横线 + 精确价格。
+  // 复盘原本用价格线画，会横贯整张图，太长。
+  const rBands: ChartBand[] = [];
+  if (session) {
+    const info = session.symbolInfo;
+    const addRBand = (
+      key: string,
+      side: Side,
+      entry: number,
+      riskPrice: number | null,
+      tp: number | null,
+      stepsR: number,
+    ) => {
+      if (!(entry > 0) || riskPrice == null || !(riskPrice > 0)) return;
+      const targetR = tp != null && tp > 0 ? Math.abs(tp - entry) / riskPrice : 0;
+      const limit = Math.min(10, Math.max(stepsR, Math.floor(targetR + 1e-9)));
+      if (limit < 1) return;
+      const dir = side === 'buy' ? 1 : -1;
+      rBands.push({
+        key,
+        from: entry,
+        to: entry + dir * riskPrice * limit,
+        color: 'transparent',
+        labelColor: RULE,
+        marks: Array.from({ length: limit }, (_, index) => {
+          const price = roundPrice(entry + dir * riskPrice * (index + 1), info);
+          return {
+            price,
+            text: `${index + 1}R`,
+            priceText: fmtPrice(price, info.digits),
+          };
+        }),
+      });
+    };
+    if (draft?.active) {
+      const anchor = draft.type === 'market' ? (draft.reference ?? draft.price) : draft.price;
+      addRBand(
+        'rr:draft',
+        draft.side,
+        anchor,
+        draft.sl != null && draft.sl > 0 ? Math.abs(anchor - draft.sl) : null,
+        draft.tp,
+        draft.stepsR ?? 0,
+      );
+    }
+    for (const position of session.positions) {
+      // 开仓时锁定的 1R 距离；部分平仓、移到保本都不改变它
+      const riskPrice =
+        position.initialRiskPrice ??
+        (position.sl != null ? Math.abs(position.entry - position.sl) : null);
+      const stepsR = Math.max(0, ...(position.steps ?? []).map((step) => step.atR));
+      addRBand(`rr:${position.id}`, position.side, position.entry, riskPrice, position.tp, stepsR);
+    }
+  }
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -382,7 +443,8 @@ export function ReplayChart({
           downY = params.clientY;
         });
         widget.subscribe('mouse_up', (params) => {
-          if (!draftRef.current?.active) return;
+          // 市价单没有委托价可设，点图只用于看盘
+          if (!draftRef.current?.active || draftRef.current.type === 'market') return;
           if (!downAt || Date.now() - downAt > 1500) return;
           if (Math.abs(params.clientX - downX) > 4 || Math.abs(params.clientY - downY) > 4) {
             return;
@@ -504,24 +566,33 @@ export function ReplayChart({
     const { currency } = session.settings;
     const volumeText = (value: number) => fmtVolume(value, session.symbolInfo.volumeStep);
 
-    if (draft?.active && draft.price > 0) {
-      const kind = draft.type === 'limit' ? '限价' : draft.type === 'stop' ? '停损' : '市价';
+    // 市价单成交价由下一根 M1 开盘决定，图上不设入场点
+    const draftAnchor =
+      draft == null
+        ? 0
+        : draft.type === 'market'
+          ? (draft.reference ?? draft.price)
+          : draft.price;
+    if (draft?.active && draftAnchor > 0) {
+      const kind = draft.type === 'limit' ? '限价' : '停损';
       const side = draft.side === 'buy' ? '买入' : '卖出';
-      specs.set('draft:entry', {
-        price: draft.price,
-        color: draft.side === 'buy' ? UP : DOWN,
-        text: `${kind}${side} ${draft.volume.toFixed(2)} @ ${draft.price.toFixed(digits)}`,
-        onMove: (price) =>
-          draftChangeRef.current?.({
-            price: roundPrice(price, session.symbolInfo),
-          }),
-      });
+      if (draft.type !== 'market') {
+        specs.set('draft:entry', {
+          price: draft.price,
+          color: draft.side === 'buy' ? UP : DOWN,
+          text: `${kind}${side} ${draft.volume.toFixed(2)} @ ${draft.price.toFixed(digits)}`,
+          onMove: (price) =>
+            draftChangeRef.current?.({
+              price: roundPrice(price, session.symbolInfo),
+            }),
+        });
+      }
       if (draft.sl != null && draft.sl > 0) {
         // 与交易台一致：止损线直接标出按当前手数打到这里的亏损金额
         const amount = stopAmount(
           draft.side,
           draft.volume,
-          draft.price,
+          draftAnchor,
           draft.sl,
           session.symbolInfo,
         );
@@ -539,7 +610,7 @@ export function ReplayChart({
         const amount = stopAmount(
           draft.side,
           draft.volume,
-          draft.price,
+          draftAnchor,
           draft.tp,
           session.symbolInfo,
         );
@@ -609,6 +680,7 @@ export function ReplayChart({
   return (
     <div className="relative h-full w-full overflow-hidden bg-console-card">
       <div ref={hostRef} className="absolute inset-0" />
+      <ChartChips chips={[]} bands={rBands} host={hostRef} chart={chart} syncCrosshair={false} />
       <div className="pointer-events-none absolute bottom-8 right-[72px] z-10 flex items-center gap-1 text-[10px] text-console-faint">
         <Lock size={14} strokeWidth={1.5} />
         复盘 · 模拟

@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
-import { stepSummary, templateSummary } from '../lib/template';
+import { stepSummary, templateSummary, templateTpTarget } from '../lib/template';
 import { activeTemplate, useApp } from '../store/useApp';
 import { calcProfit, marginFor, positionProfit, roundPrice, roundVolume } from './engine';
 import {
@@ -244,23 +244,41 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   };
 
   const entry = type === 'market' ? (side === 'buy' ? ask : bid) : Number(price) || 0;
+  /** 市价单没有入场点，始终用当前对手价；挂单用票面委托价 */
+  const entryForDisplay =
+    type === 'market' ? entry : draftActive && Number(price) > 0 ? Number(price) : entry;
   const slNumber = sl.trim() ? Number(sl) : null;
   const tpNumber = tp.trim() ? Number(tp) : null;
   const riskAmount =
     info && slNumber != null
-      ? Math.abs(calcProfit(side, Number(volume) || 0, entry, slNumber, info))
+      ? Math.abs(calcProfit(side, Number(volume) || 0, entryForDisplay, slNumber, info))
       : null;
   const rewardAmount =
     info && tpNumber != null
-      ? Math.abs(calcProfit(side, Number(volume) || 0, entry, tpNumber, info))
+      ? Math.abs(calcProfit(side, Number(volume) || 0, entryForDisplay, tpNumber, info))
       : null;
   const rr =
-    slNumber != null && tpNumber != null && Math.abs(entry - slNumber) > 0
-      ? Math.abs(tpNumber - entry) / Math.abs(entry - slNumber)
+    slNumber != null && tpNumber != null && Math.abs(entryForDisplay - slNumber) > 0
+      ? Math.abs(tpNumber - entryForDisplay) / Math.abs(entryForDisplay - slNumber)
       : null;
   const margin =
-    info && entry > 0 ? marginFor(Number(volume) || 0, entry, info, session.settings.leverage) : 0;
+    info && entryForDisplay > 0
+      ? marginFor(Number(volume) || 0, entryForDisplay, info, session.settings.leverage)
+      : 0;
   const riskPct = initial > 0 && riskAmount != null ? (riskAmount / initial) * 100 : null;
+
+  /** 模板启用时按 R 倍数推止盈；模板停用或参数不全时不干预 */
+  const tpTargetFor = (priceValue: number, stop: number | null): number | null => {
+    if (!templateArmed || !info || stop == null || !(stop > 0) || !(priceValue > 0)) return null;
+    return templateTpTarget({
+      side,
+      price: priceValue,
+      sl: stop,
+      rewardR: Math.max(1, template.rewardR),
+      tick: info.tickSize || info.point || 0,
+      digits: info.digits,
+    });
+  };
 
   const toggleDraft = () => {
     if (draftActive) {
@@ -268,8 +286,8 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
       return;
     }
     if (!info) return;
-    // 与交易台一样：开启画线时先把入场价放在当前价，随后点击图表改价
-    setPrice(String(roundPrice(entry, info)));
+    // 挂单才需要图上入场点；市价单成交价由行情决定，画线只用来放止损止盈
+    if (type !== 'market') setPrice(String(roundPrice(entry, info)));
     // 画线期间冻结自动止损止盈，免得线每根 K 线都跟着跑
     setSlTouched(true);
     setTpTouched(true);
@@ -277,6 +295,9 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   };
 
   const handleDraftChange = (patch: { price?: number; sl?: number | null; tp?: number | null }) => {
+    // 市价草稿的入场基准是当前对手价；挂单才用手放的委托价
+    const nextEntry = patch.price ?? entryForDisplay;
+    const nextStop = patch.sl !== undefined ? patch.sl : slNumber;
     if (patch.price != null) setPrice(String(patch.price));
     if (patch.sl !== undefined) {
       setSl(patch.sl == null ? '' : String(patch.sl));
@@ -285,6 +306,16 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
     if (patch.tp !== undefined) {
       setTp(patch.tp == null ? '' : String(patch.tp));
       setTpTouched(true);
+      return;
+    }
+    // 拖动止损或入场线后，模板的止盈按 R 倍数重新跟随（与交易台一致）
+    if (patch.price != null || patch.sl !== undefined) {
+      const target = tpTargetFor(nextEntry, nextStop);
+      if (target != null) {
+        setTp(String(target));
+        // 手动定过止损后，止盈交给模板 R；别再被行情自动跟随覆盖
+        setTpTouched(true);
+      }
     }
   };
 
@@ -310,9 +341,13 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
     side,
     type,
     price: Number(price) || 0,
+    // 市价草稿的计价基准：当前对手价；R 刻度也按它算
+    reference: type === 'market' ? entry : undefined,
     sl: slNumber,
     tp: tpNumber,
     volume: Number(volume) || 0,
+    // 模板阶段可能在止盈之外，图上把阶段 R 也标出来
+    stepsR: templateArmed ? Math.max(0, ...template.steps.map((step) => step.atR)) : 0,
   };
 
   const latestNote = session.notes[session.notes.length - 1];
@@ -1001,7 +1036,11 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                 )}
               >
                 <PenLine size={12} strokeWidth={1.5} />
-                {draftActive ? '划线中 · 点击图表设价' : '画线下单'}
+                {draftActive
+                  ? type === 'market'
+                    ? '划线中 · 拖动设置止损/止盈'
+                    : '划线中 · 点击图表设价'
+                  : '画线下单'}
               </button>
               {draftActive && (
                 <button
@@ -1035,7 +1074,17 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                 </span>
                 <input
                   value={type === 'market' ? fmtPrice(entry, digits) : price}
-                  onChange={(event) => setPrice(event.target.value)}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setPrice(next);
+                    if (slNumber != null) {
+                      const target = tpTargetFor(Number(next), slNumber);
+                      if (target != null) {
+                        setTp(String(target));
+                        setTpTouched(true);
+                      }
+                    }
+                  }}
                   disabled={type === 'market'}
                   className="console-input w-full font-mono text-[11px] disabled:text-console-muted"
                 />
@@ -1051,8 +1100,15 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                 <input
                   value={sl}
                   onChange={(event) => {
-                    setSl(event.target.value);
+                    const next = event.target.value;
+                    setSl(next);
                     setSlTouched(true);
+                    const stop = Number(next);
+                    const target = tpTargetFor(entryForDisplay, stop > 0 ? stop : null);
+                    if (target != null) {
+                      setTp(String(target));
+                      setTpTouched(true);
+                    }
                   }}
                   className="console-input w-full font-mono text-[11px]"
                 />
