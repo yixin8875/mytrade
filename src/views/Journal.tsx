@@ -213,8 +213,8 @@ export function JournalView() {
           />
         </div>
 
-        <div className="mt-4 grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-          <section className="console-card flex flex-col overflow-hidden xl:sticky xl:top-4">
+        <div className="mt-4 grid gap-4">
+          <section className="console-card flex flex-col overflow-hidden">
             <div className="flex items-center gap-1 border-b border-console-line px-3 py-2">
               {BREAKDOWN_TABS.map((item) => (
                 <button
