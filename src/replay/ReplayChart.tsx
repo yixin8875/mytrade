@@ -9,7 +9,7 @@ import { StudyTemplates } from '../components/StudyTemplates';
 import { fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
 import { useApp, type Theme } from '../store/useApp';
 import type { OrderType, Side, SymbolInfo } from '../gateway/types';
-import { aggregateBars, ReplayDatafeed } from './datafeed';
+import { aggregateBars, ReplayDatafeed, tailRange } from './datafeed';
 import { holdingRange, referenceVisible } from './reference';
 import { replayBars, sourceFor } from './source';
 import { useReplay, chartStateKey, drawingsKey, flushViewSaves, queueViewSave } from './store';
@@ -483,17 +483,11 @@ export function ReplayChart({
         const current = state.sessions.find((item) => item.id === sessionId);
         if (current) {
           const resolution = active.resolution() || (timeframe as ResolutionString);
-          const bars = replayBars(current.id);
-          const series = aggregateBars(bars, resolution, current.cursorIndex);
-          const tail = series.slice(-110);
-          if (tail.length > 1) {
-            active
-              .setVisibleRange({
-                from: tail[0].time,
-                to: tail[tail.length - 1].time + 900,
-              })
-              .catch(() => {});
-          }
+          const range = tailRange(
+            aggregateBars(replayBars(current.id), resolution, current.cursorIndex),
+            resolution,
+          );
+          if (range) active.setVisibleRange(range).catch(() => {});
           // 恢复的画布可能停在上次的周期；让工作台标题跟着图表走
           if (active.resolution() !== timeframeRef.current) {
             timeframeChangeRef.current?.(active.resolution());
@@ -562,13 +556,51 @@ export function ReplayChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, revision]);
 
-  // 周期切换：交给图表自己的 datafeed 重新取数
+  // 周期切换：交给图表自己的 datafeed 重新取数。
+  // 库会沿用旧周期的可见范围，右偏移又按「根数」算，切到大周期就会剩一大片空白，
+  // 所以新周期数据加载完后把窗口贴回游标尾部。
   useEffect(() => {
     if (!chart) return;
-    if (chart.resolution() !== (timeframe as ResolutionString)) {
-      chart.setResolution(timeframe as ResolutionString).catch(() => {});
-    }
-  }, [chart, timeframe]);
+    const resolution = timeframe as ResolutionString;
+    let cancelled = false;
+    let anchored = false;
+    const anchor = () => {
+      if (cancelled || anchored) return;
+      anchored = true;
+      const session = useReplay.getState().sessions.find((item) => item.id === sessionId);
+      if (!session) return;
+      const range = tailRange(
+        aggregateBars(replayBars(session.id), resolution, session.cursorIndex),
+        resolution,
+      );
+      if (range) chart.setVisibleRange(range).catch(() => {});
+    };
+    const run = async () => {
+      try {
+        if (chart.resolution() !== resolution) await chart.setResolution(resolution);
+      } catch {
+        return;
+      }
+      if (cancelled) return;
+      // 数据可能要走 datafeed；加载完再定位，避免被库的首次渲染覆盖
+      try {
+        chart.onDataLoaded().subscribe(null, anchor, true);
+      } catch {
+        /* 图表已销毁 */
+      }
+      // 分辨率数据已缓存时不会再触发 onDataLoaded，兜底定时定位
+      window.setTimeout(anchor, 400);
+    };
+    void run();
+    return () => {
+      cancelled = true;
+      try {
+        chart.onDataLoaded().unsubscribe(null, anchor);
+      } catch {
+        /* 图表已销毁 */
+      }
+    };
+  }, [chart, timeframe, sessionId]);
 
   useEffect(() => {
     const widget = widgetRef.current;

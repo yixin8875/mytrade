@@ -121,6 +121,20 @@ export function aggregateLast(
   };
 }
 
+/** 图表尾部可视窗口：最多 110 根，右端至少留一根（分钟周期留 15 分钟）；不足两根时返回 null */
+export function tailRange(
+  series: Bar[],
+  resolution = '1',
+): { from: number; to: number } | null {
+  const tail = series.slice(-110);
+  if (tail.length < 2) return null;
+  const barSeconds = MINUTE_SECONDS[resolution] ?? (resolution === '1W' ? 604800 : 86400);
+  return {
+    from: tail[0].time,
+    to: tail[tail.length - 1].time + Math.max(900, barSeconds),
+  };
+}
+
 interface Listener {
   resolution: string;
   onTick: SubscribeBarsCallback;

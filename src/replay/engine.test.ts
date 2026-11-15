@@ -18,6 +18,7 @@ import {
   setOrderPrice,
   setPositionStops,
   stepSession,
+  volumeForRisk,
 } from './engine';
 import { GOLD_INFO, makeBar, makeOrder, makeSession, makeSettings } from './testUtils';
 
@@ -572,6 +573,42 @@ describe('手数与盈亏口径的边界', () => {
 
   it('缺少 tickSize 时退回 point 取整', () => {
     expect(roundPrice(2000.234, { ...GOLD_INFO, tickSize: 0 })).toBe(2000.23);
+  });
+});
+
+describe('按风险金额反推手数', () => {
+  it('黄金 10 美元止损、风险 50 美元 → 0.05 手', () => {
+    // 每手每 10 美元 = 1000 美元风险，50 / 1000 = 0.05
+    expect(volumeForRisk(50, 2000, 1990, GOLD_INFO)).toBe(0.05);
+  });
+
+  it('止损距离按绝对值算，多空方向不影响结果', () => {
+    expect(volumeForRisk(50, 1990, 2000, GOLD_INFO)).toBe(0.05);
+  });
+
+  it('不足一个步长向下取整到 volumeStep', () => {
+    expect(volumeForRisk(55, 2000, 1990, GOLD_INFO)).toBe(0.05);
+  });
+
+  it('风险过小时抬到最小手数', () => {
+    expect(volumeForRisk(1, 2000, 1990, GOLD_INFO)).toBe(0.01);
+  });
+
+  it('风险过大时封顶到最大手数', () => {
+    expect(volumeForRisk(1e9, 2000, 1990, GOLD_INFO)).toBe(100);
+  });
+
+  it('参数不完整时返回 null，调用方保持原手数', () => {
+    expect(volumeForRisk(0, 2000, 1990, GOLD_INFO)).toBeNull();
+    expect(volumeForRisk(-5, 2000, 1990, GOLD_INFO)).toBeNull();
+    expect(volumeForRisk(50, 0, 1990, GOLD_INFO)).toBeNull();
+    expect(volumeForRisk(50, 2000, 0, GOLD_INFO)).toBeNull();
+    expect(volumeForRisk(50, 2000, 2000, GOLD_INFO)).toBeNull();
+    expect(volumeForRisk(50, 2000, 1990, { ...GOLD_INFO, tickValue: 0 })).toBeNull();
+  });
+
+  it('缺少 tickSize 时用 point 兜底', () => {
+    expect(volumeForRisk(50, 2000, 1990, { ...GOLD_INFO, tickSize: 0 })).toBe(0.05);
   });
 });
 

@@ -53,8 +53,26 @@ export function calcProfit(
   return (diff / tick) * (info.tickValue || 0) * volume;
 }
 
-export function marginFor(
-  volume: number,
+/**
+ * 按目标风险金额反推手数：|入场−止损| 一个 tick 值多少，再拿风险金额去除。
+ * 参数不完整（没有止损、tick 价值为 0 等）时返回 null，调用方保持原手数。
+ */
+export function volumeForRisk(
+  riskAmount: number,
+  entry: number,
+  sl: number,
+  info: SymbolInfo,
+): number | null {
+  if (!(riskAmount > 0) || !(entry > 0) || !(sl > 0)) return null;
+  const tick = info.tickSize || info.point || 0;
+  const distance = Math.abs(entry - sl);
+  if (!(tick > 0) || !(distance > 0) || !(info.tickValue > 0)) return null;
+  const riskPerLot = (distance / tick) * info.tickValue;
+  if (!(riskPerLot > 0)) return null;
+  return roundVolume(riskAmount / riskPerLot, info);
+}
+
+export function marginFor(  volume: number,
   price: number,
   info: SymbolInfo,
   leverage: number,

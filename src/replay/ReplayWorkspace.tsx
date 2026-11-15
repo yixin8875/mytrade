@@ -16,7 +16,13 @@ import { clsx } from 'clsx';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
 import { stepSummary, templateSummary, templateTpTarget } from '../lib/template';
 import { activeTemplate, useApp, type Page } from '../store/useApp';
-import { calcProfit, marginFor, positionProfit, roundPrice, roundVolume } from './engine';
+import {
+  calcProfit,
+  marginFor,
+  positionProfit,
+  roundPrice,
+  volumeForRisk,
+} from './engine';
 import {
   currentBar,
   lastPrice,
@@ -128,6 +134,8 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   const [side, setSide] = useState<Side>('buy');
   const [type, setType] = useState<OrderType>('market');
   const [volume, setVolume] = useState('0.10');
+  /** 用户手动改过手数后，就不要再按风险比例覆盖 */
+  const [volumeTouched, setVolumeTouched] = useState(false);
   const [price, setPrice] = useState('');
   const [sl, setSl] = useState('');
   const [tp, setTp] = useState('');
@@ -163,15 +171,12 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
     ticketInited.current = session.id;
     const reference = side === 'buy' ? ask : bid;
     const distance = defaultStopDistance(info);
-    const tickSize = info.tickSize || info.point || 1e-9;
-    const riskPerLot = (distance / tickSize) * (info.tickValue || 0);
+    const stop = roundPrice(side === 'buy' ? reference - distance : reference + distance, info);
     const riskAmount = (session.settings.initialBalance * riskPercent) / 100;
-    const suggested =
-      riskPerLot > 0 ? roundVolume(riskAmount / riskPerLot, info) : info.minVolume;
+    const suggested = volumeForRisk(riskAmount, reference, stop, info) ?? info.minVolume;
     setVolume(String(suggested));
-    setSl(
-      String(roundPrice(side === 'buy' ? reference - distance : reference + distance, info)),
-    );
+    setVolumeTouched(false);
+    setSl(String(stop));
     setTp(
       String(
         roundPrice(
@@ -209,6 +214,19 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
       );
     }
   }, [ask, bid, info, side, type, slTouched, tpTouched, rewardR]);
+
+  // 风险比例 → 手数：拖动/修改止损、入场价后按目标风险重算；
+  // 用户手动改过手数（或从实盘参照带入手数）就不再覆盖。
+  useEffect(() => {
+    if (!info || volumeTouched || !(riskPercent > 0) || !(initial > 0)) return;
+    const sizingEntry =
+      type === 'market' ? (side === 'buy' ? ask : bid) : Number(price) || 0;
+    const stop = sl.trim() ? Number(sl) : null;
+    if (!(sizingEntry > 0) || stop == null || !(stop > 0)) return;
+    const next = volumeForRisk((initial * riskPercent) / 100, sizingEntry, stop, info);
+    if (next == null) return;
+    setVolume((current) => (Math.abs(Number(current) - next) > 1e-9 ? String(next) : current));
+  }, [info, volumeTouched, riskPercent, initial, type, side, ask, bid, price, sl]);
 
   if (!session) {
     return (
@@ -286,6 +304,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
     setSide(reference.side);
     setType('market');
     setVolume(String(reference.volume));
+    setVolumeTouched(true);
     setSl(reference.sl != null ? String(reference.sl) : '');
     setTp(reference.tp != null ? String(reference.tp) : '');
     setSlTouched(true);
@@ -377,6 +396,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
     setTemplateArmed(next);
     setSlTouched(false);
     setTpTouched(false);
+    setVolumeTouched(false);
     // 模板风险比例变了，手数和默认止损按新风险重算
     ticketInited.current = null;
     useApp
@@ -1040,6 +1060,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                   if (!templateArmed) setTemplateArmed(true);
                   setSlTouched(false);
                   setTpTouched(false);
+                  setVolumeTouched(false);
                   ticketInited.current = null;
                 }}
                 className="console-input h-7 min-w-0 flex-1 text-[11px]"
@@ -1149,7 +1170,11 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                 <span className="mb-1 block text-[10px] text-console-muted">手数</span>
                 <input
                   value={volume}
-                  onChange={(event) => setVolume(event.target.value)}
+                  onChange={(event) => {
+                    setVolume(event.target.value);
+                    // 手动改过手数就按手动值，不再按风险比例自动覆盖
+                    setVolumeTouched(true);
+                  }}
                   inputMode="decimal"
                   className="console-input w-full font-mono text-[11px]"
                 />

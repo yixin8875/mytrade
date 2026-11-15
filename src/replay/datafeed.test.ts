@@ -13,6 +13,7 @@ import {
   bucketStart,
   REPLAY_RESOLUTIONS,
   ReplayDatafeed,
+  tailRange,
 } from './datafeed';
 import { setReplayBars } from './source';
 import { useReplay } from './store';
@@ -126,6 +127,31 @@ describe('aggregateLast', () => {
   it('没有数据时返回 null', () => {
     expect(aggregateLast(BARS, '5', 0)).toBeNull();
     expect(aggregateLast([], '5', 1)).toBeNull();
+  });
+});
+
+describe('tailRange', () => {
+  it('取末尾最多 110 根，右端留 15 分钟空档', () => {
+    const series = Array.from({ length: 200 }, (_, index) =>
+      makeBar(T0 + index * 60, 100, 105, 95, 102, 10),
+    );
+    expect(tailRange(series)).toEqual({
+      from: T0 + 90 * 60,
+      to: T0 + 199 * 60 + 900,
+    });
+  });
+
+  it('不足两根时不定位，让图表保持原样', () => {
+    expect(tailRange([])).toBeNull();
+    expect(tailRange([makeBar(T0, 100, 105, 95, 102, 10)])).toBeNull();
+  });
+
+  it('大周期右端至少留一整根，别把最后一根切掉', () => {
+    const series = [
+      makeBar(T0, 100, 105, 95, 102, 10),
+      makeBar(T0 + 86400, 102, 108, 99, 106, 10),
+    ];
+    expect(tailRange(series, '1D')).toEqual({ from: T0, to: T0 + 2 * 86400 });
   });
 });
 
