@@ -4,9 +4,17 @@ import type {
   ILineDataSourceApi,
 } from '../../../public/charting_library/charting_library';
 
+/** 当前是否有选中的绘图或价格线；用来区分「点空白处」和「点/拖已有线」。 */
+export function hasSelectedDrawing(chart: IChartWidgetApi): boolean {
+  try {
+    return !chart.selection().isEmpty();
+  } catch {
+    return false;
+  }
+}
+
 export interface PriceLineSpec {
-  price: number;
-  text: string;
+  price: number;  text: string;
   color: string;
   /** 允许用户用鼠标上下拖动，默认 true */
   editable?: boolean;

@@ -9,7 +9,8 @@ import { CalendarLayer } from '../chart/tv/calendarLayer';
 import { GatewayDatafeed } from '../chart/tv/datafeed';
 import { PineRunner } from '../chart/tv/pineRunner';
 import { currenciesForSymbol, loadCalendar } from '../lib/calendar';
-import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
+import { PriceLineLayer, hasSelectedDrawing, type PriceLineSpec } from '../chart/tv/priceLines';
+import { shouldPlacePrice } from '../chart/tv/placement';
 import { registerWidget, setActiveSlot } from '../chart/tv/registry';
 import { SessionBoxManager } from '../chart/tv/sessionBoxes';
 import { customIndicators } from '../chart/tv/studies';
@@ -731,15 +732,39 @@ export function ChartPanel({
         const active = widget.activeChart();
         // 图表在 same-origin iframe 里，父容器的 pointerdown 收不到图内点击，
         // 所以用库的 mouse_down 事件把「当前操作的图」和下单品种对齐。
-        widget.subscribe('mouse_down', () => {
+        // 落委托价放到 mouse_up 再判断：只有空白处短促点一下才算，
+        // 否则拖动图表、点/拖止损止盈线都会把入场价一起带走。
+        let downAt = 0;
+        let downX = 0;
+        let downY = 0;
+        widget.subscribe('mouse_down', (params) => {
+          downAt = Date.now();
+          downX = params.clientX;
+          downY = params.clientY;
           setActiveSlot(slot);
           const store = useApp.getState();
           if (symbolRef.current && store.symbol !== symbolRef.current) store.setSymbol(symbolRef.current);
-          // 图表在 iframe 里，父容器收不到点击；落委托价只能借库的 mouse_down 事件。
-          // 市价单没有委托价可落，切换品种时 setSymbol 已把草稿关掉，这里只处理仍激活的挂单草稿。
+        });
+        widget.subscribe('mouse_up', (params) => {
           const current = useApp.getState();
           const price = crosshairPrice.current;
-          if (!current.draft.active || current.draft.type === 'market' || price == null) return;
+          if (
+            !shouldPlacePrice({
+              active: current.draft.active,
+              type: current.draft.type,
+              downAt,
+              upAt: Date.now(),
+              downX,
+              downY,
+              upX: params.clientX,
+              upY: params.clientY,
+              hasSelection: hasSelectedDrawing(active),
+              price,
+            }) ||
+            price == null
+          ) {
+            return;
+          }
           const next = shiftRef.current
             ? snapLevel(price, infoRef.current)
             : roundToTick(price, infoRef.current);

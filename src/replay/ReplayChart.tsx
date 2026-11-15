@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Lock } from 'lucide-react';
-import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
+import { PriceLineLayer, hasSelectedDrawing, type PriceLineSpec } from '../chart/tv/priceLines';
+import { shouldPlacePrice } from '../chart/tv/placement';
 import { ReferenceLayer } from '../chart/tv/referenceLayer';
 import { ChartChips, type ChartBand } from '../components/ChartChips';
 import { DrawingTemplates } from '../components/DrawingTemplates';
@@ -438,9 +439,10 @@ export function ReplayChart({
           if (typeof params?.price === 'number') crosshairPrice.current = params.price;
         });
 
-        // 画线下单：点击图内把入场价放到十字线价格。
+        // 画线下单：在图表空白处短促点一下，把委托价放到十字线价格。
         // 图表在 same-origin iframe 里，父容器的 click 收不到，只能听库的鼠标事件；
-        // 用按下/松开的位移区分「点一下」和拖动画布。
+        // 用按下/松开的位移区分「点一下」和拖动，点/拖止损止盈线时不能落价，
+        // 否则拖止损会把入场价一起带走，模板还会跟着重算止盈。
         let downAt = 0;
         let downX = 0;
         let downY = 0;
@@ -450,17 +452,29 @@ export function ReplayChart({
           downY = params.clientY;
         });
         widget.subscribe('mouse_up', (params) => {
-          // 市价单没有委托价可设，点图只用于看盘
-          if (!draftRef.current?.active || draftRef.current.type === 'market') return;
-          if (!downAt || Date.now() - downAt > 1500) return;
-          if (Math.abs(params.clientX - downX) > 4 || Math.abs(params.clientY - downY) > 4) {
+          const current = draftRef.current;
+          const price = crosshairPrice.current;
+          if (
+            !shouldPlacePrice({
+              active: !!current?.active,
+              type: current?.type ?? 'market',
+              downAt,
+              upAt: Date.now(),
+              downX,
+              downY,
+              upX: params.clientX,
+              upY: params.clientY,
+              hasSelection: hasSelectedDrawing(active),
+              price,
+            }) ||
+            price == null
+          ) {
             return;
           }
-          const price = crosshairPrice.current;
           const info = useReplay
             .getState()
             .sessions.find((item) => item.id === sessionId)?.symbolInfo;
-          if (price == null || !info) return;
+          if (!info) return;
           draftChangeRef.current?.({ price: roundPrice(price, info) });
         });
 
