@@ -4,12 +4,18 @@ import { Search } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { settingsSnapshot } from '../lib/dataExport';
 import { checkForUpdates } from '../lib/updater';
-import { useApp, type Page, type SettingsSection } from '../store/useApp';
+import { goReplayList, goReplaySession } from '../replay/route';
+import { useReplay } from '../replay/store';
+import { useApp, type Page } from '../store/useApp';
+import { SETTINGS_NAV } from './SettingsPanel';
 
 const PAGE_LABELS: Record<Page, string> = {
   overview: '概览',
   trade: '交易台',
   replay: '历史复盘',
+  records: '记录',
+  insights: '分析',
+  discipline: '纪律',
   journal: '交易日志',
   diary: '盈亏日历',
   strategy: '策略手册',
@@ -23,19 +29,6 @@ const PAGE_LABELS: Record<Page, string> = {
   audit: '审计日志',
   settings: '设置',
 };
-
-const SETTINGS: { id: SettingsSection; label: string }[] = [
-  { id: 'appearance', label: '外观' },
-  { id: 'chart', label: '图表' },
-  { id: 'pine', label: 'Pine 脚本' },
-  { id: 'template', label: '交易模板' },
-  { id: 'risk', label: '交易与风控' },
-  { id: 'accounts', label: 'MT5 账户' },
-  { id: 'alerts', label: '告警' },
-  { id: 'data', label: '数据与备份' },
-  { id: 'updates', label: '更新' },
-  { id: 'about', label: '数据与连接' },
-];
 
 interface Action {
   id: string;
@@ -51,7 +44,9 @@ export function CommandPalette() {
   const setOpen = useApp((s) => s.setPaletteOpen);
   const setPage = useApp((s) => s.setPage);
   const setTheme = useApp((s) => s.setTheme);
-  const setSettingsSection = useApp((s) => s.setSettingsSection);
+  const openSettings = useApp((s) => s.openSettings);
+  const exportDays = useApp((s) => s.exportDays);
+  const sessions = useReplay((s) => s.sessions);
   const setCalendarOpen = useApp((s) => s.setCalendarOpen);
   const notify = useApp((s) => s.notify);
 
@@ -88,15 +83,40 @@ export function CommandPalette() {
       },
       {
         id: 'export-journal',
-        label: '导出交易日志 CSV（30 天）',
+        label: `导出交易日志 CSV（${exportDays === 0 ? '全部' : `${exportDays} 天`}）`,
         hint: '数据',
+        keywords: 'export csv',
         run: async () => {
           const out = await gateway.call<{ name: string; rows: number }>(
             'data.export',
-            { kind: 'journal', days: 30 },
+            { kind: 'journal', days: exportDays },
             30_000,
           );
           notify('success', `已导出 ${out.name}（${out.rows} 行）`);
+        },
+      },
+      {
+        id: 'replay-new',
+        label: '新建复盘',
+        hint: '回放',
+        keywords: 'replay new',
+        run: () => {
+          goReplayList();
+          setPage('replay');
+        },
+      },
+      {
+        id: 'replay-resume',
+        label: '继续上次复盘',
+        hint: '回放',
+        keywords: 'replay resume',
+        run: () => {
+          const latest = [...sessions]
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+            .find((item) => !['finished', 'archived', 'error'].includes(item.status));
+          if (latest) goReplaySession(latest.id);
+          else goReplayList();
+          setPage('replay');
         },
       },
       {
@@ -119,20 +139,17 @@ export function CommandPalette() {
         run: () => checkForUpdates(true),
       },
     );
-    for (const section of SETTINGS) {
+    for (const section of SETTINGS_NAV) {
       items.push({
         id: `settings-${section.id}`,
         label: `设置：${section.label}`,
         hint: '设置',
         keywords: `settings ${section.id}`,
-        run: () => {
-          setSettingsSection(section.id);
-          setPage('settings');
-        },
+        run: () => openSettings(section.id),
       });
     }
     return items;
-  }, [notify, setCalendarOpen, setPage, setSettingsSection, setTheme]);
+  }, [exportDays, notify, openSettings, sessions, setCalendarOpen, setPage, setTheme]);
 
   const items = useMemo(() => {
     const text = query.trim().toLowerCase();

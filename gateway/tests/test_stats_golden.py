@@ -13,7 +13,7 @@ class FakeStore:
         self.base_dir = base_dir
         self.rows = rows
 
-    def journal_list(self, limit=200, since=0, login=0):
+    def journal_list(self, limit=200, since=0, login=0, filters=None):
         return self.rows[:limit]
 
     def position_risk_map(self, login, tickets):
@@ -29,7 +29,7 @@ class FakeStore:
         return {}
 
 
-def load_rows() -> tuple[dict, list[dict]]:
+def load_rows() -> tuple[dict, list[dict], int]:
     data = json.loads(FIXTURE.read_text(encoding="utf-8"))
     rows = []
     for trade in data["trades"]:
@@ -57,14 +57,30 @@ def load_rows() -> tuple[dict, list[dict]]:
                 "recorded_at": 0,
             }
         )
-    return data["expected"], rows
+    return data["expected"], rows, int(data.get("serverOffset") or 0)
+
+
+def _by_key(groups: list[dict]) -> dict[str, dict]:
+    return {group["key"]: group for group in groups}
+
+
+def _assert_groups(groups: list[dict], expected: dict[str, dict]) -> None:
+    actual = _by_key(groups)
+    assert sorted(actual) == sorted(expected)
+    for key, values in expected.items():
+        row = actual[key]
+        assert row["trades"] == values["trades"], key
+        assert row["wins"] == values["wins"], key
+        assert row["pnl"] == values["pnl"], key
+        assert row["winRate"] == values["winRate"], key
+        assert row["avgR"] == values["avgR"], key
 
 
 def test_golden_stats_match_shared_expectations(tmp_path):
-    expected, rows = load_rows()
+    expected, rows, server_offset = load_rows()
     journal = TradeJournal(FakeStore(tmp_path, rows))
 
-    stats = journal.stats(days=30, login=1)
+    stats = journal.stats(days=30, login=1, server_offset=server_offset)
     summary = stats["summary"]
 
     assert summary["trades"] == expected["trades"]
@@ -75,5 +91,24 @@ def test_golden_stats_match_shared_expectations(tmp_path):
     assert summary["winRate"] == round(expected["winRate"] * 100, 1)
     assert summary["truncated"] is False
     assert summary["avgDurationSec"] == expected["avgDurationSec"]
+    assert summary["profitFactor"] == expected["profitFactor"]
+    assert summary["expectancy"] == expected["expectancy"]
     assert stats["r"]["trades"] == expected["rTrades"]
     assert stats["r"]["avgR"] == expected["avgR"]
+
+    _assert_groups(stats["byTag"], expected["byTag"])
+    _assert_groups(stats["byDuration"], expected["byDuration"])
+    _assert_groups(stats["byHour"], expected["byHour"])
+
+
+def test_golden_by_hour_follows_server_offset(tmp_path):
+    expected, rows, server_offset = load_rows()
+    journal = TradeJournal(FakeStore(tmp_path, rows))
+
+    shifted = journal.stats(days=30, login=1, server_offset=server_offset + 3600)
+
+    # 偏移 +1 小时后每个开仓小时桶整体前移一小时，笔数不变
+    assert {key: item["trades"] for key, item in _by_key(shifted["byHour"]).items()} == {
+        f"{(int(key[:2]) - 1) % 24:02d}:00": values["trades"]
+        for key, values in expected["byHour"].items()
+    }

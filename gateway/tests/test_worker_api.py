@@ -207,12 +207,14 @@ class FakeJournal:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    def stats(self, days: int, login: int):
-        self.calls.append(("stats", days, login))
+    def stats(self, days: int, login: int, server_offset: int = 0, filters=None):
+        self.calls.append(("stats", days, login, server_offset))
         return {"days": days}
 
-    def sync(self, login: int, force: bool = False) -> int:
-        self.calls.append(("sync", login, force))
+    def sync(
+        self, login: int, force: bool = False, server_offset: int | None = None
+    ) -> int:
+        self.calls.append(("sync", login, force, server_offset))
         return 3
 
 
@@ -501,6 +503,129 @@ def test_分派到日志与设置处理器(worker):
         assert worker._dispatch(method, {"v": 1}) == expected
 
 
+def test_data_export_replay(worker, monkeypatch):
+    import exporter
+
+    seen = {}
+
+    def fake(store, login):
+        seen["store"] = store
+        seen["login"] = login
+        return {"kind": "json", "name": "tally-replay-test.json", "rows": 0}
+
+    monkeypatch.setattr(exporter, "export_replay", fake)
+
+    out = worker._data_export({"kind": "replay"})
+
+    assert out["name"] == "tally-replay-test.json"
+    assert seen["store"] is worker.store
+    assert seen["login"] == worker._login()
+
+
+def test_分派到复盘处理器(worker):
+    worker._replay_list = lambda p: {"list": p}
+    worker._replay_save = lambda p: {"save": p}
+    worker._replay_delete = lambda p: {"delete": p}
+
+    assert worker._dispatch("replay.list", {"v": 1}) == {"list": {"v": 1}}
+    assert worker._dispatch("replay.save", {"v": 1}) == {"save": {"v": 1}}
+    assert worker._dispatch("replay.delete", {"v": 1}) == {"delete": {"v": 1}}
+
+
+def test_journal_filters_only_keeps_known_keys(worker):
+    assert worker._journal_filters({}) == {}
+    assert worker._journal_filters({"filters": "nope"}) == {}
+    assert worker._journal_filters(
+        {
+            "filters": {
+                "symbol": "XAUUSD",
+                "tag": "",
+                "result": "win",
+                "reviewed": 0,
+                "unknown": "丢弃",
+            }
+        }
+    ) == {"symbol": "XAUUSD", "result": "win", "reviewed": 0}
+
+
+def test_journal_list_all_history_and_offset(worker):
+    worker._journal = types.SimpleNamespace(sync=lambda *a, **k: 0)
+    worker._server_offset = 3600
+    worker.store.journal_list = lambda **kw: worker.store.calls.append(("journal_list", kw)) or []
+
+    worker._journal_list({"days": 0, "limit": 50, "filters": {"symbol": "XAUUSD"}})
+    _, all_history = worker.store.calls[-1]
+    assert all_history["since"] == 0
+    assert all_history["limit"] == 50
+    assert all_history["filters"] == {"symbol": "XAUUSD"}
+    assert all_history["login"] == 111
+
+    worker._journal_list({"days": 30})
+    _, window = worker.store.calls[-1]
+    expected = int(time.time()) - 30 * 86400 + 3600
+    assert abs(window["since"] - expected) <= 5
+
+
+def test_server_offset_value_unknown_until_known(worker):
+    # 没从真实 tick 推算过时不能把 0 当真实时区
+    assert worker._server_offset_value() is None
+    worker._server_offset = 7200
+    worker._server_offset_known = True
+    assert worker._server_offset_value() == 7200
+
+
+def test_note_server_time_rounds_and_clamps(worker, monkeypatch):
+    patched = types.SimpleNamespace(time=lambda: 1_700_000_000, monotonic=time.monotonic)
+    monkeypatch.setattr(mt5_worker, "time", patched)
+
+    worker._note_server_time(types.SimpleNamespace(time=1_700_000_000 + 3630))
+    assert worker._server_offset == 3600
+    assert worker._server_offset_known is True
+
+    # 周末/异常 tick 的差值超过 14 小时：宁可保留原值
+    worker._note_server_time(types.SimpleNamespace(time=1_700_000_000 + 40 * 3600))
+    assert worker._server_offset == 3600
+    # 0 或没有 time 的 tick 直接忽略
+    worker._note_server_time(types.SimpleNamespace(time=0))
+    assert worker._server_offset == 3600
+
+
+def test_refresh_server_offset_uses_watchlist_and_throttles(worker, monkeypatch):
+    worker._subs = {}
+    worker.store.state["watchlist"] = ["XAUUSD"]
+    calls: list[str] = []
+    now = time.time()
+    monkeypatch.setattr(
+        mt5_worker.mt5,
+        "symbol_info_tick",
+        lambda symbol: calls.append(symbol) or types.SimpleNamespace(time=now + 7200),
+        raising=False,
+    )
+
+    worker._refresh_server_offset()
+
+    assert calls == ["XAUUSD"]
+    assert worker._server_offset == 7200
+    assert worker._server_offset_known is True
+
+    # 30 秒内重复轮询 health 不重复校准
+    worker._refresh_server_offset()
+    assert calls == ["XAUUSD"]
+
+
+def test_refresh_server_offset_skips_when_disconnected(worker, monkeypatch):
+    worker._connected = False
+    calls: list[str] = []
+    monkeypatch.setattr(
+        mt5_worker.mt5, "symbol_info_tick", lambda symbol: calls.append(symbol), raising=False
+    )
+
+    worker._refresh_server_offset()
+
+    assert calls == []
+    assert getattr(worker, "_server_offset_known", False) is False
+
+
 def test_只读查询方法(worker):
     worker._positions = [{"ticket": 1}]
     worker._orders = [{"ticket": 2}]
@@ -511,6 +636,9 @@ def test_只读查询方法(worker):
     assert worker._dispatch("executions.stats", {}) == {"days": 30}
     assert worker._dispatch("executions.stats", {"days": 7}) == {"days": 7}
     assert ("execution_stats", (7, 111)) in worker.store.calls
+    # 0 = 全部历史，不能被默认值 30 吞掉
+    assert worker._dispatch("executions.stats", {"days": 0}) == {"days": 0}
+    assert ("execution_stats", (0, 111)) in worker.store.calls
 
     accounts = worker._dispatch("accounts.list", {})
     assert accounts["activeId"] == "a"
@@ -518,7 +646,7 @@ def test_只读查询方法(worker):
 
     assert worker._dispatch("journal.stats", {}) == {"days": 30}
     assert worker._dispatch("journal.sync", {}) == {"written": 3}
-    assert ("sync", 111, True) in worker._journal.calls
+    assert ("sync", 111, True, None) in worker._journal.calls
 
     assert worker._dispatch("intents.list", {}) == []
     assert ("recent_intents", (50, 111)) in worker.store.calls

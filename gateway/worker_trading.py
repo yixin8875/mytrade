@@ -4,6 +4,33 @@ from worker_base import *  # noqa: F401,F403
 from worker_base import _num  # noqa: F401
 
 
+def _check_stops(side: str, ref: float, sl: float, tp: float, info: Any, label: str) -> None:
+    """改单时先按方向/最小距离校验；0 表示清除该价位，不参与校验。"""
+    stops = float(getattr(info, "trade_stops_level", 0) or 0) * float(
+        getattr(info, "point", 0) or 0
+    )
+    if sl > 0:
+        if side == "buy" and sl >= ref:
+            raise GatewayError("BAD_STOPS", f"{label}止损必须低于入场价")
+        if side == "sell" and sl <= ref:
+            raise GatewayError("BAD_STOPS", f"{label}止损必须高于入场价")
+        if stops > 0 and abs(ref - sl) < stops:
+            raise GatewayError(
+                "STOPS_LEVEL",
+                f"止损距离小于券商最小 {info.trade_stops_level} 点（{stops:.{info.digits}f}）",
+            )
+    if tp > 0:
+        if side == "buy" and tp <= ref:
+            raise GatewayError("BAD_STOPS", f"{label}止盈必须高于入场价")
+        if side == "sell" and tp >= ref:
+            raise GatewayError("BAD_STOPS", f"{label}止盈必须低于入场价")
+        if stops > 0 and abs(ref - tp) < stops:
+            raise GatewayError(
+                "STOPS_LEVEL",
+                f"止盈距离小于券商最小 {info.trade_stops_level} 点（{stops:.{info.digits}f}）",
+            )
+
+
 class WorkerTrading:
     def _analyze(self, p: dict) -> dict:
         if not self._connected:
@@ -582,8 +609,11 @@ class WorkerTrading:
         order = found[0]
         info = self._ensure_symbol(order.symbol)
         price = align_price(_num(p.get("price"), float(order.price_open)), info)
-        sl = align_price(_num(p.get("sl")), info) if p.get("sl") else float(order.sl)
-        tp = align_price(_num(p.get("tp")), info) if p.get("tp") else float(order.tp)
+        # 传 0 = 清除该价位；不传才保留原值
+        sl = align_price(_num(p.get("sl")), info) if p.get("sl") is not None else float(order.sl)
+        tp = align_price(_num(p.get("tp")), info) if p.get("tp") is not None else float(order.tp)
+        side = "buy" if int(order.type) % 2 == 0 else "sell"
+        _check_stops(side, float(order.price_open), sl, tp, info, "挂单")
         request = {
             "action": mt5.TRADE_ACTION_MODIFY,
             "order": ticket,
@@ -628,6 +658,13 @@ class WorkerTrading:
         info = self._ensure_symbol(position.symbol)
         sl = align_price(_num(p.get("sl")), info) if p.get("sl") is not None else float(position.sl)
         tp = align_price(_num(p.get("tp")), info) if p.get("tp") is not None else float(position.tp)
+        side = "buy" if int(position.type) == 0 else "sell"
+        # 方向校验用当前可平仓价：买单按 bid、卖单按 ask；拿不到报价时退回开仓价
+        tick = mt5.symbol_info_tick(position.symbol)
+        ref = float(position.price_open)
+        if tick is not None:
+            ref = float(tick.bid if side == "buy" else tick.ask)
+        _check_stops(side, ref, sl, tp, info, "持仓")
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "symbol": position.symbol,

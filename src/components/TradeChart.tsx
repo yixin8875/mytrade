@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { gateway } from '../gateway/client';
+import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, signedClass } from '../lib/format';
+import { fmtLocalTime, rowOffset } from '../lib/time';
 import {
   buildTradeChart,
   chartWindow,
@@ -23,17 +25,6 @@ const RESOLUTION_LABELS: Record<string, string> = {
   '240': '4 小时',
 };
 
-function fmtTime(ts: number): string {
-  if (!ts) return '—';
-  return new Date(ts * 1000).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-}
-
 function fmtDuration(sec: number): string {
   if (!Number.isFinite(sec) || sec <= 0) return '—';
   if (sec < 60) return `${Math.round(sec)} 秒`;
@@ -44,6 +35,8 @@ function fmtDuration(sec: number): string {
 
 /** 按持仓时段从 MT5 取 K 线，画出入场、出场、持仓区间和止损止盈 */
 export function TradeChart({ record }: { record: JournalRecord }) {
+  const serverOffset = useApp((s) => s.health?.serverOffset ?? 0);
+  const offset = rowOffset(record, serverOffset);
   const [resolution, setResolution] = useState<string>('auto');
   const effective = resolution === 'auto' ? chooseResolution(record.duration_sec) : resolution;
   const [bars, setBars] = useState<Bar[]>([]);
@@ -348,8 +341,8 @@ export function TradeChart({ record }: { record: JournalRecord }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px]">
-        <Metric label="入场" value={price(record.entry_price)} hint={fmtTime(record.open_time)} />
-        <Metric label="出场" value={price(record.exit_price)} hint={fmtTime(record.close_time)} />
+        <Metric label="入场" value={price(record.entry_price)} hint={fmtLocalTime(record.open_time, offset)} />
+        <Metric label="出场" value={price(record.exit_price)} hint={fmtLocalTime(record.close_time, offset)} />
         <Metric label="持仓" value={fmtDuration(record.duration_sec)} />
         <Metric
           label="盈亏"

@@ -5,11 +5,12 @@ import { gateway } from '../gateway/client';
 import type { RuleCheck, TradeNoteDetail } from '../gateway/types';
 import { isShotMeta, shotY, type ShotMeta } from '../chart/tv/shotMeta';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
+import { usePrivacyMask } from '../lib/privacy';
 import { shotUrl } from '../lib/shots';
 import { useApp } from '../store/useApp';
 import { referenceVisible } from './reference';
 import { fmtDateTime } from './time';
-import type { ReplaySession } from './types';
+import type { ReplayReference, ReplaySession } from './types';
 
 const CLOSED_BY: Record<string, string> = {
   sl: '止损',
@@ -32,6 +33,101 @@ function ruleMark(followed: boolean | null): { text: string; tone: string } {
   return { text: '未评估', tone: 'text-console-faint' };
 }
 
+/** 实盘交易的只读摘要；参照面板与报告共用同一份字段与文案 */
+export function ReferenceSummary({
+  reference,
+  digits,
+  className,
+}: {
+  reference: ReplayReference;
+  digits: number;
+  className?: string;
+}) {
+  return (
+    <div
+      className={clsx(
+        'grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] text-console-muted',
+        className,
+      )}
+    >
+      <span>
+        方向{' '}
+        <b
+          className={clsx(
+            'font-normal',
+            reference.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
+          )}
+        >
+          {reference.side === 'buy' ? '多' : '空'} {fmtVolume(reference.volume)}
+        </b>
+      </span>
+      <span className="text-right">
+        盈亏{' '}
+        <b className={clsx('font-mono font-normal', signedClass(reference.profit))}>
+          {fmtSigned(reference.profit)}
+        </b>
+        {reference.r != null && (
+          <span className={clsx('ml-1 font-mono', signedClass(reference.r))}>
+            {fmtSigned(reference.r)}R
+          </span>
+        )}
+      </span>
+      <span>
+        入场{' '}
+        <b className="font-mono font-normal text-console-ink-2">
+          {fmtPrice(reference.entry, digits)}
+        </b>
+      </span>
+      <span className="text-right">
+        出场{' '}
+        <b className="font-mono font-normal text-console-ink-2">
+          {fmtPrice(reference.exit, digits)}
+        </b>
+      </span>
+      <span className="col-span-2 font-mono text-console-faint">
+        {fmtDateTime(reference.openTs)} → {fmtDateTime(reference.closeTs)}
+      </span>
+      <span>
+        持仓{' '}
+        <b className="font-normal text-console-ink-2">
+          {fmtDuration(reference.closeTs - reference.openTs)}
+        </b>
+      </span>
+      <span className="text-right">
+        平仓{' '}
+        <b className="font-normal text-console-ink-2">
+          {reference.closedBy ? CLOSED_BY[reference.closedBy] ?? reference.closedBy : '—'}
+        </b>
+      </span>
+      <span>
+        MFE{' '}
+        <b className="font-mono font-normal text-console-ink-2">{fmtMoney(reference.mfe)}</b>
+      </span>
+      <span className="text-right">
+        MAE{' '}
+        <b className="font-mono font-normal text-console-ink-2">{fmtMoney(reference.mae)}</b>
+      </span>
+      <span>
+        止损{' '}
+        <b className="font-mono font-normal text-console-ink-2">
+          {fmtPrice(reference.sl, digits)}
+        </b>
+      </span>
+      <span className="text-right">
+        止盈{' '}
+        <b className="font-mono font-normal text-console-ink-2">
+          {fmtPrice(reference.tp, digits)}
+        </b>
+      </span>
+      {reference.tag && (
+        <span className="col-span-2">
+          标签 <b className="font-normal text-console-ink-2">{reference.tag}</b>
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** 回放右侧的「参照」页签：实盘成交、当时的复盘与截图，全部只读 */
 export function ReferencePanel({
   session,
@@ -43,8 +139,10 @@ export function ReferencePanel({
   onToggleVisible: () => void;
 }) {
   const reference = session.reference;
+  usePrivacyMask();
   const currentLogin = useApp((s) => s.account?.login ?? null);
   const setPage = useApp((s) => s.setPage);
+  const setJournalFocus = useApp((s) => s.setJournalFocus);
   const [note, setNote] = useState<TradeNoteDetail | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
   const [noteLoading, setNoteLoading] = useState(true);
@@ -116,82 +214,7 @@ export function ReferencePanel({
           </div>
         )}
 
-        <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] text-console-muted">
-          <span>
-            方向{' '}
-            <b
-              className={clsx(
-                'font-normal',
-                reference.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
-              )}
-            >
-              {reference.side === 'buy' ? '多' : '空'} {fmtVolume(reference.volume)}
-            </b>
-          </span>
-          <span className="text-right">
-            盈亏{' '}
-            <b className={clsx('font-mono font-normal', signedClass(reference.profit))}>
-              {fmtSigned(reference.profit)}
-            </b>
-            {reference.r != null && (
-              <span className={clsx('ml-1 font-mono', signedClass(reference.r))}>
-                {fmtSigned(reference.r)}R
-              </span>
-            )}
-          </span>
-          <span>
-            入场{' '}
-            <b className="font-mono font-normal text-console-ink-2">
-              {fmtPrice(reference.entry, digits)}
-            </b>
-          </span>
-          <span className="text-right">
-            出场{' '}
-            <b className="font-mono font-normal text-console-ink-2">
-              {fmtPrice(reference.exit, digits)}
-            </b>
-          </span>
-          <span className="col-span-2 font-mono text-console-faint">
-            {fmtDateTime(reference.openTs)} → {fmtDateTime(reference.closeTs)}
-          </span>
-          <span>
-            持仓{' '}
-            <b className="font-normal text-console-ink-2">
-              {fmtDuration(reference.closeTs - reference.openTs)}
-            </b>
-          </span>
-          <span className="text-right">
-            平仓{' '}
-            <b className="font-normal text-console-ink-2">
-              {reference.closedBy ? CLOSED_BY[reference.closedBy] ?? reference.closedBy : '—'}
-            </b>
-          </span>
-          <span>
-            MFE{' '}
-            <b className="font-mono font-normal text-console-ink-2">{fmtMoney(reference.mfe)}</b>
-          </span>
-          <span className="text-right">
-            MAE{' '}
-            <b className="font-mono font-normal text-console-ink-2">{fmtMoney(reference.mae)}</b>
-          </span>
-          <span>
-            止损{' '}
-            <b className="font-mono font-normal text-console-ink-2">
-              {fmtPrice(reference.sl, digits)}
-            </b>
-          </span>
-          <span className="text-right">
-            止盈{' '}
-            <b className="font-mono font-normal text-console-ink-2">
-              {fmtPrice(reference.tp, digits)}
-            </b>
-          </span>
-          {reference.tag && (
-            <span className="col-span-2">
-              标签 <b className="font-normal text-console-ink-2">{reference.tag}</b>
-            </span>
-          )}
-        </div>
+        <ReferenceSummary reference={reference} digits={digits} className="mt-2.5" />
       </div>
 
       {(reference.fills?.length ?? 0) > 0 && (
@@ -258,7 +281,10 @@ export function ReferencePanel({
           <div className="mt-2 flex items-center gap-2 text-[10px] text-console-muted">
             这笔还没复盘。
             <button
-              onClick={() => setPage('journal')}
+              onClick={() => {
+                if (reference) setJournalFocus(reference.positionId);
+                setPage('journal');
+              }}
               className="text-console-accent hover:underline"
             >
               去复盘

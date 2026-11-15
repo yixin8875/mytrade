@@ -16,6 +16,25 @@ function fmtClock(ts: string): string {
 
 /** 审计日志页：按 UTC 日期查询网关 JSONL 审计记录 */
 export function AuditView() {
+  return (
+    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
+      <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-[24px] font-medium tracking-[-0.01em]">审计日志</h1>
+            <p className="mt-1.5 text-[13px] text-console-muted">
+              UTC 日期 · JSONL 文件 · 最多返回 300 条
+            </p>
+          </div>
+        </header>
+        <AuditPanel />
+      </div>
+    </div>
+  );
+}
+
+/** 设置 → 诊断分区复用：查询、筛选与立即对账，不带页面外框 */
+export function AuditPanel() {
   const conn = useApp((s) => s.conn);
   const notify = useApp((s) => s.notify);
 
@@ -68,24 +87,20 @@ export function AuditView() {
   };
 
   return (
-    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
-      <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-[24px] font-medium tracking-[-0.01em]">审计日志</h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">
-              UTC 日期 · JSONL 文件 · 最多返回 300 条
-            </p>
-          </div>
-          <button
-            onClick={reconcile}
-            className="console-btn console-btn-secondary"
-            title="按 clientOrderId 与 MT5 挂单/持仓/近 7 天成交重新对账"
-          >
-            <RefreshCw size={14} strokeWidth={1.5} />
-            立即对账
-          </button>
-        </header>
+    <>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[12px] text-console-muted">
+          UTC 日期 · JSONL 文件 · 最多返回 300 条
+        </p>
+        <button
+          onClick={reconcile}
+          className="console-btn console-btn-secondary"
+          title="按 clientOrderId 与 MT5 挂单/持仓/近 7 天成交重新对账"
+        >
+          <RefreshCw size={14} strokeWidth={1.5} />
+          立即对账
+        </button>
+      </div>
 
         <section className="console-card mt-6 p-5">
           <div className="flex flex-wrap items-end gap-3">
@@ -175,7 +190,6 @@ export function AuditView() {
         <p className="mt-4 text-[11px] text-console-faint">
           {loading ? '正在读取审计文件…' : '审计记录由网关写入 gateway/audit，按 UTC 日期分文件。'}
         </p>
-      </div>
-    </div>
+    </>
   );
 }

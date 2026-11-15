@@ -243,6 +243,32 @@ def export_settings(
     }
 
 
+def export_replay(store: Store, login: int) -> dict:
+    """复盘会话整包导出（JSON）：换机、归档或做外部统计时带走训练记录。
+
+    会话体已经是可序列化的快照（K 线不存），图表视图与画线按字符串原样带出。
+    """
+    sessions = store.replay_list(login, limit=500)
+    path = _folder(store.base_dir, "exports") / f"tally-replay-{_stamp()}.json"
+    payload = {
+        "version": 1,
+        "app": {"name": "Tally", "version": APP_VERSION},
+        "exportedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "login": int(login),
+        "sessions": sessions,
+    }
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return {
+        "kind": "json",
+        "name": path.name,
+        "path": str(path),
+        "rows": len(sessions),
+        "bytes": path.stat().st_size,
+    }
+
+
 def _snapshot_database(base: Path, target: Path) -> None:
     source = base / "data" / "mytrade.db"
     if not source.is_file():

@@ -15,7 +15,7 @@ import {
   winFlags,
 } from '../lib/trends';
 import { useApp } from '../store/useApp';
-import { ReferenceCapacityDialog, useTradeReplay } from '../replay/useTradeReplay';
+import { useTradeReplay } from '../replay/useTradeReplay';
 import type { JournalRecord, TrendSeries, TrendTrade } from '../gateway/types';
 
 const RANGES = [90, 180, 365];
@@ -459,12 +459,6 @@ function ScatterCard({
           )}
         </div>
       )}
-
-      <ReferenceCapacityDialog
-        pending={replay.pending}
-        onConfirm={() => replay.confirm()}
-        onCancel={replay.cancel}
-      />
     </section>
   );
 }

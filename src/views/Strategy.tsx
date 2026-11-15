@@ -23,6 +23,7 @@ const EMPTY_FORM: BookForm = { name: '', description: '', rules: '' };
 export function StrategyView() {
   const notify = useApp((s) => s.notify);
   const activeLogin = useApp((s) => s.account?.login ?? 0);
+  const strategyNew = useApp((s) => s.strategyNew);
   usePrivacyMask();
 
   const [books, setBooks] = useState<Playbook[]>([]);
@@ -58,6 +59,11 @@ export function StrategyView() {
   useEffect(() => {
     void load();
   }, [load, activeLogin]);
+
+  // 从交易复盘/下单票的「新建策略」入口进来时，直接打开空白表单
+  useEffect(() => {
+    if (strategyNew > 0) setForm({ ...EMPTY_FORM });
+  }, [strategyNew]);
 
   const selectedBook = books.find((book) => book.id === selectedId) ?? null;
   const selectedStats = adherence?.books.find((book) => book.id === selectedId) ?? null;

@@ -54,7 +54,8 @@ describe('analysis helpers', () => {
     expect(durationBucket(60)).toBe('lt15');
     expect(durationBucket(30 * 60)).toBe('15-60');
     expect(durationBucket(2 * 3600)).toBe('1-4h');
-    expect(durationBucket(5 * 3600)).toBe('gt4h');
+    expect(durationBucket(5 * 3600)).toBe('4-24h');
+    expect(durationBucket(30 * 3600)).toBe('gt24h');
   });
 
   it('日期转星期', () => {
@@ -84,7 +85,8 @@ describe('analysis helpers', () => {
     expect(applyFilters(trades, { ...EMPTY_FILTERS, result: 'win' }, CTX)).toHaveLength(2);
     expect(applyFilters(trades, { ...EMPTY_FILTERS, result: 'loss' }, CTX)).toHaveLength(1);
     expect(applyFilters(trades, { ...EMPTY_FILTERS, hours: ['6-11'] }, CTX)).toHaveLength(3);
-    expect(applyFilters(trades, { ...EMPTY_FILTERS, durations: ['gt4h'] }, CTX)).toHaveLength(0);
+    expect(applyFilters(trades, { ...EMPTY_FILTERS, durations: ['gt24h'] }, CTX)).toHaveLength(0);
+    expect(applyFilters(trades, { ...EMPTY_FILTERS, durations: ['4-24h'] }, CTX)).toHaveLength(0);
     expect(isFiltered({ ...EMPTY_FILTERS })).toBe(false);
     expect(isFiltered({ ...EMPTY_FILTERS, result: 'win' })).toBe(true);
   });

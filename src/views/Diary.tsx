@@ -11,7 +11,7 @@ import {
 import { gateway } from '../gateway/client';
 import { AiReviewPanel } from '../components/AiReviewPanel';
 import { TradeReviewDrawer } from '../components/TradeReviewDrawer';
-import { ReferenceCapacityDialog, useTradeReplay } from '../replay/useTradeReplay';
+import { useTradeReplay } from '../replay/useTradeReplay';
 import { fmtSigned, signedClass } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
 import { downloadReviewCard, downloadReviewCardPdf } from '../lib/reviewCard';
@@ -619,12 +619,6 @@ export function DiaryView() {
           }
           void loadCalendar(month);
         }}
-      />
-
-      <ReferenceCapacityDialog
-        pending={replay.pending}
-        onConfirm={() => replay.confirm()}
-        onCancel={replay.cancel}
       />
     </div>
   );

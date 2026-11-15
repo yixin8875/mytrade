@@ -32,7 +32,10 @@ export function LayoutIcon({
   );
 }
 
-/** 按图表数量分行列出所有布局 */
+/** 常用布局：覆盖单图到八图最常见的排法，其余收进「更多」 */
+const COMMON_LAYOUTS = ['1', '2v', '2h', '4', '6', '8'];
+
+/** 按图表数量分行列出布局：默认只显示常用 6 个，展开后看全部 */
 export function LayoutGallery({
   value,
   onChange,
@@ -40,35 +43,55 @@ export function LayoutGallery({
   value: string;
   onChange: (id: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const common = COMMON_LAYOUTS.map((id) => layoutById(id));
+  const rest = LAYOUT_GROUPS.map((group) => ({
+    count: group.count,
+    presets: group.presets.filter((preset) => !COMMON_LAYOUTS.includes(preset.id)),
+  })).filter((group) => group.presets.length > 0);
+
+  const renderRow = (count: number | string, presets: LayoutPreset[], label?: string) => (
+    <div key={`${label ?? 'group'}-${count}`} className="flex items-center gap-2.5">
+      <span className="w-5 shrink-0 select-none text-right font-mono text-[11px] text-tv-faint">
+        {count}
+      </span>
+      <div className="flex flex-wrap items-center gap-1">
+        {presets.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            title={`${preset.count} 图 · ${preset.label}`}
+            aria-label={`${preset.count} 图 ${preset.label}`}
+            aria-pressed={value === preset.id}
+            onClick={() => onChange(preset.id)}
+            className={clsx(
+              'rounded-md p-1 transition-colors',
+              value === preset.id
+                ? 'bg-tv-accent-soft text-tv-accent'
+                : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+            )}
+          >
+            <LayoutIcon preset={preset} className="h-5 w-5" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-1.5">
-      {LAYOUT_GROUPS.map((group) => (
-        <div key={group.count} className="flex items-center gap-2.5">
-          <span className="w-5 shrink-0 select-none text-right font-mono text-[11px] text-tv-faint">
-            {group.count}
-          </span>
-          <div className="flex flex-wrap items-center gap-1">
-            {group.presets.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                title={`${preset.count} 图 · ${preset.label}`}
-                aria-label={`${preset.count} 图 ${preset.label}`}
-                aria-pressed={value === preset.id}
-                onClick={() => onChange(preset.id)}
-                className={clsx(
-                  'rounded-md p-1 transition-colors',
-                  value === preset.id
-                    ? 'bg-tv-accent-soft text-tv-accent'
-                    : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
-                )}
-              >
-                <LayoutIcon preset={preset} className="h-5 w-5" />
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
+      {renderRow('常用', common)}
+      {expanded && rest.map((group) => renderRow(group.count, group.presets, 'rest'))}
+      <div className="flex items-center gap-2.5 pt-0.5">
+        <span className="w-5 shrink-0" />
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="rounded-md px-1 text-[11px] text-tv-muted transition-colors hover:text-tv-text"
+        >
+          {expanded ? '收起更多布局' : '更多布局'}
+        </button>
+      </div>
     </div>
   );
 }

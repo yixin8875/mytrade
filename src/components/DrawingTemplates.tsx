@@ -10,14 +10,19 @@ import { GripVertical, PencilRuler, Trash2, X } from 'lucide-react';
 import { useApp } from '../store/useApp';
 import type { IChartWidgetApi } from '../../public/charting_library/charting_library';
 
-const STORAGE_KEY = 'mytrade.drawTemplates';
-const POS_KEY = 'mytrade.drawTemplatesPos';
+const LEGACY_KEY = 'mytrade.drawTemplates';
+const LEGACY_POS_KEY = 'mytrade.drawTemplatesPos';
+/** 模板与面板位置都按图表槽位分开，四图布局互不影响 */
+const storageKey = (slot: string) => `mytrade.drawTemplates:${slot}`;
+const posKey = (slot: string) => `mytrade.drawTemplatesPos:${slot}`;
 
 type PanelPos = { x: number; y: number };
 
-function readPos(): PanelPos | null {
+function readPos(slot: string): PanelPos | null {
   try {
-    const raw = window.localStorage.getItem(POS_KEY);
+    const raw =
+      window.localStorage.getItem(posKey(slot)) ??
+      (slot === 'main' ? window.localStorage.getItem(LEGACY_POS_KEY) : null);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object') return null;
@@ -30,9 +35,9 @@ function readPos(): PanelPos | null {
   }
 }
 
-function writePos(pos: PanelPos): void {
+function writePos(slot: string, pos: PanelPos): void {
   try {
-    window.localStorage.setItem(POS_KEY, JSON.stringify(pos));
+    window.localStorage.setItem(posKey(slot), JSON.stringify(pos));
   } catch {
     /* 忽略 */
   }
@@ -111,20 +116,34 @@ export interface DrawTemplate {
 
 type TemplateMap = Record<string, Record<string, DrawTemplate>>;
 
-function readTemplates(): TemplateMap {
+function parseTemplates(raw: string): TemplateMap {
+  const parsed = JSON.parse(raw) as unknown;
+  return parsed && typeof parsed === 'object' ? (parsed as TemplateMap) : {};
+}
+
+function readTemplates(slot: string): TemplateMap {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-    return parsed && typeof parsed === 'object' ? (parsed as TemplateMap) : {};
+    const raw = window.localStorage.getItem(storageKey(slot));
+    if (raw) return parseTemplates(raw);
+    if (slot !== 'main') {
+      // 画线模板是不分品种/周期的样式组合：本槽位还没存过时沿用主图那套，
+      // 在该槽位第一次保存或删除后才会分出自己的一份。
+      const main = window.localStorage.getItem(storageKey('main'));
+      return main ? parseTemplates(main) : {};
+    }
+    // 旧版本只有一份全局模板：迁移到主图槽位，旧键保留不删
+    const legacy = window.localStorage.getItem(LEGACY_KEY);
+    if (!legacy) return {};
+    window.localStorage.setItem(storageKey('main'), legacy);
+    return parseTemplates(legacy);
   } catch {
     return {};
   }
 }
 
-function writeTemplates(map: TemplateMap): void {
+function writeTemplates(slot: string, map: TemplateMap): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+    window.localStorage.setItem(storageKey(slot), JSON.stringify(map));
   } catch {
     /* 本地存储满/被禁用时不影响画线本身 */
   }
@@ -151,13 +170,14 @@ export function DrawingTemplates({
 }) {
   const notify = useApp((s) => s.notify);
   const [open, setOpen] = useState(false);
-  const [templates, setTemplates] = useState<TemplateMap>(() => readTemplates());
+  const [templates, setTemplates] = useState<TemplateMap>(() => readTemplates(slot));
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [selection, setSelection] = useState<{ id: string; name: string } | null>(null);
   const [name, setName] = useState('');
   const [asDefault, setAsDefault] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
-  // 面板位置：默认左下角，拖过之后用 localStorage 里记住的位置
-  const [pos, setPos] = useState<PanelPos | null>(() => readPos());
+  // 面板位置：默认左下角，拖过之后用 localStorage 里记住的位置（按槽位分开）
+  const [pos, setPos] = useState<PanelPos | null>(() => readPos(slot));
   const wrapRef = useRef<HTMLDivElement>(null);
   const movedRef = useRef(false);
   const dragRef = useRef<{
@@ -231,10 +251,17 @@ export function DrawingTemplates({
       y: Math.min(Math.max(drag.originY + dy, 0), Math.max(0, drag.hostH - drag.height)),
     };
     setPos(next);
-    writePos(next);
+    writePos(slot, next);
     event.preventDefault();
     event.stopPropagation();
   };
+
+  // 槽位变化时切到对应槽位的模板与面板位置
+  useEffect(() => {
+    setTemplates(readTemplates(slot));
+    setPos(readPos(slot));
+    setPendingDelete(null);
+  }, [slot]);
 
   // 窗口变小或图表切到四图时，把记住的位置收回可视范围
   useEffect(() => {
@@ -248,7 +275,7 @@ export function DrawingTemplates({
     if (pos.x > maxX || pos.y > maxY) {
       const next = { x: Math.min(pos.x, maxX), y: Math.min(pos.y, maxY) };
       setPos(next);
-      writePos(next);
+      writePos(slot, next);
     }
   }, [pos]);
 
@@ -325,7 +352,7 @@ export function DrawingTemplates({
           },
         },
       };
-      writeTemplates(next);
+      writeTemplates(slot, next);
       setTemplates(next);
       setName('');
       notify('success', `已保存模板「${trimmed}」`);
@@ -363,13 +390,23 @@ export function DrawingTemplates({
   };
 
   const remove = (template: DrawTemplate) => {
+    // 两次点击确认，避免误删
+    if (pendingDelete !== template.name) {
+      setPendingDelete(template.name);
+      window.setTimeout(
+        () => setPendingDelete((prev) => (prev === template.name ? null : prev)),
+        4000,
+      );
+      return;
+    }
     const next: TemplateMap = { ...templates };
     const group = { ...(next[template.type] ?? {}) };
     delete group[template.name];
     if (Object.keys(group).length === 0) delete next[template.type];
     else next[template.type] = group;
-    writeTemplates(next);
+    writeTemplates(slot, next);
     setTemplates(next);
+    setPendingDelete(null);
     notify('success', `已删除模板「${template.name}」`);
   };
 
@@ -492,8 +529,13 @@ export function DrawingTemplates({
                   </button>
                   <button
                     onClick={() => remove(template)}
-                    title="删除模板"
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-tv-muted opacity-0 transition-colors hover:bg-tv-down-soft hover:text-tv-down group-hover:opacity-100"
+                    title={pendingDelete === template.name ? '再点一次删除' : '删除模板（需再点一次确认）'}
+                    className={clsx(
+                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-tv-down-soft hover:text-tv-down',
+                      pendingDelete === template.name
+                        ? 'bg-tv-down-soft text-tv-down'
+                        : 'text-tv-muted opacity-0 group-hover:opacity-100',
+                    )}
                   >
                     <Trash2 size={13} strokeWidth={1.5} />
                   </button>

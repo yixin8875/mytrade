@@ -2,23 +2,15 @@ import type { ReactNode } from 'react';
 import {
   BarChart3,
   BookOpen,
-  CalendarDays,
   ChartCandlestick,
   ClipboardCheck,
-  Crosshair,
   Eye,
   EyeOff,
-  FileClock,
-  Gauge,
   History,
   LayoutDashboard,
-  ListChecks,
   RefreshCw,
   Search,
   Settings as SettingsIcon,
-  ShieldCheck,
-  SlidersHorizontal,
-  TrendingUp,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
@@ -36,29 +28,23 @@ const NAV: { label: string; items: { page: Page; label: string; icon: typeof Lay
       items: [
         { page: 'overview', label: '概览', icon: LayoutDashboard },
         { page: 'trade', label: '交易台', icon: ChartCandlestick },
-        { page: 'replay', label: '历史复盘', icon: History },
       ],
     },
     {
       label: '复盘',
-      items: [
-        { page: 'diary', label: '盈亏日历', icon: CalendarDays },
-        { page: 'strategy', label: '策略手册', icon: ListChecks },
-        { page: 'routines', label: '例行清单', icon: ClipboardCheck },
-        { page: 'missed', label: '错过机会', icon: Crosshair },
-        { page: 'trends', label: '绩效趋势', icon: TrendingUp },
-        { page: 'analysis', label: '深度分析', icon: SlidersHorizontal },
-        { page: 'score', label: '过程评分', icon: Gauge },
-      ],
+      items: [{ page: 'replay', label: '历史复盘', icon: History }],
     },
     {
       label: '记录',
-      items: [
-        { page: 'journal', label: '交易日志', icon: BookOpen },
-        { page: 'reports', label: '统计报表', icon: BarChart3 },
-        { page: 'executions', label: '执行质量', icon: ShieldCheck },
-        { page: 'audit', label: '审计日志', icon: FileClock },
-      ],
+      items: [{ page: 'records', label: '交易记录', icon: BookOpen }],
+    },
+    {
+      label: '分析',
+      items: [{ page: 'insights', label: '分析', icon: BarChart3 }],
+    },
+    {
+      label: '纪律',
+      items: [{ page: 'discipline', label: '纪律', icon: ClipboardCheck }],
     },
   ];
 

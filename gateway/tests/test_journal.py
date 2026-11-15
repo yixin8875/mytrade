@@ -1,6 +1,10 @@
 """日志侧的纯函数：加权成交价、平仓分类、截图标注清洗。"""
 
+import time
+
+import journal as journal_module
 from journal import (
+    TradeJournal,
     _clean_shot_meta,
     _close_kind,
     _duration_bucket,
@@ -8,8 +12,10 @@ from journal import (
     _plan_fidelity,
     _r_multiple,
     _r_summary,
+    _row_offset,
     _weighted,
 )
+from store import Store
 
 
 def test_weighted_price_uses_volume():
@@ -139,3 +145,129 @@ def test_execution_cross_groups_winners_and_losers():
     assert cross["wins"]["avgSpread"] == 1.0
     assert cross["losses"]["trades"] == 1
     assert cross["losses"]["avgSlippage"] == -0.5
+
+
+def test_row_offset_prefers_row_value_over_fallback():
+    assert _row_offset({"server_offset": 3600}, 0) == 3600
+    assert _row_offset({"server_offset": None}, 7200) == 7200
+    assert _row_offset({}, -3600) == -3600
+
+
+class _StatsStore:
+    """只覆盖 journal.stats 需要的查询，用来验证时间口径。"""
+
+    def __init__(self, base_dir, rows):
+        self.base_dir = base_dir
+        self.rows = rows
+        self.since = None
+
+    def journal_list(self, limit=200, since=0, login=0, filters=None):
+        self.since = since
+        self.filters = filters
+        return list(self.rows[:limit])
+
+    def position_risk_map(self, login, tickets):
+        return {}
+
+    def intent_sl_map(self, login, tickets):
+        return {}
+
+    def journal_set_risks(self, login, risks):
+        pass
+
+    def execution_entry_map(self, login, since):
+        return {}
+
+
+def _row(position_id=1, open_time=1_700_000_000, server_offset=0):
+    return {
+        "position_id": position_id,
+        "symbol": "EURUSD",
+        "side": "buy",
+        "volume": 0.1,
+        "entry_price": 1.08,
+        "exit_price": 1.081,
+        "profit": 10.0,
+        "swap": 0.0,
+        "commission": 0.0,
+        "open_time": open_time,
+        "close_time": open_time + 600,
+        "duration_sec": 600,
+        "mfe": 20.0,
+        "mae": -5.0,
+        "tag": None,
+        "closed_by": "manual",
+        "has_shot": 0,
+        "risk": 10.0,
+        "risk_source": "journal",
+        "recorded_at": 0,
+        "server_offset": server_offset,
+    }
+
+
+def _hour_key(stats):
+    return int(stats["byHour"][0]["key"][:2])
+
+
+def test_stats_by_hour_uses_row_server_offset(tmp_path):
+    store = _StatsStore(tmp_path, [_row(server_offset=None)])
+    journal = TradeJournal(store)
+
+    fallback_zero = journal.stats(days=30, login=1, server_offset=0)
+    fallback_known = journal.stats(days=30, login=1, server_offset=3600)
+
+    # 单笔记录自己带偏移时，优先用它，而不是账户当前偏移
+    store.rows = [_row(server_offset=3600)]
+    row_offset = journal.stats(days=30, login=1, server_offset=0)
+
+    assert _hour_key(fallback_known) == (_hour_key(fallback_zero) - 1) % 24
+    assert _hour_key(row_offset) == _hour_key(fallback_known)
+
+
+def test_stats_window_shifts_since_by_server_offset(tmp_path):
+    store = _StatsStore(tmp_path, [_row()])
+    journal = TradeJournal(store)
+
+    journal.stats(days=2, login=1, server_offset=3600)
+
+    expected = int(time.time()) - 2 * 86400 + 3600
+    assert abs(store.since - expected) <= 2
+
+
+def test_stats_all_range_passes_filters_through(tmp_path):
+    store = _StatsStore(tmp_path, [_row()])
+    journal = TradeJournal(store)
+
+    journal.stats(days=0, login=1, server_offset=3600, filters={"symbol": "EURUSD"})
+
+    # 「全部」= 不设时间下限；筛选原样交给 store，保证列表与统计口径一致
+    assert store.since == 0
+    assert store.filters == {"symbol": "EURUSD"}
+
+
+def _journal_record(position_id=9, server_offset=None):
+    return {
+        "login": 1,
+        "position_id": position_id,
+        "symbol": "EURUSD",
+        "side": "buy",
+        "volume": 0.1,
+        "entry_price": 1.08,
+        "exit_price": 1.085,
+        "profit": 50.0,
+        "open_time": 100,
+        "close_time": 200,
+        "duration_sec": 100,
+        "server_offset": server_offset,
+    }
+
+
+def test_sync_backfills_offset_even_without_new_deals(tmp_path, monkeypatch):
+    store = Store(tmp_path)
+    store.upsert_journal(_journal_record())
+    monkeypatch.setattr(journal_module.mt5, "history_deals_get", lambda *a, **k: [])
+    journal = TradeJournal(store)
+
+    assert journal.sync(1, force=True, server_offset=3600) == 0
+
+    assert (store.journal_get(9, 1) or {})["server_offset"] == 3600

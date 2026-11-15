@@ -9,6 +9,7 @@ import {
   Check,
   Database,
   Download,
+  FileClock,
   FolderOpen,
   Info,
   KeyRound,
@@ -30,6 +31,7 @@ import { fmtNum, templateStepsSummary } from '../lib/template';
 import { AccountManager } from './AccountManager';
 import { TemplateEditor } from './TemplateEditor';
 import { LayoutGallery, SyncToggles } from './LayoutPicker';
+import { AuditPanel } from '../views/Audit';
 import {
   isDesktopApp,
   restoreBackup,
@@ -63,19 +65,23 @@ import {
 import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
 
 const NAV = [
-  { id: 'appearance', label: '外观', hint: '主题与界面', icon: Palette },
-  { id: 'chart', label: '图表', hint: '布局与周期', icon: ChartCandlestick },
-  { id: 'pine', label: 'Pine 脚本', hint: '实验：本地执行', icon: Braces },
-  { id: 'template', label: '交易模板', hint: '风险、止盈与分批', icon: Target },
-  { id: 'risk', label: '交易与风控', hint: '手数与风险上限', icon: ShieldCheck },
-  { id: 'discipline', label: '开仓纪律', hint: '下单前的清单门禁', icon: ListChecks },
-  { id: 'accounts', label: 'MT5 账户', hint: '自动登录与切换', icon: Users },
-  { id: 'alerts', label: '告警', hint: '声音与通知', icon: Bell },
-  { id: 'data', label: '数据与备份', hint: '导出、备份与恢复', icon: Database },
-  { id: 'ai', label: 'AI 复盘', hint: '自带 Key，默认关闭', icon: Sparkles },
-  { id: 'updates', label: '更新', hint: '版本与检查更新', icon: RefreshCw },
-  { id: 'about', label: '数据与连接', hint: '终端状态与本机路径', icon: Info },
+  { id: 'appearance', label: '外观', hint: '主题与界面', icon: Palette, group: '界面' },
+  { id: 'chart', label: '图表', hint: '布局与周期', icon: ChartCandlestick, group: '界面' },
+  { id: 'template', label: '交易模板', hint: '风险、止盈与分批', icon: Target, group: '交易' },
+  { id: 'risk', label: '交易与风控', hint: '手数与风险上限', icon: ShieldCheck, group: '交易' },
+  { id: 'discipline', label: '开仓纪律', hint: '下单前的清单门禁', icon: ListChecks, group: '交易' },
+  { id: 'accounts', label: 'MT5 账户', hint: '自动登录与切换', icon: Users, group: '账户与通知' },
+  { id: 'alerts', label: '告警', hint: '声音与通知', icon: Bell, group: '账户与通知' },
+  { id: 'data', label: '数据与备份', hint: '导出、备份与恢复', icon: Database, group: '数据' },
+  { id: 'diagnostics', label: '诊断', hint: '审计日志与对账', icon: FileClock, group: '数据' },
+  { id: 'pine', label: 'Pine 脚本', hint: '实验：本地执行', icon: Braces, group: '实验与系统' },
+  { id: 'ai', label: 'AI 复盘', hint: '自带 Key，默认关闭', icon: Sparkles, group: '实验与系统' },
+  { id: 'updates', label: '更新', hint: '版本与检查更新', icon: RefreshCw, group: '实验与系统' },
+  { id: 'about', label: '数据与连接', hint: '终端状态与本机路径', icon: Info, group: '实验与系统' },
 ] as const;
+
+/** 设置分区清单：命令面板直接复用，新增分区不必两处各写一遍 */
+export const SETTINGS_NAV = NAV;
 
 const FRAMES: [string, string][] = [
   ['1', '1m'],
@@ -221,6 +227,7 @@ export function SettingsPanel() {
   const setPage = useApp((s) => s.setPage);
   const section = useApp((s) => s.settingsSection);
   const setSection = useApp((s) => s.setSettingsSection);
+  const settingsReturn = useApp((s) => s.settingsReturn);
 
   const active = NAV.find((item) => item.id === section) ?? NAV[0];
 
@@ -236,25 +243,28 @@ export function SettingsPanel() {
         </div>
 
         <nav className="mt-5 space-y-0.5">
-          {NAV.map((item) => {
+          {NAV.map((item, index) => {
             const Icon = item.icon;
+            const showGroup = index === 0 || NAV[index - 1].group !== item.group;
             return (
-              <button
-                key={item.id}
-                onClick={() => setSection(item.id)}
-                className={clsx(
-                  'flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left transition-colors',
-                  section === item.id
-                    ? 'bg-console-selected font-medium text-console-ink'
-                    : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
-                )}
-              >
-                <Icon size={16} strokeWidth={1.5} className="shrink-0" />
-                <span className="flex-1 truncate text-[13px]">{item.label}</span>
-                {section === item.id && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-console-accent" />
-                )}
-              </button>
+              <div key={item.id}>
+                {showGroup && <div className="console-label px-2.5 pb-1.5 pt-3">{item.group}</div>}
+                <button
+                  onClick={() => setSection(item.id)}
+                  className={clsx(
+                    'flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left transition-colors',
+                    section === item.id
+                      ? 'bg-console-selected font-medium text-console-ink'
+                      : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
+                  )}
+                >
+                  <Icon size={16} strokeWidth={1.5} className="shrink-0" />
+                  <span className="flex-1 truncate text-[13px]">{item.label}</span>
+                  {section === item.id && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-console-accent" />
+                  )}
+                </button>
+              </div>
             );
           })}
         </nav>
@@ -264,11 +274,11 @@ export function SettingsPanel() {
             设置保存在本机，不会上传。
           </div>
           <button
-            onClick={() => setPage('overview')}
+            onClick={() => setPage(settingsReturn ?? 'overview')}
             className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-console-line bg-console-card text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
           >
             <X size={14} strokeWidth={1.5} />
-            返回概览
+            返回
           </button>
         </div>
       </aside>
@@ -291,6 +301,7 @@ export function SettingsPanel() {
           {section === 'accounts' && <AccountManager />}
           {section === 'alerts' && <AlertsSection />}
           {section === 'data' && <DataSection />}
+          {section === 'diagnostics' && <AuditPanel />}
           {section === 'ai' && <AiSection />}
           {section === 'updates' && <UpdatesSection />}
           {section === 'about' && <AboutSection />}
@@ -305,6 +316,7 @@ const EXPORTS = [
   { kind: 'executions', label: '执行质量 CSV', hint: '点差、滑点、延迟与拒单' },
   { kind: 'audit', label: '审计日志 JSONL', hint: '下单、风控、模板执行事件' },
   { kind: 'settings', label: '设置 JSON', hint: '风控参数、模板与界面偏好' },
+  { kind: 'replay', label: '复盘会话 JSON', hint: '回放训练记录、图表与画线' },
 ] as const;
 
 type ExportKind = (typeof EXPORTS)[number]['kind'];
@@ -328,7 +340,8 @@ function fmtWhen(ts: number): string {
 
 function DataSection() {
   const notify = useApp((s) => s.notify);
-  const [days, setDays] = useState(30);
+  const days = useApp((s) => s.exportDays);
+  const setDays = useApp((s) => s.setExportDays);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<ExportResult | null>(null);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
@@ -894,17 +907,6 @@ function AppearanceSection() {
           </button>
         </div>
       </Card>
-
-      <Card
-        title="双介质界面"
-        description="实时台用冷灰底和白色面板，复盘页用暖白纸面；字号、间距、语义色和标记保持一致。"
-      >
-        <ul className="space-y-2 text-[12px] leading-relaxed text-console-muted">
-          <li>· 交易台：图表、下单、持仓与挂单，数字用等宽字体对齐。</li>
-          <li>· 复盘区：概览、日志、报表、执行、审计与设置，读起来像纸面记录。</li>
-          <li>· 深色主题下复盘页换成暖石墨，白色主题下是中性白纸；语义色在所有底材上一致。</li>
-        </ul>
-      </Card>
     </>
   );
 }
@@ -941,15 +943,6 @@ function ChartSection() {
             ))}
           </select>
         </Row>
-      </Card>
-
-      <Card
-        title="画线工具"
-        description="画线模板面板在图表左下角；收藏工具在左侧工具栏右键或展开工具组里设置。"
-      >
-        <div className="text-[12px] leading-relaxed text-console-muted">
-          这些内容仍保存在图表本地存储，不会上传。
-        </div>
       </Card>
     </>
   );
@@ -1698,17 +1691,6 @@ function AlertsSection() {
           />
         </Row>
       </Card>
-
-      <Card
-        title="第三方通道"
-        description="Webhook / Discord / Telegram / 企业微信在 gateway/config.json 的 alert_channels 里配置，密钥不会下发到前端。"
-      >
-        <div className="text-[12px] text-console-muted">
-          {config?.alert_channel_names?.length
-            ? `已配置：${config.alert_channel_names.join('、')}`
-            : '未配置第三方通道'}
-        </div>
-      </Card>
     </>
   );
 }
@@ -1899,9 +1881,6 @@ function UpdatesSection() {
       <Card title="版本" description="桌面版通过 GitHub Releases 检查更新。">
         <Row label="网关版本">
           <span className="font-mono text-[12px] text-console-ink-2">v{health?.version ?? '—'}</span>
-        </Row>
-        <Row label="自动检查" hint="桌面版启动约 6 秒后静默检查一次，失败不会打扰。">
-          <span className="text-[12px] text-console-muted">已启用</span>
         </Row>
         <Row label="手动检查">
           <button

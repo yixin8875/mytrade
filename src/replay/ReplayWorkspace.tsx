@@ -15,7 +15,7 @@ import {
 import { clsx } from 'clsx';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
 import { stepSummary, templateSummary, templateTpTarget } from '../lib/template';
-import { activeTemplate, useApp } from '../store/useApp';
+import { activeTemplate, useApp, type Page } from '../store/useApp';
 import { calcProfit, marginFor, positionProfit, roundPrice, roundVolume } from './engine';
 import {
   currentBar,
@@ -26,6 +26,7 @@ import {
   useReplay,
 } from './store';
 import { goReplayList, goReplayReport } from './route';
+import { clearReplayBack, getReplayBack } from './back';
 import { hasReplayBars } from './source';
 import { ReplayChart, type ReplayDraft } from './ReplayChart';
 import { ReferencePanel } from './ReferencePanel';
@@ -94,6 +95,15 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   const removeNote = useReplay((s) => s.removeNote);
   const template = useApp(activeTemplate);
   const templates = useApp((s) => s.templates);
+  const setPage = useApp((s) => s.setPage);
+  const setJournalFocus = useApp((s) => s.setJournalFocus);
+  const back = useMemo(() => getReplayBack(), [sessionId]);
+  const goBack = () => {
+    if (!back) return;
+    if (back.positionId) setJournalFocus(back.positionId);
+    clearReplayBack();
+    setPage(back.page as Page);
+  };
   const setActiveTemplate = useApp((s) => s.setActiveTemplate);
 
   const [timeframe, setTimeframe] = useState('15');
@@ -107,6 +117,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   const [retryTag, setRetryTag] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [editSl, setEditSl] = useState('');
   const [editTp, setEditTp] = useState('');
@@ -412,6 +423,15 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
         >
           <ChevronLeft size={16} strokeWidth={1.5} />
         </button>
+        {back && (
+          <button
+            onClick={goBack}
+            className="shrink-0 rounded-[8px] border border-console-line px-2.5 py-1 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover"
+            title={`回到${back.label}`}
+          >
+            返回{back.label}
+          </button>
+        )}
         <div className="min-w-0">
           <div className="truncate text-[15px] font-medium leading-tight">{session.name}</div>
           <div className="mt-1 whitespace-nowrap text-[11px] text-console-muted">
@@ -478,7 +498,10 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
         )}
         <div className="relative">
           <button
-            onClick={() => setMenu((value) => !value)}
+            onClick={() => {
+              setMenu((value) => !value);
+              setConfirmDelete(false);
+            }}
             className="grid h-8 w-8 place-items-center rounded-[8px] text-console-muted hover:bg-console-hover hover:text-console-ink"
             title="更多"
           >
@@ -486,7 +509,13 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
           </button>
           {menu && (
             <>
-              <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
+              <div
+                className="fixed inset-0 z-20"
+                onClick={() => {
+                  setMenu(false);
+                  setConfirmDelete(false);
+                }}
+              />
               <div className="absolute right-0 top-9 z-30 w-36 overflow-hidden rounded-[8px] border border-console-line bg-console-card py-1 shadow-[0_12px_28px_-12px_rgba(33,28,22,.35)]">
                 <button
                   onClick={() => {
@@ -510,6 +539,11 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                 </button>
                 <button
                   onClick={() => {
+                    if (!confirmDelete) {
+                      setConfirmDelete(true);
+                      return;
+                    }
+                    setConfirmDelete(false);
                     remove(session.id);
                     setMenu(false);
                     goReplayList();
@@ -517,7 +551,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-console-loss hover:bg-console-hover"
                 >
                   <Trash2 size={13} strokeWidth={1.5} />
-                  删除
+                  {confirmDelete ? '再次点击删除' : '删除'}
                 </button>
               </div>
             </>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { ChevronDown, Loader2, Sparkles } from 'lucide-react';
 import { gateway } from '../gateway/client';
+import { usePrivacyMask } from '../lib/privacy';
 import type {
   AiKind,
   AiPayloadPreview,
@@ -28,6 +29,7 @@ function fmtWhen(ts: number): string {
  * 生成前可展开「将发送哪些字段」，笔记必须手动勾选才会带上。
  */
 export function AiReviewPanel({ date }: Props) {
+  usePrivacyMask();
   const [status, setStatus] = useState<AiStatus | null>(null);
   const [kind, setKind] = useState<AiKind>('day');
   const [preview, setPreview] = useState<AiPayloadPreview | null>(null);

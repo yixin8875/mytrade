@@ -2,9 +2,11 @@ import { useMemo } from 'react';
 import { ArrowLeft, Download, RotateCcw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
-import { useApp } from '../store/useApp';
+import { usePrivacyMask } from '../lib/privacy';
+import { useApp, type Page } from '../store/useApp';
 import { calculateStats } from './engine';
 import { goReplayList, goReplaySession } from './route';
+import { clearReplayBack, getReplayBack } from './back';
 import { useReplay, useReplaySession } from './store';
 import { fmtDate, fmtDateTime, fmtShort } from './time';
 import type { ReplaySession, ReplayStats } from './types';
@@ -259,6 +261,10 @@ function ReferenceCompare({ session }: { session: ReplaySession }) {
     },
   ];
 
+  // 只列差异：完全一致的项收成一行，报告不再重复参照面板的信息
+  const same = retry ? rows.filter((row) => row.real === row.replay) : [];
+  const shown = retry ? rows.filter((row) => row.real !== row.replay) : rows;
+
   return (
     <section className="mt-4 rounded-[12px] border border-console-line bg-console-card p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -270,24 +276,35 @@ function ReferenceCompare({ session }: { session: ReplaySession }) {
             : ''}
         </span>
       </div>
-      <table className="mt-3 w-full text-[11px]">
-        <thead>
-          <tr className="text-left text-[10px] text-console-muted">
-            <th className="pb-1.5 font-normal">指标</th>
-            <th className="pb-1.5 pl-3 font-normal">实盘</th>
-            <th className="pb-1.5 pl-3 font-normal">重演</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.label} className="border-t border-console-line">
-              <td className="py-1.5 text-console-muted">{row.label}</td>
-              <td className="num py-1.5 pl-3 font-mono text-console-ink-2">{row.real}</td>
-              <td className="num py-1.5 pl-3 font-mono text-console-ink-2">{row.replay}</td>
+      {shown.length > 0 ? (
+        <table className="mt-3 w-full text-[11px]">
+          <thead>
+            <tr className="text-left text-[10px] text-console-muted">
+              <th className="pb-1.5 font-normal">差异</th>
+              <th className="pb-1.5 pl-3 font-normal">实盘</th>
+              <th className="pb-1.5 pl-3 font-normal">重演</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {shown.map((row) => (
+              <tr key={row.label} className="border-t border-console-line">
+                <td className="py-1.5 text-console-muted">{row.label}</td>
+                <td className="num py-1.5 pl-3 font-mono text-console-ink-2">{row.real}</td>
+                <td className="num py-1.5 pl-3 font-mono text-console-ink-2">{row.replay}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : retry ? (
+        <p className="mt-3 text-[11px] text-console-muted">
+          重演与实盘在方向、手数、入场、出场、R、MFE/MAE、持仓时长与出场方式上完全一致。
+        </p>
+      ) : null}
+      {same.length > 0 && shown.length > 0 && (
+        <p className="mt-2 text-[10px] text-console-faint">
+          与实盘一致：{same.map((row) => row.label).join('、')}
+        </p>
+      )}
       {retry ? (
         <p className="mt-2 text-[10px] leading-4 text-console-faint">
           实盘含真实滑点、隔夜利息；回放按 M1 保守撮合、不含隔夜利息。只用于过程对照，不能据此断言「实盘比回放差」。
@@ -308,9 +325,19 @@ function ReferenceCompare({ session }: { session: ReplaySession }) {
 }
 
 export function ReplayReport({ sessionId }: { sessionId: string }) {
+  usePrivacyMask();
   const session = useReplaySession(sessionId);
   const duplicateSession = useReplay((s) => s.duplicateSession);
   const restart = useReplay((s) => s.restart);
+  const setPage = useApp((s) => s.setPage);
+  const setJournalFocus = useApp((s) => s.setJournalFocus);
+  const back = useMemo(() => getReplayBack(), [sessionId]);
+  const goBack = () => {
+    if (!back) return;
+    if (back.positionId) setJournalFocus(back.positionId);
+    clearReplayBack();
+    setPage(back.page as Page);
+  };
 
   const stats = useMemo(() => (session ? calculateStats(session) : null), [session]);
 
@@ -382,6 +409,15 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
           >
             <ArrowLeft size={16} strokeWidth={1.5} />
           </button>
+          {back && (
+            <button
+              onClick={goBack}
+              className="mt-0.5 shrink-0 rounded-[8px] border border-console-line px-2.5 py-1 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover"
+              title={`回到${back.label}`}
+            >
+              返回{back.label}
+            </button>
+          )}
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-[20px] font-medium leading-tight">{session.name}</h1>

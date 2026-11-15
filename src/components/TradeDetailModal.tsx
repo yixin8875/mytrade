@@ -5,7 +5,7 @@ import { TradeChart } from './TradeChart';
 import { isShotMeta, shotY, type ShotMeta } from '../chart/tv/shotMeta';
 import { fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import { shotUrl } from '../lib/shots';
-import { ReferenceCapacityDialog, useTradeReplay } from '../replay/useTradeReplay';
+import { useTradeReplay } from '../replay/useTradeReplay';
 import type { JournalRecord } from '../gateway/types';
 
 const CLOSED_BY: Record<string, string> = {
@@ -163,14 +163,6 @@ export function TradeDetailModal({
             </div>
           )}
         </div>
-
-        <ReferenceCapacityDialog
-          pending={replay.pending}
-          onConfirm={() => {
-            if (replay.confirm() === 'opened') onClose();
-          }}
-          onCancel={replay.cancel}
-        />
       </div>
     </div>
   );

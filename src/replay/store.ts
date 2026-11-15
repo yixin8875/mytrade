@@ -32,8 +32,30 @@ import type { OrderType, Side, TemplateStep } from '../gateway/types';
 /** 会话开始前额外载入的 M1，用于指标预热 */
 const WARMUP_BARS = 1000;
 const SESSION_KEY = 'mytrade.replay.sessions';
+/** 本地存储已迁到网关的标记；保留 '1' 的旧版本数据用于一次性复制 */
+const STORAGE_KEY = 'mytrade.replay.storage';
+const STORAGE_MIGRATED = '2';
 const CURVE_POINTS = 1200;
 const CHUNK = 5000;
+/** 软上限：超过只在列表提示归档旧会话，不再弹窗强制删除 */
+export const SESSION_SOFT_LIMIT = 200;
+/** 会话进度写网关的防抖；localStorage 仍按 3 秒写一份快照 */
+const SAVE_DEBOUNCE_MS = 2000;
+/** 图表视图 / 画线写网关的防抖 */
+const VIEW_DEBOUNCE_MS = 5000;
+/** 本地快照只保留最近这些会话，避免撑爆 localStorage */
+const LOCAL_CACHE_LIMIT = 60;
+
+type StorageMode = 'gateway' | 'local';
+
+/** replay.list 返回的一行：会话主体 + 图表视图 / 画线原始 JSON */
+interface StoredSession {
+  id: string;
+  updatedAt: number;
+  session: ReplaySession;
+  chart?: string | null;
+  drawings?: string | null;
+}
 
 export interface NewSessionInput {
   name: string;
@@ -43,7 +65,7 @@ export interface NewSessionInput {
   endTs: number;
   settings: ReplaySettings;
   /** 从实盘交易创建的会话带来源与参照 */
-  origin?: 'manual' | 'journal';
+  origin?: 'manual' | 'journal' | 'missed';
   reference?: ReplayReference;
   referenceVisible?: boolean;
 }
@@ -81,6 +103,12 @@ interface ReplayStore {
   /** 重新开始时递增，用来重建图表 */
   revision: number;
   lastEvent: string | null;
+  /** 首次载入完成前，列表显示骨架屏而不是「还没有会话」 */
+  hydrated: boolean;
+  /** gateway = 会话在 SQLite；local = 网关不可用，只读本地快照 */
+  storageMode: StorageMode;
+
+  hydrate: (login: number) => Promise<void>;
 
   createSession: (input: NewSessionInput) => string;
   loadSession: (id: string) => Promise<void>;
@@ -124,11 +152,21 @@ function downsampleCurve(session: ReplaySession): ReplaySession {
   return { ...session, equityCurve: curve };
 }
 
-function saveSessions(sessions: ReplaySession[]): void {
+/** 图表状态与画线按会话保存；网关持久化用同一串键名，localStorage 只是快速缓存 */
+export function chartStateKey(sessionId: string): string {
+  return `mytrade.replay.chart.${sessionId}`;
+}
+
+export function drawingsKey(sessionId: string): string {
+  return `mytrade.replay.drawings.${sessionId}`;
+}
+
+/** 本地快照：只当缓存用，容量有限，保留最近 60 个会话 */
+function saveLocalSnapshot(sessions: ReplaySession[]): void {
   try {
     window.localStorage.setItem(
       SESSION_KEY,
-      JSON.stringify(sessions.slice(0, 60).map(downsampleCurve)),
+      JSON.stringify(sessions.slice(0, LOCAL_CACHE_LIMIT).map(downsampleCurve)),
     );
   } catch {
     /* 本地存储满了不影响回放；下一次保存再试 */
@@ -148,35 +186,314 @@ function isSession(value: unknown): value is ReplaySession {
   );
 }
 
+/** 刷新或从网关读回时，把不能继续的状态归位，缺失数组补空 */
+function normalizeSession(session: ReplaySession): ReplaySession {
+  return {
+    ...session,
+    status:
+      session.status === 'running' || session.status === 'preparing'
+        ? 'paused'
+        : session.status,
+    equityCurve: Array.isArray(session.equityCurve) ? session.equityCurve : [],
+    orders: Array.isArray(session.orders) ? session.orders : [],
+    positions: Array.isArray(session.positions) ? session.positions : [],
+    trades: Array.isArray(session.trades) ? session.trades : [],
+    notes: Array.isArray(session.notes) ? session.notes : [],
+  };
+}
+
 function loadSessions(): ReplaySession[] {
   try {
     const raw = window.localStorage.getItem(SESSION_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isSession).map((session) => ({
-      ...session,
-      status:
-        session.status === 'running' || session.status === 'preparing'
-          ? 'paused'
-          : session.status,
-      equityCurve: Array.isArray(session.equityCurve) ? session.equityCurve : [],
-      orders: Array.isArray(session.orders) ? session.orders : [],
-      positions: Array.isArray(session.positions) ? session.positions : [],
-      trades: Array.isArray(session.trades) ? session.trades : [],
-      notes: Array.isArray(session.notes) ? session.notes : [],
-    }));
+    return parsed.filter(isSession).map(normalizeSession);
   } catch {
     return [];
   }
 }
 
+// ---------------------------------------------------------------- 网关同步
+
+/** 待写网关的会话 id */
+const dirty = new Set<string>();
+/** 已确认写入网关的 updatedAt，用来判断哪些会话真的变了 */
+const savedAt = new Map<string, number>();
+/** 超过单会话上限的会话：不再重试，只留本地 */
+const oversized = new Set<string>();
+/** 还需要随会话一起上传图表视图/画线的会话（迁移或本地新建） */
+const needsView = new Set<string>();
+/** 每种失败只提示一次，不打断回放 */
+const notified = new Set<string>();
+let saveTimer: number | null = null;
+let retryTimer: number | null = null;
 let persistTimer: number | null = null;
+let hydrating: Promise<void> | null = null;
+let hydratedLogin: number | null = null;
+let migrationTotal = 0;
+
+function notifyOnce(kind: string, text: string, level: 'info' | 'error' = 'info'): void {
+  if (notified.has(kind)) return;
+  notified.add(kind);
+  useApp.getState().notify(level, text);
+}
+
+function storageMode(): StorageMode {
+  return useReplay.getState().storageMode;
+}
+
+/** 标记所有 updatedAt 与已保存值不同的会话；调度一次防抖写入 */
+function collectDirty(): void {
+  for (const session of useReplay.getState().sessions) {
+    if (savedAt.get(session.id) !== session.updatedAt) {
+      dirty.add(session.id);
+      oversized.delete(session.id);
+    }
+  }
+}
+
+function scheduleSave(delay = SAVE_DEBOUNCE_MS): void {
+  if (storageMode() !== 'gateway' || saveTimer != null) return;
+  saveTimer = window.setTimeout(() => {
+    saveTimer = null;
+    void flushSaves();
+  }, delay);
+}
+
+function markMigratedIfDone(): void {
+  if (!migrationTotal || dirty.size > 0) return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, STORAGE_MIGRATED);
+  } catch {
+    /* 标记写不进去时下次会再复制一遍，replay.save 是 upsert，不会重复建 */
+  }
+  useApp.getState().notify('info', `已把本机 ${migrationTotal} 个复盘会话迁到网关`);
+  migrationTotal = 0;
+}
+
+async function flushSaves(): Promise<void> {
+  if (storageMode() !== 'gateway') return;
+  const ids = [...dirty];
+  if (!ids.length) {
+    markMigratedIfDone();
+    return;
+  }
+  const sessions = useReplay.getState().sessions;
+  let failed = false;
+  for (const id of ids) {
+    const session = sessions.find((item) => item.id === id);
+    if (!session) {
+      dirty.delete(id);
+      savedAt.delete(id);
+      continue;
+    }
+    if (oversized.has(id)) {
+      dirty.delete(id);
+      continue;
+    }
+    const at = session.updatedAt;
+    const payload: Record<string, unknown> = { session: downsampleCurve(session) };
+    if (needsView.has(id)) {
+      try {
+        const chart = window.localStorage.getItem(chartStateKey(id));
+        const drawings = window.localStorage.getItem(drawingsKey(id));
+        if (chart) payload.chart = chart;
+        if (drawings) payload.drawings = drawings;
+      } catch {
+        /* 本地存储不可用时只传会话主体 */
+      }
+    }
+    try {
+      await gateway.call('replay.save', payload, 15_000);
+      dirty.delete(id);
+      savedAt.set(id, at);
+      needsView.delete(id);
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code === 'REPLAY_TOO_LARGE') {
+        oversized.add(id);
+        dirty.delete(id);
+        notifyOnce('large', '有复盘会话超过网关单会话上限，已只保存在本机');
+      } else if (code === 'REPLAY_CONFLICT') {
+        dirty.delete(id);
+        notifyOnce('conflict', '有复盘会话在别处更新过；本机改动保留在本地缓存');
+      } else {
+        failed = true;
+        notifyOnce('offline', '复盘进度暂时没写入网关，先保存在本机；恢复连接后会重试');
+      }
+    }
+  }
+  markMigratedIfDone();
+  if (failed && retryTimer == null) {
+    retryTimer = window.setTimeout(() => {
+      retryTimer = null;
+      void flushSaves();
+    }, 15_000);
+  }
+}
+
+// ---------------------------------------------------------------- 图表视图同步
+
+const viewPending = new Map<string, { chart?: string; drawings?: string }>();
+let viewTimer: number | null = null;
+
+/** 图表视图 / 画线：5 秒防抖写网关；localStorage 由调用方同步写 */
+export function queueViewSave(
+  sessionId: string,
+  patch: { chart?: string; drawings?: string },
+): void {
+  if (storageMode() !== 'gateway') return;
+  const current = viewPending.get(sessionId) ?? {};
+  viewPending.set(sessionId, { ...current, ...patch });
+  if (viewTimer != null) window.clearTimeout(viewTimer);
+  viewTimer = window.setTimeout(() => {
+    viewTimer = null;
+    void flushViewSaves();
+  }, VIEW_DEBOUNCE_MS);
+}
+
+/** 离开会话 / 页面卸载时立即写入 */
+export async function flushViewSaves(): Promise<void> {
+  if (viewTimer != null) {
+    window.clearTimeout(viewTimer);
+    viewTimer = null;
+  }
+  const entries = [...viewPending.entries()];
+  viewPending.clear();
+  if (storageMode() !== 'gateway') return;
+  await Promise.all(
+    entries.map(async ([sessionId, patch]) => {
+      try {
+        await gateway.call('replay.save', { id: sessionId, ...patch }, 10_000);
+      } catch (error) {
+        if ((error as { code?: string }).code === 'REPLAY_TOO_LARGE') {
+          notifyOnce('view-large', '画线数据超过网关单会话上限，已只保存在本机');
+        }
+      }
+    }),
+  );
+}
+
+function dropLocalViews(sessionId: string): void {
+  try {
+    window.localStorage.removeItem(chartStateKey(sessionId));
+    window.localStorage.removeItem(drawingsKey(sessionId));
+  } catch {
+    /* 本地存储不可用时忽略 */
+  }
+}
+
+// ---------------------------------------------------------------- 载入
+
+async function hydrateSessions(login: number): Promise<void> {
+  if (hydrating) return hydrating;
+  if (useReplay.getState().hydrated && hydratedLogin === login) return;
+  hydrating = (async () => {
+    if (saveTimer != null) {
+      window.clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    if (retryTimer != null) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    useReplay.setState({ hydrated: false });
+    try {
+      const result = await gateway.call<{ sessions: StoredSession[] }>(
+        'replay.list',
+        {},
+        15_000,
+      );
+      const rows = Array.isArray(result?.sessions) ? result.sessions : [];
+      const remote: ReplaySession[] = [];
+      const remoteAt = new Map<string, number>();
+      for (const row of rows) {
+        const raw = row?.session;
+        if (!raw || !isSession(raw)) continue;
+        const session = normalizeSession(raw);
+        remote.push(session);
+        remoteAt.set(session.id, Number(row.updatedAt) || session.updatedAt);
+        // 网关里的图表视图回填本地缓存，图表挂载时照旧读 localStorage
+        try {
+          if (row.chart) window.localStorage.setItem(chartStateKey(session.id), row.chart);
+          if (row.drawings) {
+            window.localStorage.setItem(drawingsKey(session.id), row.drawings);
+          }
+        } catch {
+          /* 本地存储不可用时图表仍可打开，只是不恢复画线 */
+        }
+      }
+
+      // 合并本地快照：离线期间新建的会话、比网关新的进度都以本机为准
+      const byId = new Map(remote.map((session) => [session.id, session]));
+      const local = loadSessions();
+      for (const session of local) {
+        const existing = byId.get(session.id);
+        if (!existing || session.updatedAt > existing.updatedAt) byId.set(session.id, session);
+      }
+      const sessions = [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+
+      dirty.clear();
+      savedAt.clear();
+      needsView.clear();
+      oversized.clear();
+      for (const session of sessions) {
+        const incoming = remote.find((item) => item.id === session.id);
+        if (incoming && incoming.updatedAt === session.updatedAt) {
+          savedAt.set(session.id, remoteAt.get(session.id) ?? session.updatedAt);
+        } else {
+          dirty.add(session.id);
+          needsView.add(session.id);
+        }
+      }
+      if (remote.length === 0 && local.length > 0) {
+        let marker: string | null = null;
+        try {
+          marker = window.localStorage.getItem(STORAGE_KEY);
+        } catch {
+          marker = null;
+        }
+        if (marker !== STORAGE_MIGRATED) migrationTotal = local.length;
+        for (const session of local) needsView.add(session.id);
+      }
+
+      useReplay.setState({
+        sessions,
+        hydrated: true,
+        storageMode: 'gateway',
+        activeId: null,
+        playing: false,
+        lastEvent: null,
+      });
+      stopPlayTimer();
+      saveLocalSnapshot(sessions);
+      hydratedLogin = login;
+      notified.clear();
+      if (dirty.size) scheduleSave(100);
+    } catch {
+      // 旧网关没有 replay.* 或当前离线：退回 localStorage 快照，只读
+      const local = loadSessions().sort((a, b) => b.updatedAt - a.updatedAt);
+      useReplay.setState({
+        sessions: local,
+        hydrated: true,
+        storageMode: 'local',
+        activeId: null,
+        playing: false,
+      });
+      stopPlayTimer();
+    } finally {
+      hydrating = null;
+    }
+  })();
+  return hydrating;
+}
+
 function schedulePersist(): void {
   if (persistTimer != null) return;
   persistTimer = window.setTimeout(() => {
     persistTimer = null;
-    saveSessions(useReplay.getState().sessions);
+    persistNow();
   }, 3000);
 }
 
@@ -185,7 +502,9 @@ function persistNow(): void {
     window.clearTimeout(persistTimer);
     persistTimer = null;
   }
-  saveSessions(useReplay.getState().sessions);
+  saveLocalSnapshot(useReplay.getState().sessions);
+  collectDirty();
+  if (dirty.size) scheduleSave();
 }
 
 // ---------------------------------------------------------------- 行情加载
@@ -320,6 +639,11 @@ export const useReplay = create<ReplayStore>((set, get) => ({
   follow: true,
   revision: 0,
   lastEvent: null,
+  // 网关连接后由 App / 复盘页调用 hydrate；完成前显示骨架屏
+  hydrated: false,
+  storageMode: 'local',
+
+  hydrate: (login) => hydrateSessions(login),
 
   createSession: (input) => {
     const id = replayId('replay');
@@ -582,6 +906,8 @@ export const useReplay = create<ReplayStore>((set, get) => ({
       return;
     }
     session.cursorTs = last.time;
+    // 进度本身就是训练数据，标脏后按 2 秒防抖写网关
+    session.updatedAt = Date.now();
     // 模板阶段是异步发生在回放里的，记下最近一条，界面才能说明「模板确实执行了」
     const lastEvent = events.length ? events[events.length - 1] : null;
     const templateEvent = [...events].reverse().find((event) => event.startsWith('模板'));
@@ -679,6 +1005,7 @@ export const useReplay = create<ReplayStore>((set, get) => ({
     if (!session) return;
     stopPlayTimer();
     finishInternal(session);
+    session.updatedAt = Date.now();
     set((state) => ({
       playing: false,
       sessions: state.sessions.map((item) => (item.id === session.id ? { ...item } : item)),
@@ -706,12 +1033,23 @@ export const useReplay = create<ReplayStore>((set, get) => ({
     // 删除别的会话不能顺手中断当前回放
     if (active) stopPlayTimer();
     dropReplaySource(id);
+    dirty.delete(id);
+    savedAt.delete(id);
+    needsView.delete(id);
+    oversized.delete(id);
+    viewPending.delete(id);
+    dropLocalViews(id);
     set((state) => ({
       sessions: state.sessions.filter((item) => item.id !== id),
       activeId: active ? null : state.activeId,
       playing: active ? false : state.playing,
     }));
     persistNow();
+    if (storageMode() === 'gateway') {
+      gateway.call('replay.delete', { id }).catch(() => {
+        notifyOnce('delete', '删除没同步到网关，刷新后这个会话可能重新出现');
+      });
+    }
   },
 
   rename: (id, name) => {

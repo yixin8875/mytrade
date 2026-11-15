@@ -51,6 +51,7 @@ export function TopBar() {
   const notify = useApp((s) => s.notify);
   const [confirmKill, setConfirmKill] = useState(false);
   const [confirmLive, setConfirmLive] = useState(false);
+  const [busy, setBusy] = useState<'mode' | 'kill' | null>(null);
 
   const info = symbols.find((item) => item.name === symbol);
   const online = conn === 'open';
@@ -84,10 +85,14 @@ export function TopBar() {
       return;
     }
     setConfirmLive(false);
+    setBusy('mode');
     try {
       await gateway.call('system.setTradeMode', { mode: next });
+      notify('success', next === 'readonly' ? '已切到只读模式' : `已开启${next === 'live' ? '实盘' : '模拟'}交易`);
     } catch (error) {
       notify('error', (error as Error).message);
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -99,11 +104,14 @@ export function TopBar() {
       return;
     }
     if (halted) {
+      setBusy('kill');
       try {
         await gateway.call('system.resume', {});
         notify('success', '已恢复交易');
       } catch (error) {
         notify('error', (error as Error).message);
+      } finally {
+        setBusy(null);
       }
       return;
     }
@@ -113,6 +121,7 @@ export function TopBar() {
       return;
     }
     setConfirmKill(false);
+    setBusy('kill');
     try {
       const res = await gateway.call<{ closed?: { error?: string }[] }>('system.halt', {
         closeAll: true,
@@ -126,6 +135,8 @@ export function TopBar() {
       );
     } catch (error) {
       notify('error', (error as Error).message);
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -228,8 +239,8 @@ export function TopBar() {
       )}
 
       <button
-        onClick={killSwitch}
-        disabled={!terminal}
+        onClick={() => void killSwitch()}
+        disabled={!terminal || busy === 'kill'}
         title={
           halted
             ? `已停机：${riskStatus?.haltReason || '手动停机'}，点击恢复`
@@ -242,15 +253,15 @@ export function TopBar() {
             : confirmKill
               ? 'border-tv-down bg-tv-down text-white'
               : 'border-tv-down/35 text-tv-down hover:bg-tv-down-soft',
-          !terminal && 'cursor-not-allowed opacity-40',
+          (!terminal || busy === 'kill') && 'cursor-not-allowed opacity-40',
         )}
       >
-        {halted ? '恢复交易' : confirmKill ? '确认平仓？' : '急停'}
+        {busy === 'kill' ? '处理中…' : halted ? '恢复交易' : confirmKill ? '确认平仓？' : '急停'}
       </button>
 
       <button
-        onClick={toggleMode}
-        disabled={!terminal || modeLocked}
+        onClick={() => void toggleMode()}
+        disabled={!terminal || modeLocked || busy === 'mode'}
         title={
           modeLocked
             ? '实盘账户：请先在「设置 → 交易与风控」打开实盘开关'
@@ -264,16 +275,18 @@ export function TopBar() {
           mode === 'demo' && 'border-tv-up/35 bg-tv-up-soft text-tv-up',
           mode === 'live' && 'border-tv-down/35 bg-tv-down-soft text-tv-down',
           confirmLive && 'border-tv-down bg-tv-down text-white',
-          (!terminal || modeLocked) && 'cursor-not-allowed opacity-40',
+          (!terminal || modeLocked || busy === 'mode') && 'cursor-not-allowed opacity-40',
         )}
       >
-        {confirmLive
-          ? '确认实盘？'
-          : mode === 'readonly'
-            ? '只读'
-            : mode === 'demo'
-              ? '模拟可交易'
-              : '实盘交易'}
+        {busy === 'mode'
+          ? '切换中…'
+          : confirmLive
+            ? '确认实盘？'
+            : mode === 'readonly'
+              ? '只读'
+              : mode === 'demo'
+                ? '模拟可交易'
+                : '实盘交易'}
       </button>
 
       <div className="flex items-center gap-1.5 pl-1 text-[11px] text-tv-muted">

@@ -184,6 +184,7 @@ def make_worker(
         TRADE_ACTION_DEAL=1,
         TRADE_ACTION_PENDING=5,
         TRADE_ACTION_SLTP=6,
+        TRADE_ACTION_MODIFY=7,
         ORDER_FILLING_FOK=0,
         ORDER_FILLING_IOC=1,
         ORDER_FILLING_RETURN=2,
@@ -1692,3 +1693,71 @@ def test_执行记录写库失败不影响交易(monkeypatch):
     worker.store.record_execution = boom
 
     worker._record_execution("cid", 1, analyze_base(), 2000.7, 1, "filled", None)
+
+
+# ---------- 改单止损 / 止盈 ----------
+
+
+def _fx_info():
+    return fake_symbol_info(point=0.00001, digits=5, trade_tick_size=0.00001)
+
+
+def test_modify_order_checks_stop_direction(monkeypatch):
+    worker, fake, _ = make_worker(monkeypatch, info=_fx_info())
+    pending = types.SimpleNamespace(
+        ticket=5, symbol="EURUSD", type=3, price_open=1.06000, sl=0.0, tp=0.0
+    )
+    fake.orders_get = lambda **kwargs: (pending,)
+    monkeypatch.setattr(worker, "_poll_trade_state", lambda: None)
+
+    with pytest.raises(GatewayError) as exc:
+        worker._modify_order({"ticket": 5, "tp": 1.07000})
+    assert exc.value.code == "BAD_STOPS"
+    assert "止盈" in exc.value.message
+
+    with pytest.raises(GatewayError) as exc:
+        worker._modify_order({"ticket": 5, "sl": 1.05000})
+    assert exc.value.code == "BAD_STOPS"
+    assert "止损" in exc.value.message
+
+
+def test_modify_order_passes_stops_and_supports_clear(monkeypatch):
+    worker, fake, sent = make_worker(monkeypatch, info=_fx_info())
+    pending = types.SimpleNamespace(
+        ticket=5, symbol="EURUSD", type=2, price_open=1.06000, sl=1.05000, tp=1.07000
+    )
+    fake.orders_get = lambda **kwargs: (pending,)
+    monkeypatch.setattr(worker, "_poll_trade_state", lambda: None)
+
+    worker._modify_order({"ticket": 5, "sl": 1.05500, "tp": 1.07500})
+    assert sent[-1]["sl"] == pytest.approx(1.055)
+    assert sent[-1]["tp"] == pytest.approx(1.075)
+
+    # 0 表示清除价位，而不是保留旧值
+    worker._modify_order({"ticket": 5, "sl": 0, "tp": 0})
+    assert sent[-1]["sl"] == 0.0
+    assert sent[-1]["tp"] == 0.0
+
+
+def test_modify_position_checks_against_market_price(monkeypatch):
+    info = _fx_info()
+    position = types.SimpleNamespace(
+        ticket=7,
+        symbol="EURUSD",
+        type=0,
+        volume=0.1,
+        price_open=1.06000,
+        sl=0.0,
+        tp=0.0,
+    )
+    worker, _fake, _ = make_worker(
+        monkeypatch, info=info, tick=fake_tick(bid=1.06500, ask=1.06520), positions=(position,)
+    )
+
+    with pytest.raises(GatewayError) as exc:
+        worker._modify_position({"ticket": 7, "sl": 1.06600})
+    assert exc.value.code == "BAD_STOPS"
+
+    with pytest.raises(GatewayError) as exc:
+        worker._modify_position({"ticket": 7, "tp": 1.06000})
+    assert exc.value.code == "BAD_STOPS"

@@ -21,7 +21,8 @@ export const DURATION_BUCKETS = [
   { key: 'lt15', label: '15 分内' },
   { key: '15-60', label: '15 分–1 时' },
   { key: '1-4h', label: '1–4 时' },
-  { key: 'gt4h', label: '4 时以上' },
+  { key: '4-24h', label: '4–24 时' },
+  { key: 'gt24h', label: '1 天以上' },
 ];
 
 export const WEEKDAY_KEYS = [1, 2, 3, 4, 5, 6, 7];
@@ -46,7 +47,8 @@ export function durationBucket(durationSec: number | null): string {
   if (minutes < 15) return 'lt15';
   if (minutes < 60) return '15-60';
   if (minutes < 240) return '1-4h';
-  return 'gt4h';
+  if (minutes < 1440) return '4-24h';
+  return 'gt24h';
 }
 
 /** "2026-11-14" → 1..7（周一 = 1） */
@@ -152,18 +154,31 @@ export interface Stats {
   winRate: number | null;
   avgR: number | null;
   expectancy: number | null;
+  /** 毛利 / 毛损；没有亏损单时为空，与 journal.stats 一致 */
+  profitFactor: number | null;
+  /** 平均持仓秒数（只统计有 durationSec 的交易） */
+  avgDurationSec: number | null;
 }
 
 export function summarize(trades: TrendTrade[]): Stats {
   let net = 0;
+  let grossProfit = 0;
+  let grossLoss = 0;
   let wins = 0;
   let losses = 0;
   const rValues: number[] = [];
+  const durations: number[] = [];
   for (const trade of trades) {
     net += trade.profit;
-    if (isWin(trade.profit)) wins += 1;
-    else if (isLoss(trade.profit)) losses += 1;
+    if (isWin(trade.profit)) {
+      wins += 1;
+      grossProfit += trade.profit;
+    } else if (isLoss(trade.profit)) {
+      losses += 1;
+      grossLoss += trade.profit;
+    }
     if (trade.r != null) rValues.push(trade.r);
+    if (trade.durationSec != null && trade.durationSec > 0) durations.push(trade.durationSec);
   }
   const count = trades.length;
   return {
@@ -178,6 +193,12 @@ export function summarize(trades: TrendTrade[]): Stats {
         ? rValues.reduce((sum, value) => sum + value, 0) / rValues.length
         : null,
     expectancy: count > 0 ? net / count : null,
+    profitFactor:
+      grossLoss < 0 ? Math.round((grossProfit / Math.abs(grossLoss)) * 100) / 100 : null,
+    avgDurationSec:
+      durations.length > 0
+        ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length)
+        : null,
   };
 }
 

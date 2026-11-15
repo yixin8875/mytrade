@@ -69,6 +69,8 @@ export function OrderTicket() {
   const riskStatus = useApp((s) => s.riskStatus);
   const setPage = useApp((s) => s.setPage);
   const setSettingsSection = useApp((s) => s.setSettingsSection);
+  const openSettings = useApp((s) => s.openSettings);
+  const resetDraft = useApp((s) => s.resetDraft);
   const notify = useApp((s) => s.notify);
 
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -570,17 +572,17 @@ export function OrderTicket() {
       <div className="flex h-12 items-center justify-between px-4">
         <span className="text-[13px] font-semibold text-tv-text">下单</span>
         <button
-          onClick={activate}
-          disabled={!ready || !info}
+          onClick={() => (draft.active ? resetDraft() : activate())}
+          disabled={!draft.active && (!ready || !info)}
           className={clsx(
             'h-7 rounded-lg border px-2.5 text-[12px] transition-colors',
             draft.active
-              ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
+              ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent hover:bg-tv-accent/15'
               : 'border-tv-border bg-tv-panel text-tv-muted hover:bg-tv-hover hover:text-tv-text',
-            (!ready || !info) && 'cursor-not-allowed opacity-40',
+            !draft.active && (!ready || !info) && 'cursor-not-allowed opacity-40',
           )}
         >
-          {draft.active ? '划线中' : '画线下单'}
+          {draft.active ? '取消划线' : '画线下单'}
         </button>
       </div>
 
@@ -1045,7 +1047,7 @@ export function OrderTicket() {
             <span>取消草稿</span>
             <span className="px-1">·</span>
             <Kbd>Shift</Kbd>
-            <span>吸附整数位</span>
+            <span>在图上拖动时吸附整数位</span>
           </div>
         </div>
       </div>
@@ -1127,8 +1129,14 @@ export function OrderTicket() {
                 ) : gateError ? (
                   <div className="mt-2 text-[10px] leading-4 text-tv-warn">{gateError}</div>
                 ) : gateRules.length === 0 ? (
-                  <div className="mt-2 text-[10px] text-tv-muted">
-                    {gate?.playbookId ? '当前清单没有规则' : '未关联清单'}
+                  <div className="mt-2 space-y-1.5 text-[10px] text-tv-muted">
+                    <div>{gate?.playbookId ? '当前清单没有规则' : '未关联清单'}</div>
+                    <button
+                      onClick={() => openSettings('discipline')}
+                      className="rounded border border-tv-border px-1.5 py-0.5 text-[10px] text-tv-text transition-colors hover:bg-tv-hover"
+                    >
+                      去设置开仓纪律
+                    </button>
                   </div>
                 ) : (
                   <>

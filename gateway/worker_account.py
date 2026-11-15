@@ -174,7 +174,9 @@ class WorkerAccount:
             self._alerts = self.store.alerts_list(login)
             self._notifier.start()
             try:
-                self._journal.sync(login, force=True)
+                self._journal.sync(
+                    login, force=True, server_offset=self._server_offset_value()
+                )
             except Exception:  # noqa: BLE001 - 日志同步失败不影响交易
                 pass
             self._emit("gateway", self.health())
@@ -252,6 +254,10 @@ class WorkerAccount:
 
         previous = self._account_id
         self._account_id = profile["id"]
+        # 不同券商服务器时区可能不同，切账户后重新推算
+        self._server_offset = 0
+        self._server_offset_known = False
+        self._offset_checked_at = 0.0
         self.store.audit(
             "account.switch",
             {
@@ -472,8 +478,52 @@ class WorkerAccount:
         if not server_time:
             return
         raw = server_time - time.time()
+        # 周末/停牌/异常 tick 会让差值漂到几十小时，宁可不更新
+        if abs(raw) > 14 * 3600:
+            return
         # 券商时区都是整小时或半小时，按 15 分钟取整吸收网络延迟
         self._server_offset = int(round(raw / 900.0)) * 900
+        self._server_offset_known = True
+
+    def _server_offset_value(self) -> int | None:
+        """已知才返回偏移；未知时 None，让下游不要把 0 当成真实时区。"""
+        return int(self._server_offset) if getattr(self, "_server_offset_known", False) else None
+
+    def _refresh_server_offset(self) -> None:
+        """health 被轮询时顺手校准一次，避免没订阅报价时偏移一直是 0。"""
+        now = time.monotonic()
+        if now - getattr(self, "_offset_checked_at", 0.0) < 30:
+            return
+        self._offset_checked_at = now
+        if not self._connected:
+            return
+        symbols = list(getattr(self, "_subs", {}) or {})
+        if not symbols:
+            symbols = [
+                str(item)
+                for item in (self.store.get_state("watchlist", self._login()) or [])
+            ]
+        tick = None
+        try:
+            for symbol in symbols[:5]:
+                tick = mt5.symbol_info_tick(symbol)
+                if tick is not None and int(getattr(tick, "time", 0) or 0):
+                    break
+                tick = None
+            if tick is None:
+                info_getter = getattr(mt5, "symbols_get", None)
+                for info in (info_getter() if callable(info_getter) else None) or ():
+                    if not getattr(info, "visible", False):
+                        continue
+                    tick = mt5.symbol_info_tick(info.name)
+                    if tick is not None and int(getattr(tick, "time", 0) or 0):
+                        break
+                    tick = None
+        except Exception:  # noqa: BLE001 - 校准失败不能影响 health
+            return
+        if tick is None:
+            return
+        self._note_server_time(tick)
 
     def _account_payload(self, ai: Any) -> dict:
         return {

@@ -6,8 +6,6 @@ import type { ReplayReference, ReplaySession } from './types';
 export const REFERENCE_PAD_SEC = 30 * 60;
 /** 剥头皮交易也至少给一小时，免得只有几根 K 线 */
 export const REFERENCE_MIN_SEC = 60 * 60;
-/** 与 store.saveSessions 的持久化上限一致 */
-export const SESSION_LIMIT = 60;
 
 export function referenceKey(login: number, positionId: number): string {
   return `${login}:${positionId}`;

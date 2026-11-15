@@ -13,7 +13,7 @@ import { clsx } from 'clsx';
 import { fmtMoney, fmtSigned } from '../lib/format';
 import { cacheSummary, clearCache } from './cache';
 import { goReplayReport, goReplaySession } from './route';
-import { sessionStats, useReplay } from './store';
+import { sessionStats, SESSION_SOFT_LIMIT, useReplay } from './store';
 import { Tape } from './Tape';
 import { fmtDate, fmtShort, relativeTime } from './time';
 import type { ReplaySession, ReplayStatus } from './types';
@@ -57,12 +57,13 @@ function progressPct(session: ReplaySession): number {
 
 export function ReplayList({ onCreate }: { onCreate: () => void }) {
   const sessions = useReplay((s) => s.sessions);
+  const storageMode = useReplay((s) => s.storageMode);
   const archive = useReplay((s) => s.archive);
   const remove = useReplay((s) => s.remove);
   const [cache, setCache] = useState<{ symbol: string; bars: number; bytes: number }[]>([]);
   const [menuId, setMenuId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
-  const [source, setSource] = useState<'all' | 'journal' | 'manual'>('all');
+  const [source, setSource] = useState<'all' | 'journal' | 'missed' | 'manual'>('all');
   const visibleSessions = useMemo(
     () =>
       sessions.filter(
@@ -161,7 +162,9 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
             <div className="num mt-1.5 font-mono text-[24px] font-medium leading-none">
               {stats.finished.length}
             </div>
-            <div className="mt-2 text-[10px] text-console-muted">全部数据保存在本机</div>
+            <div className="mt-2 text-[10px] text-console-muted">
+              {storageMode === 'gateway' ? '会话保存在网关数据库' : '网关不可用 · 只读本机快照'}
+            </div>
           </div>
         </div>
 
@@ -248,6 +251,7 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
               [
                 { value: 'all', label: '全部' },
                 { value: 'journal', label: '来自实盘' },
+                { value: 'missed', label: '来自机会' },
                 { value: 'manual', label: '手动新建' },
               ] as const
             ).map((item) => (
@@ -267,6 +271,8 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
           </div>
           <span className="text-[10px] text-console-muted">
             共 {visibleSessions.length} 个会话
+            {sessions.length >= SESSION_SOFT_LIMIT ? ' · 建议归档旧会话' : ''}
+            {storageMode === 'local' ? ' · 本机缓存（离线）' : ''}
           </span>
         </div>
 
@@ -296,15 +302,18 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
                     >
                       {source === 'journal'
                         ? '还没有从实盘交易创建的会话。到交易日志点「回放」即可。'
-                        : source === 'manual'
-                          ? '没有手动新建的会话。'
-                          : '还没有复盘会话。'}
+                        : source === 'missed'
+                          ? '还没有从错过的机会创建的会话。到「错过的机会」点「在回放中看」即可。'
+                          : source === 'manual'
+                            ? '没有手动新建的会话。'
+                            : '还没有复盘会话。'}
                     </td>
                   </tr>
                 )}
                 {visibleSessions.map((session) => {
                   const pnl = pnlOf(session);
                   const finished = session.status === 'finished' || session.status === 'archived';
+                  const archived = session.status === 'archived';
                   return (
                     <tr key={session.id} className="group">
                       <td className="border-b border-console-line px-4 py-3">
@@ -319,6 +328,11 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
                             来自实盘
                           </span>
                         )}
+                        {session.origin === 'missed' && (
+                          <span className="ml-1.5 inline-flex items-center rounded-[4px] border border-console-line-2 px-1 py-px text-[9px] text-console-muted">
+                            来自机会
+                          </span>
+                        )}
                       </td>
                       <td className="whitespace-nowrap border-b border-console-line px-4 py-3 font-mono text-[11px] text-console-ink-2">
                         {session.symbol} · {session.settings.timeframe}m
@@ -330,7 +344,7 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
                         <div className="flex items-center gap-2">
                           <Tape session={session} height={10} count={24} className="h-2.5 w-16" />
                           <span className="num font-mono text-[10px] text-console-muted">
-                            {finished ? '完成' : `${progressPct(session)}%`}
+                            {archived ? '已归档' : finished ? '报告' : `${progressPct(session)}%`}
                           </span>
                         </div>
                       </td>
@@ -364,7 +378,7 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
                             onClick={() => openSession(session)}
                             className="whitespace-nowrap text-[11px] text-console-muted hover:text-console-ink"
                           >
-                            {finished ? '报告' : '继续'}
+                            {archived ? '查看' : finished ? '报告' : '继续'}
                           </button>
                           <button
                             onClick={() => {
@@ -459,21 +473,20 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
           <div className="min-w-[190px]">
             <div className="flex items-center gap-1.5 text-[12px] font-medium">
               <Database size={14} strokeWidth={1.5} className="text-console-muted" />
-              本地数据
+              本地行情缓存
             </div>
             <div className="mt-1 text-[10px] text-console-muted">
               {cache.length
-                ? `${cache
-                    .map((row) => row.symbol)
-                    .slice(0, 4)
-                    .join(' · ')} · ${(cache.reduce((sum, row) => sum + row.bytes, 0) / 1024 / 1024).toFixed(1)} MB`
+                ? `${cache.length} 个品种 · ${cache.reduce((sum, row) => sum + row.bars, 0).toLocaleString()} 根 · ${(cache.reduce((sum, row) => sum + row.bytes, 0) / 1024 / 1024).toFixed(1)} MB`
                 : '还没有缓存行情'}
             </div>
           </div>
           <div className="flex min-w-[180px] flex-1 gap-0.5">
             {Array.from({ length: 12 }, (_, index) => {
+              // 按所有品种的缓存总量画进度，而不是只看第一个品种
+              const totalBars = cache.reduce((sum, row) => sum + row.bars, 0);
               const filled = cache.length
-                ? Math.min(12, Math.round((cache[0].bars / 50000) * 12))
+                ? Math.min(12, Math.round((totalBars / 50000) * 12))
                 : 0;
               return (
                 <span
@@ -491,7 +504,9 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
             })}
           </div>
           <span className="whitespace-nowrap text-[10px] text-console-muted">
-            复盘数据保存在本机，不进入实盘日志
+            {storageMode === 'gateway'
+              ? '行情缓存只在本机 · 会话记录已写入网关'
+              : '网关离线 · 复盘会话暂存本机'}
           </span>
           <button
             onClick={() => {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
-import { Bell, Pause, Play, Trash2, X } from 'lucide-react';
+import { Bell, Pause, Pencil, Play, Trash2, X } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { beep, desktopNotify, desktopPermission, requestDesktopPermission } from '../lib/alert';
@@ -33,10 +33,13 @@ export function AlertsPanel() {
   const [repeat, setRepeat] = useState(false);
   const [cooldown, setCooldown] = useState('60');
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<PriceAlert | null>(null);
+  const [confirmId, setConfirmId] = useState<number | null>(null);
   const prefSymbol = useRef(symbol);
 
   const digitsFor = (name: string) => symbols.find((item) => item.name === name)?.digits ?? 5;
-  const digits = digitsFor(symbol);
+  const formSymbol = editing?.symbol ?? symbol;
+  const digits = digitsFor(formSymbol);
   const activeCount = alerts.filter((item) => item.enabled).length;
 
   const refresh = () =>
@@ -64,29 +67,59 @@ export function AlertsPanel() {
   useEffect(() => {
     if (prefSymbol.current === symbol) return;
     prefSymbol.current = symbol;
+    if (editing) return;
     setPrice('');
     setKind('above');
-  }, [symbol]);
+    // 编辑中的告警跟着它自己的品种，不随图表切换清空
+  }, [symbol, editing]);
 
-  const create = async () => {
+  const resetForm = () => {
+    setEditing(null);
+    setNote('');
+  };
+
+  const startEdit = (alert: PriceAlert) => {
+    setEditing(alert);
+    setKind(alert.kind);
+    setPrice(String(alert.price));
+    setNote(alert.note ?? '');
+    setRepeat(!!alert.repeat);
+    setCooldown(String(alert.cooldown_sec || 60));
+  };
+
+  const save = async () => {
     const value = Number(price);
-    if (!symbol || !Number.isFinite(value) || value <= 0) {
+    const target = editing?.symbol ?? symbol;
+    if (!target || !Number.isFinite(value) || value <= 0) {
       notify('error', '请输入有效的告警价格');
       return;
     }
     setBusy(true);
     try {
-      await gateway.call('alerts.create', {
-        symbol,
-        kind,
-        price: value,
-        note: note.trim() || undefined,
-        repeat,
-        cooldownSec: Number(cooldown) || 60,
-      });
-      await refresh();
-      setNote('');
-      notify('success', `已添加 ${symbol} ${kind === 'above' ? '上穿' : '下穿'} ${price}`);
+      if (editing) {
+        await gateway.call('alerts.update', {
+          id: editing.id,
+          kind,
+          price: value,
+          note: note.trim() || '',
+          repeat,
+          cooldownSec: repeat ? Number(cooldown) || 60 : 0,
+        });
+        await refresh();
+        notify('success', '告警已更新');
+      } else {
+        await gateway.call('alerts.create', {
+          symbol: target,
+          kind,
+          price: value,
+          note: note.trim() || undefined,
+          repeat,
+          cooldownSec: Number(cooldown) || 60,
+        });
+        await refresh();
+        notify('success', `已添加 ${target} ${kind === 'above' ? '上穿' : '下穿'} ${price}`);
+      }
+      resetForm();
     } catch (error) {
       notify('error', (error as Error).message);
     } finally {
@@ -104,6 +137,13 @@ export function AlertsPanel() {
   };
 
   const remove = async (alert: PriceAlert) => {
+    if (confirmId !== alert.id) {
+      setConfirmId(alert.id);
+      window.setTimeout(() => setConfirmId((id) => (id === alert.id ? null : id)), 4000);
+      return;
+    }
+    setConfirmId(null);
+    if (editing?.id === alert.id) resetForm();
     try {
       await gateway.call('alerts.delete', { id: alert.id });
       await refresh();
@@ -209,7 +249,8 @@ export function AlertsPanel() {
         <div className="flex items-center gap-2">
           <span className="w-8 shrink-0 text-[11px] text-tv-muted">品种</span>
           <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-tv-text">
-            {symbol || '—'}
+            {formSymbol || '—'}
+            {editing && <span className="ml-1.5 text-[10px] text-tv-muted">编辑中</span>}
           </span>
           <div className="flex gap-1">
             <button
@@ -246,15 +287,17 @@ export function AlertsPanel() {
             onChange={(event) => setPrice(event.target.value)}
             className={clsx(inputClass, 'flex-1')}
           />
-          <button
-            onClick={() => {
-              const base = useApp.getState().quote?.bid;
-              if (base) setPrice(base.toFixed(digits));
-            }}
-            className="h-7 shrink-0 rounded-lg px-2 text-[11px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
-          >
-            现价
-          </button>
+          {!editing && (
+            <button
+              onClick={() => {
+                const base = useApp.getState().quote?.bid;
+                if (base) setPrice(base.toFixed(digits));
+              }}
+              className="h-7 shrink-0 rounded-lg px-2 text-[11px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+            >
+              现价
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -288,15 +331,24 @@ export function AlertsPanel() {
             className="h-6 w-11 rounded-md border border-tv-border bg-tv-raised px-1 text-right font-mono text-[11px] text-tv-text outline-none focus:border-tv-accent disabled:opacity-40"
           />
           <span>秒</span>
+          {editing && (
+            <button
+              onClick={resetForm}
+              className="ml-auto h-7 rounded-lg px-2 text-[11px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+            >
+              取消编辑
+            </button>
+          )}
           <button
-            onClick={() => void create()}
+            onClick={() => void save()}
             disabled={busy}
             className={clsx(
-              'ml-auto h-7 rounded-lg bg-tv-text px-3 text-[12px] font-medium text-tv-bg transition-opacity hover:opacity-90',
+              'h-7 rounded-lg bg-tv-text px-3 text-[12px] font-medium text-tv-bg transition-opacity hover:opacity-90',
+              !editing && 'ml-auto',
               busy && 'opacity-50',
             )}
           >
-            {busy ? '添加中…' : '添加告警'}
+            {busy ? '保存中…' : editing ? '保存修改' : '添加告警'}
           </button>
         </div>
       </div>
@@ -363,12 +415,25 @@ export function AlertsPanel() {
               )}
             </button>
             <button
-              onClick={() => void remove(alert)}
-              title="删除"
-              aria-label="删除告警"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-tv-muted transition-colors hover:bg-tv-down-soft hover:text-tv-down"
+              onClick={() => startEdit(alert)}
+              title="编辑"
+              aria-label="编辑告警"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
             >
-              <Trash2 size={13} strokeWidth={1.5} />
+              <Pencil size={13} strokeWidth={1.5} />
+            </button>
+            <button
+              onClick={() => void remove(alert)}
+              title={confirmId === alert.id ? '再点一次确认删除' : '删除'}
+              aria-label="删除告警"
+              className={clsx(
+                'flex h-6 shrink-0 items-center justify-center rounded-md transition-colors',
+                confirmId === alert.id
+                  ? 'w-auto bg-tv-down px-1.5 text-[10px] text-white'
+                  : 'w-6 text-tv-muted hover:bg-tv-down-soft hover:text-tv-down',
+              )}
+            >
+              {confirmId === alert.id ? '确认' : <Trash2 size={13} strokeWidth={1.5} />}
             </button>
           </div>
         ))}

@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { gateway } from '../gateway/client';
+import { RangeChips } from '../components/RangeChips';
 import { useApp } from '../store/useApp';
 import { fmtPrice, fmtVolume } from '../lib/format';
 import type { ExecutionRow, ExecutionStats } from '../gateway/types';
-
-const RANGES = [7, 30, 90];
 
 const STATE_TEXT: Record<ExecutionRow['state'], string> = {
   filled: '成交',
@@ -34,6 +33,9 @@ export function ExecutionsView() {
   const conn = useApp((s) => s.conn);
   const symbolList = useApp((s) => s.symbols);
   const activeLogin = useApp((s) => s.account?.login ?? 0);
+  const setPage = useApp((s) => s.setPage);
+  const setJournalFilter = useApp((s) => s.setJournalFilter);
+  const setJournalDays = useApp((s) => s.setJournalDays);
 
   const [days, setDays] = useState(30);
   const [stats, setStats] = useState<ExecutionStats | null>(null);
@@ -79,17 +81,7 @@ export function ExecutionsView() {
           </div>
           <div className="flex items-center gap-2">
             {loading && <span className="text-[12px] text-console-faint">读取中…</span>}
-            <div className="flex items-center gap-1">
-              {RANGES.map((value) => (
-                <button
-                  key={value}
-                  onClick={() => setDays(value)}
-                  className={clsx('console-chip', days === value && 'console-chip-active')}
-                >
-                  {value} 天
-                </button>
-              ))}
-            </div>
+            <RangeChips value={days} onChange={setDays} />
           </div>
         </header>
 
@@ -147,7 +139,7 @@ export function ExecutionsView() {
             <div className="flex items-baseline justify-between border-b border-console-line px-5 py-3.5">
               <span className="text-[13px] font-semibold">按品种</span>
               <span className="num font-mono text-[11px] text-console-faint">
-                {stats?.bySymbol.length ?? 0} 个品种
+                {stats?.bySymbol.length ?? 0} 个品种 · 点击行看日志
               </span>
             </div>
             <table className="w-full border-collapse text-[12px]">
@@ -163,7 +155,16 @@ export function ExecutionsView() {
               </thead>
               <tbody>
                 {(stats?.bySymbol ?? []).map((row) => (
-                  <tr key={row.key} className="border-t border-console-line/70">
+                  <tr
+                    key={row.key}
+                    onClick={() => {
+                      setJournalFilter({ symbol: row.key });
+                      setJournalDays(days);
+                      setPage('journal');
+                    }}
+                    title={`在交易日志中查看 ${row.key}`}
+                    className="cursor-pointer border-t border-console-line/70 transition-colors hover:bg-console-hover/50"
+                  >
                     <td className="px-5 py-2.5 font-medium">{row.key}</td>
                     <td className="num px-2 py-2.5 text-right font-mono text-console-ink-2">{row.count}</td>
                     <td

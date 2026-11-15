@@ -185,7 +185,7 @@ export interface ReplaySession {
   notes: ReplayNote[];
 
   /** 1 = 从实盘交易创建；缺省为普通会话 */
-  origin?: 'manual' | 'journal';
+  origin?: 'manual' | 'journal' | 'missed';
   /** 从实盘交易创建时的只读参照 */
   reference?: ReplayReference;
   /** 参照层是否显示；缺省时按数据源判断（demo 默认隐藏） */

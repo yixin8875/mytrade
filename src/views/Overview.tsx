@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowUpRight,
   BarChart3,
@@ -6,27 +6,29 @@ import {
   ChartCandlestick,
   Gauge,
   Layers,
+  ListChecks,
+  PlayCircle,
   Settings as SettingsIcon,
   ShieldCheck,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { gateway } from '../gateway/client';
+import { goReplaySession } from '../replay/route';
+import { useReplay } from '../replay/store';
 import { useApp, type Page } from '../store/useApp';
 import { fmtMoney, fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
 import { scoreTone, scoreWords } from '../lib/score';
-import type { JournalRecord, JournalStats, ProcessScore } from '../gateway/types';
-
-function fmtTime(ts: number): string {
-  if (!ts) return '—';
-  return new Date(ts * 1000).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-}
+import { fmtLocalTime, rowOffset } from '../lib/time';
+import type {
+  DisciplineMode,
+  JournalRecord,
+  JournalStats,
+  ProcessScore,
+  Playbook,
+  RoutineDay,
+  RoutinePhase,
+} from '../gateway/types';
 
 const QUICK_LINKS: {
   page: Page;
@@ -130,6 +132,8 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
           />
         </div>
 
+        {conn === 'open' && <TodayBoard onNavigate={onNavigate} />}
+
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(300px,1fr)]">
           <section className="console-card overflow-hidden">
             <div className="flex items-center justify-between border-b border-console-line px-5 py-4">
@@ -164,8 +168,11 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
                 <tbody>
                   {recent.map((record) => (
                     <tr key={record.position_id} className="border-t border-console-line/70">
-                      <td className="num whitespace-nowrap px-5 py-2.5 font-mono text-[11px] text-console-muted">
-                        {fmtTime(record.close_time)}
+                      <td
+                        className="num whitespace-nowrap px-5 py-2.5 font-mono text-[11px] text-console-muted"
+                        title="本机时区"
+                      >
+                        {fmtLocalTime(record.close_time, rowOffset(record, health?.serverOffset ?? 0))}
                       </td>
                       <td className="px-2 py-2.5 font-medium">{record.symbol}</td>
                       <td className="px-2 py-2.5">
@@ -377,6 +384,323 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
         </section>
       </div>
     </div>
+  );
+}
+
+const PHASES: { key: RoutinePhase; label: string }[] = [
+  { key: 'pre', label: '盘前' },
+  { key: 'during', label: '盘中' },
+  { key: 'post', label: '盘后' },
+];
+
+const MODE_TEXT: Record<DisciplineMode, string> = {
+  off: '未开启',
+  confirm: '下单前确认清单',
+  block: '不勾清单不能下单',
+};
+
+/** 今天的四个起点：例行、开仓门禁、今日交易、回放；每块都给出可执行的下一步 */
+function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
+  const notify = useApp((s) => s.notify);
+  const health = useApp((s) => s.health);
+  const config = useApp((s) => s.health?.config);
+  const activeLogin = useApp((s) => s.account?.login ?? 0);
+  const openSettings = useApp((s) => s.openSettings);
+  const setJournalFilter = useApp((s) => s.setJournalFilter);
+  const setJournalDays = useApp((s) => s.setJournalDays);
+  const sessions = useReplay((s) => s.sessions);
+
+  const [routine, setRoutine] = useState<RoutineDay | null>(null);
+  const [today, setToday] = useState<{ trades: number; net: number; unreviewed: number } | null>(
+    null,
+  );
+  const [books, setBooks] = useState<Playbook[]>([]);
+  const [seeding, setSeeding] = useState(false);
+
+  const globalMode: DisciplineMode = config?.discipline_mode ?? 'off';
+  const activeAccount = health?.accounts?.find((item) => item.id === health.activeAccountId);
+  const override = activeAccount?.discipline ?? {};
+  const mode: DisciplineMode = override.mode ?? globalMode;
+  const playbookId = override.playbook || config?.discipline_playbook || '';
+
+  useEffect(() => {
+    let alive = true;
+    gateway
+      .call<RoutineDay>('routine.day', {})
+      .then((next) => {
+        if (alive) setRoutine(next);
+      })
+      .catch(() => {
+        /* 例行还没准备好时留空态 */
+      });
+    Promise.all([
+      gateway.call<JournalStats>('journal.stats', { days: 1 }),
+      gateway.call<JournalRecord[]>('journal.list', {
+        days: 1,
+        limit: 300,
+        filters: { reviewed: 0 },
+      }),
+    ])
+      .then(([stats, unreviewed]) => {
+        if (!alive) return;
+        setToday({
+          trades: stats.summary.trades,
+          net: stats.summary.netPnl,
+          unreviewed: unreviewed.length,
+        });
+      })
+      .catch(() => {
+        /* 日志未同步时今日交易停在空态 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [activeLogin]);
+
+  useEffect(() => {
+    if (mode === 'off' && !playbookId) {
+      setBooks([]);
+      return;
+    }
+    let alive = true;
+    gateway
+      .call<{ playbooks: Playbook[] }>('strategy.list', {})
+      .then((res) => {
+        if (alive) setBooks(res.playbooks ?? []);
+      })
+      .catch(() => {
+        /* 清单名解析不出来时退回显示 id */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [mode, playbookId, activeLogin]);
+
+  const seed = async () => {
+    setSeeding(true);
+    try {
+      await gateway.call('routine.seed', {});
+      const next = await gateway.call<RoutineDay>('routine.day', {});
+      setRoutine(next);
+      notify('success', '已生成默认例行清单');
+    } catch (err) {
+      notify('error', (err as Error).message);
+    } finally {
+      setSeeding(false);
+    }
+  };
+
+  const total = routine?.summary.total ?? 0;
+  const done = routine?.summary.done ?? 0;
+  const playbookName = books.find((book) => book.id === playbookId)?.name ?? null;
+  const resumable = [...sessions]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .find((item) => !['finished', 'archived', 'error'].includes(item.status));
+  const unreviewed = today?.unreviewed ?? 0;
+
+  const openJournal = () => {
+    setJournalFilter(unreviewed > 0 ? { reviewed: 0 } : {});
+    setJournalDays(1);
+    onNavigate('journal');
+  };
+
+  const openReplay = () => {
+    if (resumable) goReplaySession(resumable.id);
+    onNavigate('replay');
+  };
+
+  return (
+    <section className="mt-4">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[13px] font-semibold">今天</span>
+        <button
+          onClick={() => onNavigate('diary')}
+          className="flex items-center gap-1 text-[12px] text-console-muted transition-colors hover:text-console-ink"
+        >
+          写今日笔记
+          <ArrowUpRight size={13} strokeWidth={1.5} />
+        </button>
+      </div>
+
+      <div className="mt-2 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <TodayCard
+          icon={ListChecks}
+          title="今天例行"
+          aside={total > 0 ? `${done} / ${total}` : '未建立'}
+          asideTone={total > 0 && done >= total ? 'text-console-gain' : 'text-console-faint'}
+        >
+          {total === 0 ? (
+            <p className="text-[12px] leading-relaxed text-console-muted">
+              还没有例行清单。先生成一份盘前 / 盘中 / 盘后的默认清单，之后每天打勾。
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {PHASES.map(({ key, label }) => {
+                const items = (routine?.phases?.[key] ?? []).filter((item) => item.due);
+                const finished = items.filter((item) => item.done).length;
+                const ratio = items.length > 0 ? finished / items.length : 0;
+                return (
+                  <div key={key}>
+                    <div className="flex items-baseline justify-between text-[11px] text-console-muted">
+                      <span>{label}</span>
+                      <span className="num font-mono text-console-faint">
+                        {items.length > 0 ? `${finished} / ${items.length}` : '—'}
+                      </span>
+                    </div>
+                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-console-hover">
+                      <div
+                        className={clsx(
+                          'h-full rounded-full',
+                          items.length > 0 && finished >= items.length
+                            ? 'bg-console-gain'
+                            : 'bg-console-ink-2/50',
+                        )}
+                        style={{ width: `${ratio * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {total === 0 ? (
+            <TodayAction onClick={() => void seed()} disabled={seeding}>
+              {seeding ? '生成中…' : '生成默认清单'}
+            </TodayAction>
+          ) : (
+            <TodayAction onClick={() => onNavigate('routines')}>去例行页打勾</TodayAction>
+          )}
+        </TodayCard>
+
+        <TodayCard
+          icon={ShieldCheck}
+          title="开仓门禁"
+          aside={mode === 'off' ? '未开启' : '生效中'}
+          asideTone={mode === 'off' ? 'text-console-warn' : 'text-console-gain'}
+        >
+          <p className="text-[12px] leading-relaxed text-console-muted">
+            {MODE_TEXT[mode]}
+            {override.mode ? '（账户覆盖）' : ''}
+          </p>
+          <p className="mt-1 truncate text-[11px] text-console-faint" title={playbookId || undefined}>
+            {playbookName ?? (playbookId || '还没有默认清单')}
+          </p>
+          <TodayAction onClick={() => openSettings('discipline')}>
+            {mode === 'off' ? '去开启门禁' : '调整门禁设置'}
+          </TodayAction>
+        </TodayCard>
+
+        <TodayCard
+          icon={BookOpen}
+          title="今日交易"
+          aside={today ? `${today.trades} 笔` : '—'}
+          asideTone="text-console-faint"
+        >
+          {today == null ? (
+            <p className="text-[12px] text-console-faint">读取中…</p>
+          ) : today.trades === 0 ? (
+            <p className="text-[12px] leading-relaxed text-console-muted">
+              今天还没有已平仓交易。开仓前先过一遍门禁清单。
+            </p>
+          ) : (
+            <div className="space-y-1">
+              <div className="flex items-baseline justify-between text-[12px]">
+                <span className="text-console-muted">净盈亏</span>
+                <span className={clsx('num font-mono font-medium', signedClass(today.net))}>
+                  {fmtSigned(today.net)}
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between text-[12px]">
+                <span className="text-console-muted">待复盘</span>
+                <span
+                  className={clsx(
+                    'num font-mono',
+                    unreviewed > 0 ? 'text-console-warn' : 'text-console-gain',
+                  )}
+                >
+                  {unreviewed > 0 ? `${unreviewed} 笔` : '都写完了'}
+                </span>
+              </div>
+            </div>
+          )}
+          <TodayAction onClick={openJournal}>
+            {unreviewed > 0 ? '去复盘今天的交易' : '查看今日交易'}
+          </TodayAction>
+        </TodayCard>
+
+        <TodayCard
+          icon={PlayCircle}
+          title="继续复盘"
+          aside={resumable ? resumable.status === 'paused' ? '已暂停' : '未结束' : '无进行中'}
+          asideTone="text-console-faint"
+        >
+          {resumable ? (
+            <>
+              <p className="truncate text-[12px] font-medium" title={resumable.name}>
+                {resumable.name}
+              </p>
+              <p className="mt-1 text-[11px] text-console-faint">
+                {resumable.symbol} · 更新于 {fmtLocalTime(resumable.updatedAt / 1000, 0)}
+              </p>
+            </>
+          ) : (
+            <p className="text-[12px] leading-relaxed text-console-muted">
+              没有未结束的回放。挑一笔今天的交易，重演一遍入场与离场。
+            </p>
+          )}
+          <TodayAction onClick={openReplay}>
+            {resumable ? '继续这次回放' : '开始一次回放'}
+          </TodayAction>
+        </TodayCard>
+      </div>
+    </section>
+  );
+}
+
+function TodayCard({
+  icon: Icon,
+  title,
+  aside,
+  asideTone,
+  children,
+}: {
+  icon: typeof ChartCandlestick;
+  title: string;
+  aside: string;
+  asideTone: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="console-card flex flex-col p-4">
+      <div className="flex items-center gap-2">
+        <Icon size={15} strokeWidth={1.5} className="text-console-muted" />
+        <span className="text-[13px] font-semibold">{title}</span>
+        <span className="flex-1" />
+        <span className={clsx('num font-mono text-[11px]', asideTone)}>{aside}</span>
+      </div>
+      <div className="mt-3 flex-1">{children}</div>
+    </section>
+  );
+}
+
+function TodayAction({
+  onClick,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="mt-3 flex items-center gap-1 text-[12px] text-console-muted transition-colors hover:text-console-ink disabled:opacity-50"
+    >
+      {children}
+      <ArrowUpRight size={13} strokeWidth={1.5} />
+    </button>
   );
 }
 

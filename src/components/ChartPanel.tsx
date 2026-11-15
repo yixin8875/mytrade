@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { gateway } from '../gateway/client';
 import { handleGlobalShortcut, useApp, type Theme } from '../store/useApp';
 import { accentForTheme } from '../lib/accent';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, snapToLevel } from '../lib/format';
 import { requestModify, revertModify } from '../lib/modifyQueue';
+import { cancelOrderWithUndo } from '../lib/orderActions';
 import { CalendarLayer } from '../chart/tv/calendarLayer';
 import { GatewayDatafeed } from '../chart/tv/datafeed';
 import { PineRunner } from '../chart/tv/pineRunner';
@@ -327,13 +328,15 @@ export function ChartPanel({
   const resolution = resolutionProp ?? storeResolution;
   symbolRef.current = symbol;
   resolutionRef.current = resolution;
-  const info = useApp((s) => s.symbols.find((item) => item.name === s.symbol));
+  // 多图时每个槽位用自己的品种参数取整，不能拿全局 symbol 的 digits / tickSize
+  const info = useApp((s) => s.symbols.find((item) => item.name === symbol));
   const quote = useApp((s) => s.quote);
   const draft = useApp((s) => s.draft);
   const preview = useApp((s) => s.preview);
   const allPositions = useApp((s) => s.positions);
   const allOrders = useApp((s) => s.orders);
   const patchDraft = useApp((s) => s.patchDraft);
+  const resetDraft = useApp((s) => s.resetDraft);
   const setSymbol = useApp((s) => s.setSymbol);
   const setResolution = useApp((s) => s.setResolution);
   const theme = useApp((s) => s.theme);
@@ -433,7 +436,7 @@ export function ChartPanel({
         color: sideColor(draft.side),
         text: `${kind}${side} ${volume(draft.volume)} @ ${fmtPrice(draft.price, digits)}`,
         onMove: (price) => patchDraft({ price: roundPrice(price) }),
-        onRemove: () => patchDraft({ active: false }),
+        onRemove: () => resetDraft(),
       });
     }
     if (draft.sl != null && draft.sl > 0) {
@@ -560,7 +563,7 @@ export function ChartPanel({
           gateway.call('order.modify', { ticket: order.ticket, price: value }),
         ),
       onRemove: () => {
-        gateway.call('order.cancel', { ticket: order.ticket }).catch((err: Error) => notify('error', err.message));
+        void cancelOrderWithUndo(order, notify);
       },
     });
   }
@@ -732,6 +735,15 @@ export function ChartPanel({
           setActiveSlot(slot);
           const store = useApp.getState();
           if (symbolRef.current && store.symbol !== symbolRef.current) store.setSymbol(symbolRef.current);
+          // 图表在 iframe 里，父容器收不到点击；落委托价只能借库的 mouse_down 事件。
+          // 市价单没有委托价可落，切换品种时 setSymbol 已把草稿关掉，这里只处理仍激活的挂单草稿。
+          const current = useApp.getState();
+          const price = crosshairPrice.current;
+          if (!current.draft.active || current.draft.type === 'market' || price == null) return;
+          const next = shiftRef.current
+            ? snapLevel(price, infoRef.current)
+            : roundToTick(price, infoRef.current);
+          if (Math.abs(current.draft.price - next) > 1e-9) current.patchDraft({ price: next });
         });
         // 品种 / 周期切换回写：单图直接写全局，多图交给 ChartGrid 决定
         // 是否同步到所有图表。用 ref 比较，避免 setSymbol/setResolution 自己触发的事件回环。
@@ -960,22 +972,6 @@ export function ChartPanel({
     };
   }, [chart, syncRange, slot]);
 
-  // ---- 点击图表设置委托价 ----
-  const handleChartClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!(event.target instanceof HTMLCanvasElement)) return;
-    const state = useApp.getState();
-    // 市价单不设委托价：点图表不再改价，只用来拖动止损/止盈
-    if (!state.draft.active || state.draft.type === 'market' || crosshairPrice.current == null) {
-      return;
-    }
-    const current = state.symbols.find((item) => item.name === state.symbol);
-    state.patchDraft({
-      price: shiftRef.current
-        ? snapLevel(crosshairPrice.current, current)
-        : roundToTick(crosshairPrice.current, current),
-    });
-  };
-
   // ---- 图表上的价格线：画线下单 + 挂单 + 持仓 + 持仓止损止盈 ----
   useEffect(() => {
     const layer = layerRef.current;
@@ -1032,6 +1028,33 @@ export function ChartPanel({
             gateway.call('order.modify', { ticket: order.ticket, price: value }),
           ),
       });
+      // 挂单的止损/止盈：没有时画引导线，松手由后端按最小距离校验
+      const slKey = `order:${order.ticket}:sl`;
+      specs.set(slKey, {
+        price: order.sl
+          ? (resolvePrice(slKey, order.sl, tol).price ?? order.sl)
+          : guidePrice(chart, order.price, order.side === 'buy', info, 1),
+        color: SIDE_SELL,
+        text: order.sl ? '' : '拖动设置止损',
+        showPrice: !!order.sl,
+        onMove: (price) =>
+          moveTo(slKey, order.sl, price, (value) =>
+            gateway.call('order.modify', { ticket: order.ticket, sl: value }),
+          ),
+      });
+      const tpKey = `order:${order.ticket}:tp`;
+      specs.set(tpKey, {
+        price: order.tp
+          ? (resolvePrice(tpKey, order.tp, tol).price ?? order.tp)
+          : guidePrice(chart, order.price, order.side !== 'buy', info, 2),
+        color: SIDE_BUY,
+        text: order.tp ? '' : '拖动设置止盈',
+        showPrice: !!order.tp,
+        onMove: (price) =>
+          moveTo(tpKey, order.tp, price, (value) =>
+            gateway.call('order.modify', { ticket: order.ticket, tp: value }),
+          ),
+      });
     }
 
     for (const position of positions) {
@@ -1052,6 +1075,18 @@ export function ChartPanel({
               gateway.call('position.modify', { ticket: position.ticket, sl: value }),
             ),
         });
+      } else {
+        const key = `position:${position.ticket}:sl`;
+        specs.set(`protect:${position.ticket}:sl`, {
+          price: guidePrice(chart, position.openPrice, position.side === 'buy', info, 1),
+          color: SIDE_SELL,
+          text: '拖动设置止损',
+          showPrice: false,
+          onMove: (price) =>
+            moveTo(key, position.sl, price, (value) =>
+              gateway.call('position.modify', { ticket: position.ticket, sl: value }),
+            ),
+        });
       }
       if (position.tp) {
         const key = `position:${position.ticket}:tp`;
@@ -1059,6 +1094,18 @@ export function ChartPanel({
           price: resolvePrice(key, position.tp, tol).price ?? position.tp,
           color: SIDE_BUY,
           text: '',
+          onMove: (price) =>
+            moveTo(key, position.tp, price, (value) =>
+              gateway.call('position.modify', { ticket: position.ticket, tp: value }),
+            ),
+        });
+      } else {
+        const key = `position:${position.ticket}:tp`;
+        specs.set(`protect:${position.ticket}:tp`, {
+          price: guidePrice(chart, position.openPrice, position.side !== 'buy', info, 2),
+          color: SIDE_BUY,
+          text: '拖动设置止盈',
+          showPrice: false,
           onMove: (price) =>
             moveTo(key, position.tp, price, (value) =>
               gateway.call('position.modify', { ticket: position.ticket, tp: value }),
@@ -1083,7 +1130,6 @@ export function ChartPanel({
         const store = useApp.getState();
         if (symbol && store.symbol !== symbol) store.setSymbol(symbol);
       }}
-      onClick={handleChartClick}
       onMouseLeave={() => {
         if (syncCrosshairRef.current) publishCrosshair(null);
       }}

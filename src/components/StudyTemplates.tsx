@@ -4,7 +4,9 @@ import { Activity, Trash2, X } from 'lucide-react';
 import { useApp } from '../store/useApp';
 import type { IChartWidgetApi } from '../../public/charting_library/charting_library';
 
-const STORAGE_KEY = 'mytrade.studyTemplates';
+const LEGACY_KEY = 'mytrade.studyTemplates';
+/** 每个图表槽位一套模板，避免四图布局互相覆盖 */
+const storageKey = (slot: string) => `mytrade.studyTemplates:${slot}`;
 
 export interface StudyTemplate {
   name: string;
@@ -15,20 +17,34 @@ export interface StudyTemplate {
 
 type TemplateMap = Record<string, StudyTemplate>;
 
-function readTemplates(): TemplateMap {
+function parseTemplates(raw: string): TemplateMap {
+  const parsed = JSON.parse(raw) as unknown;
+  return parsed && typeof parsed === 'object' ? (parsed as TemplateMap) : {};
+}
+
+function readTemplates(slot: string): TemplateMap {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-    return parsed && typeof parsed === 'object' ? (parsed as TemplateMap) : {};
+    const raw = window.localStorage.getItem(storageKey(slot));
+    if (raw) return parseTemplates(raw);
+    if (slot !== 'main') {
+      // 模板是不分品种/周期的指标组合：本槽位还没存过时沿用主图那套，
+      // 在该槽位第一次保存或删除后才会分出自己的一份。
+      const main = window.localStorage.getItem(storageKey('main'));
+      return main ? parseTemplates(main) : {};
+    }
+    // 旧版本只有一份全局模板：迁移到主图槽位，旧键保留不删
+    const legacy = window.localStorage.getItem(LEGACY_KEY);
+    if (!legacy) return {};
+    window.localStorage.setItem(storageKey('main'), legacy);
+    return parseTemplates(legacy);
   } catch {
     return {};
   }
 }
 
-function writeTemplates(map: TemplateMap): void {
+function writeTemplates(slot: string, map: TemplateMap): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+    window.localStorage.setItem(storageKey(slot), JSON.stringify(map));
   } catch {
     /* 本地存储满/被禁用时不影响图表本身 */
   }
@@ -53,10 +69,17 @@ export function StudyTemplates({
 }) {
   const notify = useApp((s) => s.notify);
   const [open, setOpen] = useState(false);
-  const [templates, setTemplates] = useState<TemplateMap>(() => readTemplates());
+  const [templates, setTemplates] = useState<TemplateMap>(() => readTemplates(slot));
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [count, setCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 槽位变化（例如布局从单图切成四图）时读对应槽位的模板
+  useEffect(() => {
+    setTemplates(readTemplates(slot));
+    setPendingDelete(null);
+  }, [slot]);
 
   const readCount = () => {
     if (!chart) {
@@ -96,7 +119,7 @@ export function StudyTemplates({
         ...templates,
         [trimmed]: { name: trimmed, content, savedAt: Date.now() },
       };
-      writeTemplates(next);
+      writeTemplates(slot, next);
       setTemplates(next);
       setName('');
       notify('success', `已保存指标模板「${trimmed}」`);
@@ -118,10 +141,17 @@ export function StudyTemplates({
   };
 
   const remove = (template: StudyTemplate) => {
+    // 删除需要两次点击：第一次只进入待确认状态，避免误删
+    if (pendingDelete !== template.name) {
+      setPendingDelete(template.name);
+      window.setTimeout(() => setPendingDelete((prev) => (prev === template.name ? null : prev)), 4000);
+      return;
+    }
     const next = { ...templates };
     delete next[template.name];
-    writeTemplates(next);
+    writeTemplates(slot, next);
     setTemplates(next);
+    setPendingDelete(null);
     notify('success', `已删除模板「${template.name}」`);
   };
 
@@ -207,8 +237,13 @@ export function StudyTemplates({
                   </button>
                   <button
                     onClick={() => remove(template)}
-                    title="删除模板"
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-tv-muted opacity-0 transition-colors hover:bg-tv-down-soft hover:text-tv-down group-hover:opacity-100"
+                    title={pendingDelete === template.name ? '再点一次删除' : '删除模板（需再点一次确认）'}
+                    className={clsx(
+                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-tv-down-soft hover:text-tv-down',
+                      pendingDelete === template.name
+                        ? 'bg-tv-down-soft text-tv-down'
+                        : 'text-tv-muted opacity-0 group-hover:opacity-100',
+                    )}
                   >
                     <Trash2 size={13} strokeWidth={1.5} />
                   </button>

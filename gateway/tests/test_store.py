@@ -1,5 +1,7 @@
 """存储层新增查询：初始止损映射与入场执行成本。"""
 
+import time
+
 from store import Store
 
 
@@ -189,3 +191,94 @@ def test_execution_entry_map_uses_first_record_per_ticket(tmp_path):
         11: {"spread": 1.2, "slippage": 0.0},
         12: {"spread": None, "slippage": None},
     }
+
+
+def test_execution_stats_zero_days_means_all_history(tmp_path):
+    store = Store(tmp_path)
+    base = {
+        "login": 1,
+        "symbol": "EURUSD",
+        "side": "buy",
+        "type": "market",
+        "volume": 0.1,
+        "state": "filled",
+        "spread_points": 1.0,
+        "slippage_points": 0.0,
+    }
+    # 一笔很老的请求与一笔今天的请求
+    store.record_execution({**base, "client_id": "old", "created_at": 1000})
+    store.record_execution({**base, "client_id": "new", "created_at": int(time.time())})
+
+    assert store.execution_stats(0, 1)["summary"]["total"] == 2
+    assert store.execution_stats(30, 1)["summary"]["total"] == 1
+
+
+def test_journal_server_offset_persists_and_backfill_is_idempotent(tmp_path):
+    store = Store(tmp_path)
+    record = {
+        "login": 1,
+        "position_id": 21,
+        "symbol": "EURUSD",
+        "side": "buy",
+        "volume": 0.1,
+        "entry_price": 1.08,
+        "exit_price": 1.085,
+        "profit": 50.0,
+        "open_time": 100,
+        "close_time": 200,
+        "duration_sec": 100,
+        "server_offset": 7200,
+    }
+    store.upsert_journal(record)
+    assert (store.journal_get(21, 1) or {})["server_offset"] == 7200
+    # 之后同步没带上偏移（未知）时，已有值不能被覆盖成 NULL
+    store.upsert_journal({**record, "server_offset": None})
+    assert (store.journal_get(21, 1) or {})["server_offset"] == 7200
+    # 回填只补 NULL 的历史记录
+    store.upsert_journal({**record, "position_id": 22, "server_offset": None})
+    assert store.journal_backfill_offset(1, 3600) == 1
+    assert (store.journal_get(22, 1) or {})["server_offset"] == 3600
+    assert (store.journal_get(21, 1) or {})["server_offset"] == 7200
+    # 已经全有值时再回填不会改动任何行
+    assert store.journal_backfill_offset(1, 1) == 0
+
+
+def test_journal_list_shares_filters_with_stats(tmp_path):
+    store = Store(tmp_path)
+    base = {
+        "login": 1,
+        "side": "buy",
+        "volume": 0.1,
+        "entry_price": 1.08,
+        "exit_price": 1.09,
+        "open_time": 100,
+        "close_time": 200,
+        "duration_sec": 100,
+    }
+    store.upsert_journal({**base, "position_id": 1, "symbol": "EURUSD", "tag": "突破", "profit": 10.0})
+    store.upsert_journal({**base, "position_id": 2, "symbol": "XAUUSD", "tag": None, "profit": -5.0})
+    store.upsert_journal({**base, "position_id": 3, "symbol": "EURUSD", "tag": None, "profit": 3.0})
+    store.trade_note_set_reviewed(1, True, login=1)
+    store.trade_note_set_reviewed(3, True, login=1)
+
+    def ids(filters=None):
+        return {
+            row["position_id"]
+            for row in store.journal_list(login=1, since=0, filters=filters)
+        }
+
+    assert ids() == {1, 2, 3}
+    assert ids({"symbol": "EURUSD"}) == {1, 3}
+    assert ids({"tag": "突破"}) == {1}
+    assert ids({"tag": "未标记"}) == {2, 3}
+    assert ids({"result": "win"}) == {1, 3}
+    assert ids({"result": "loss"}) == {2}
+    assert ids({"reviewed": 1}) == {1, 3}
+    assert ids({"reviewed": "0"}) == {2}
+    assert ids({"symbol": "EURUSD", "reviewed": 0}) == set()
+
+    # 列表带出 reviewed_at，Journal 才能显示「待复盘」
+    reviewed = {row["position_id"]: row["reviewed_at"] for row in store.journal_list(login=1, since=0)}
+    assert reviewed[1] is not None
+    assert reviewed[2] is None
+

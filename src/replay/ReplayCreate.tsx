@@ -4,6 +4,7 @@ import { clsx } from 'clsx';
 import { gateway } from '../gateway/client';
 import type { Bar } from '../gateway/types';
 import { activeTemplate, useApp } from '../store/useApp';
+import { readCachedBars } from './cache';
 import { goReplaySession } from './route';
 import { useReplay } from './store';
 import { addDays, fmtDateTime, parseServerInput, toInputValue } from './time';
@@ -35,6 +36,7 @@ export function ReplayCreate({ open, onClose }: { open: boolean; onClose: () => 
   const [riskPercent, setRiskPercent] = useState('0.5');
   const [advanced, setAdvanced] = useState(false);
   const [latest, setLatest] = useState<number | null>(null);
+  const [cached, setCached] = useState<{ from: number; to: number; bars: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -84,6 +86,25 @@ export function ReplayCreate({ open, onClose }: { open: boolean; onClose: () => 
     setCurrency(info.currency || 'USD');
   }, [open, latest, range, info]);
 
+  useEffect(() => {
+    if (!open || !symbol) return;
+    let alive = true;
+    setCached(null);
+    void readCachedBars(symbol)
+      .then((bars) => {
+        if (!alive) return;
+        const first = bars[0];
+        const last = bars[bars.length - 1];
+        setCached(first && last ? { from: first.time, to: last.time + 60, bars: bars.length } : null);
+      })
+      .catch(() => {
+        if (alive) setCached(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, symbol]);
+
   const estimate = useMemo(() => {
     const startTs = parseServerInput(start);
     const endTs = parseServerInput(end);
@@ -96,6 +117,20 @@ export function ReplayCreate({ open, onClose }: { open: boolean; onClose: () => 
       days: Math.max(1, Math.round(minutes / 1440)),
     };
   }, [start, end]);
+
+  // 色条按本机已有缓存与所选区间的重叠比例来画，不再是装饰
+  const coverage = useMemo(() => {
+    const startTs = parseServerInput(start);
+    const endTs = parseServerInput(end);
+    if (!startTs || !endTs || endTs <= startTs) return null;
+    if (!cached) return { filled: 0, partial: true };
+    const from = Math.max(startTs, cached.from);
+    const to = Math.min(endTs, cached.to);
+    if (to <= from) return { filled: 0, partial: true };
+    const ratio = (to - from) / (endTs - startTs);
+    const filled = Math.min(24, Math.round(ratio * 24));
+    return { filled, partial: ratio < 0.995 };
+  }, [start, end, cached]);
 
   if (!open) return null;
 
@@ -301,7 +336,11 @@ export function ReplayCreate({ open, onClose }: { open: boolean; onClose: () => 
                   key={index}
                   className={clsx(
                     'h-2 flex-1 rounded-[2px]',
-                    index < 21 ? 'bg-console-gain' : index === 21 ? 'bg-console-warn' : 'bg-console-line',
+                    index < (coverage?.filled ?? 0)
+                      ? 'bg-console-gain'
+                      : index === (coverage?.filled ?? 0) && coverage?.partial
+                        ? 'bg-console-warn'
+                        : 'bg-console-line',
                   )}
                 />
               ))}
@@ -317,6 +356,11 @@ export function ReplayCreate({ open, onClose }: { open: boolean; onClose: () => 
                 {estimate
                   ? `${estimate.days} 天 · 10x 下约 ${Math.max(1, Math.round(estimate.days * 0.06))} 小时`
                   : '—'}
+              </span>
+              <span>
+                {cached
+                  ? `本机缓存 ${cached.bars.toLocaleString()} 根 · ${fmtDateTime(cached.from)} 起`
+                  : '本机暂无缓存，将联网读取'}
               </span>
             </div>
           </section>

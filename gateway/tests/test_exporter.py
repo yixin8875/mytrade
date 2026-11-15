@@ -8,6 +8,7 @@ import zipfile
 from exporter import (
     create_backup,
     export_journal,
+    export_replay,
     list_backups,
     prune_auto_backups,
 )
@@ -49,6 +50,37 @@ def test_export_journal_writes_utf8_bom_and_r(tmp_path):
     assert header.startswith("登录,持仓号,品种")
     assert row.split(",")[12] == "2.0"
     assert "intent" in row
+
+
+def test_export_replay_writes_sessions_json(tmp_path):
+    store = Store(tmp_path)
+    session = {
+        "id": "rp-1",
+        "name": "黄金复盘",
+        "symbol": "XAUUSD",
+        "status": "running",
+        "startTs": 1_763_190_000,
+        "endTs": 1_763_276_400,
+        "createdAt": 1_763_190_000_000,
+        "updatedAt": 1_763_200_000_000,
+    }
+    assert (
+        store.replay_save(1, session, json.dumps(session), chart="{}", drawings="{}")
+        is True
+    )
+
+    out = export_replay(store, login=1)
+
+    assert out["rows"] == 1
+    assert out["name"].startswith("tally-replay-")
+    payload = json.loads((tmp_path / "exports" / out["name"]).read_text(encoding="utf-8"))
+    assert payload["version"] == 1
+    assert payload["login"] == 1
+    assert payload["sessions"][0]["id"] == "rp-1"
+    assert payload["sessions"][0]["session"]["symbol"] == "XAUUSD"
+    assert payload["sessions"][0]["chart"] == "{}"
+    # 会话按登录号隔离：别的账户导出不到
+    assert export_replay(store, login=2)["rows"] == 0
 
 
 def test_backup_zip_contains_database_and_manifest(tmp_path):

@@ -1,17 +1,18 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { ChartCandlestick, NotebookPen, Play, RefreshCw } from 'lucide-react';
+import { Camera, NotebookPen, Play, RefreshCw } from 'lucide-react';
 import { gateway } from '../gateway/client';
+import { RangeChips } from '../components/RangeChips';
 import { TradeDetailModal } from '../components/TradeDetailModal';
 import { TradeReviewDrawer } from '../components/TradeReviewDrawer';
-import { ReferenceCapacityDialog, useTradeReplay } from '../replay/useTradeReplay';
+import { useTradeReplay } from '../replay/useTradeReplay';
 import { useApp } from '../store/useApp';
-import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
+import { fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
+import { fmtLocalTime, rowOffset } from '../lib/time';
 import { priceDigits } from '../lib/tradeChart';
-import type { JournalBreakdown, JournalRecord, JournalStats } from '../gateway/types';
+import type { JournalFilter, JournalRecord, JournalStats } from '../gateway/types';
 
-const RANGES = [7, 30, 90];
 const PAGE_SIZE = 50;
 
 const CLOSED_BY: Record<string, string> = {
@@ -22,25 +23,6 @@ const CLOSED_BY: Record<string, string> = {
   manual: '手动',
 };
 
-type BreakdownTab = 'symbol' | 'hour' | 'tag';
-
-const BREAKDOWN_TABS: { id: BreakdownTab; label: string }[] = [
-  { id: 'symbol', label: '按品种' },
-  { id: 'hour', label: '按时段' },
-  { id: 'tag', label: '按策略' },
-];
-
-function fmtTime(ts: number): string {
-  if (!ts) return '—';
-  return new Date(ts * 1000).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-}
-
 function fmtDuration(sec: number): string {
   if (!Number.isFinite(sec) || sec <= 0) return '—';
   if (sec < 60) return `${Math.round(sec)}秒`;
@@ -49,16 +31,24 @@ function fmtDuration(sec: number): string {
   return `${Math.floor(sec / 86400)}天`;
 }
 
-/** 交易日志页：区间筛选、统计卡片、分组表现与已平仓明细 */
+/** 交易日志页：统一筛选、统计卡片与已平仓明细 */
 export function JournalView() {
   const notify = useApp((s) => s.notify);
+  const setPage = useApp((s) => s.setPage);
   const activeLogin = useApp((s) => s.account?.login ?? 0);
+  const serverOffset = useApp((s) => s.health?.serverOffset ?? 0);
+  const journalFocus = useApp((s) => s.journalFocus);
+  const setJournalFocus = useApp((s) => s.setJournalFocus);
+  const journalFilter = useApp((s) => s.journalFilter);
+  const journalDays = useApp((s) => s.journalDays);
+  const setJournalFilter = useApp((s) => s.setJournalFilter);
+  const setJournalDays = useApp((s) => s.setJournalDays);
   usePrivacyMask();
 
   const [days, setDays] = useState(30);
+  const [filter, setFilter] = useState<JournalFilter>({});
   const [stats, setStats] = useState<JournalStats | null>(null);
   const [records, setRecords] = useState<JournalRecord[]>([]);
-  const [tab, setTab] = useState<BreakdownTab>('symbol');
   const [editing, setEditing] = useState<{ id: number; value: string } | null>(null);
   const [shot, setShot] = useState<{ record: JournalRecord; tab: 'chart' | 'shot' } | null>(null);
   const [reviewing, setReviewing] = useState<number | null>(null);
@@ -72,8 +62,8 @@ export function JournalView() {
     try {
       if (syncFirst) await gateway.call('journal.sync', {});
       const [nextStats, nextRecords] = await Promise.all([
-        gateway.call<JournalStats>('journal.stats', { days }),
-        gateway.call<JournalRecord[]>('journal.list', { days, limit: 300 }),
+        gateway.call<JournalStats>('journal.stats', { days, filters: filter }),
+        gateway.call<JournalRecord[]>('journal.list', { days, limit: 300, filters: filter }),
       ]);
       setStats(nextStats);
       setRecords(nextRecords);
@@ -87,9 +77,26 @@ export function JournalView() {
 
   useEffect(() => {
     void load();
-    // load 每次渲染都是新函数，只在区间或账户变化时重新拉
+    // load 每次渲染都是新函数，只在区间、筛选或账户变化时重新拉
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days, activeLogin]);
+  }, [days, filter, activeLogin]);
+
+  // 从报表 / 执行质量下钻进来时带上筛选与区间；消费后清空，避免下次进页重复套用
+  useEffect(() => {
+    const hasFilter = Object.keys(journalFilter).length > 0;
+    if (!hasFilter && journalDays == null) return;
+    if (hasFilter) setFilter(journalFilter);
+    if (journalDays != null) setDays(journalDays);
+    setJournalFilter({});
+    setJournalDays(null);
+  }, [journalFilter, journalDays, setJournalFilter, setJournalDays]);
+
+  // 从回放/参考面板跳进来时直接打开该笔复盘；打开后清空，避免重复触发
+  useEffect(() => {
+    if (journalFocus == null) return;
+    setReviewing(journalFocus);
+    setJournalFocus(null);
+  }, [journalFocus, setJournalFocus]);
 
   // 切换账户后关闭上一笔交易的详情，避免把旧账户的图配到新记录上
   useEffect(() => {
@@ -106,13 +113,7 @@ export function JournalView() {
   const price = (value: number) => fmtPrice(value, priceDigits(value));
 
   const summary = stats?.summary;
-  const breakdown: JournalBreakdown[] =
-    tab === 'symbol'
-      ? (stats?.bySymbol ?? [])
-      : tab === 'hour'
-        ? (stats?.byHour ?? [])
-        : (stats?.byTag ?? []);
-  const breakdownMax = breakdown.reduce((max, row) => Math.max(max, Math.abs(row.pnl)), 0);
+  const filterActive = Object.keys(filter).length > 0;
 
   const saveTag = async (record: JournalRecord, value: string) => {
     setEditing(null);
@@ -126,9 +127,9 @@ export function JournalView() {
       setRecords((prev) =>
         prev.map((item) => (item.position_id === record.position_id ? updated : item)),
       );
-      // 按标签的统计也要跟着刷新
+      // 按标签的统计也要跟着刷新（保持当前筛选口径）
       gateway
-        .call<JournalStats>('journal.stats', { days })
+        .call<JournalStats>('journal.stats', { days, filters: filter })
         .then(setStats)
         .catch(() => {});
     } catch (err) {
@@ -148,17 +149,7 @@ export function JournalView() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              {RANGES.map((value) => (
-                <button
-                  key={value}
-                  onClick={() => setDays(value)}
-                  className={clsx('console-chip', days === value && 'console-chip-active')}
-                >
-                  {value} 天
-                </button>
-              ))}
-            </div>
+            <RangeChips value={days} onChange={setDays} />
             <button
               onClick={() => void load(true)}
               disabled={loading}
@@ -176,118 +167,127 @@ export function JournalView() {
           </div>
         )}
 
-        <div className="readout mt-6 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
-          <StatCard
-            label="交易笔数"
-            value={summary ? String(summary.trades) : '—'}
-            hint={summary?.truncated ? '仅统计最近 5000 笔' : undefined}
-          />
-          <StatCard
-            label="胜率"
-            value={summary?.winRate != null ? `${summary.winRate.toFixed(1)}%` : '—'}
-            hint={summary ? `${summary.wins} 胜 / ${summary.losses} 负` : undefined}
-          />
-          <StatCard
-            label="净盈亏"
-            value={summary ? fmtSigned(summary.netPnl) : '—'}
-            tone={summary ? signedClass(summary.netPnl) : undefined}
-          />
-          <StatCard
-            label="盈亏比"
-            value={summary?.profitFactor != null ? summary.profitFactor.toFixed(2) : '—'}
-            hint={
-              summary
-                ? `毛利 ${fmtMoney(summary.grossProfit)} · 毛损 ${fmtMoney(summary.grossLoss)}`
-                : undefined
-            }
-          />
-          <StatCard
-            label="期望 / 笔"
-            value={summary?.expectancy != null ? fmtSigned(summary.expectancy) : '—'}
-            tone={summary?.expectancy != null ? signedClass(summary.expectancy) : undefined}
-            hint={summary ? `平均持仓 ${fmtDuration(summary.avgDurationSec)}` : undefined}
-          />
-          <StatCard
-            label="最大回撤"
-            value={summary ? fmtMoney(summary.maxDrawdown) : '—'}
-            tone={summary && summary.maxDrawdown > 0 ? 'text-console-loss' : undefined}
-            hint={
-              summary?.bestTrade != null
-                ? `最好 ${fmtSigned(summary.bestTrade)} · 最差 ${fmtSigned(summary.worstTrade ?? 0)}`
-                : undefined
-            }
-          />
+        <div className="mt-6 flex flex-wrap items-start gap-3">
+          <div className="readout min-w-0 flex-1 grid-cols-1 sm:grid-cols-3">
+            <StatCard
+              label="交易笔数"
+              value={summary ? String(summary.trades) : '—'}
+              hint={summary?.truncated ? '仅统计最近 5000 笔' : undefined}
+            />
+            <StatCard
+              label="净盈亏"
+              value={summary ? fmtSigned(summary.netPnl) : '—'}
+              tone={summary ? signedClass(summary.netPnl) : undefined}
+            />
+            <StatCard
+              label="胜率"
+              value={summary?.winRate != null ? `${summary.winRate.toFixed(1)}%` : '—'}
+              hint={summary ? `${summary.wins} 胜 / ${summary.losses} 负` : undefined}
+            />
+          </div>
+          <button
+            onClick={() => setPage('reports')}
+            className="console-btn console-btn-secondary mt-1 whitespace-nowrap"
+          >
+            查看完整报表
+          </button>
         </div>
 
-        <div className="mt-4 grid gap-4">
-          <section className="console-card flex flex-col overflow-hidden">
-            <div className="flex items-center gap-1 border-b border-console-line px-3 py-2">
-              {BREAKDOWN_TABS.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => setTab(item.id)}
-                  className={clsx(
-                    'h-7 rounded-md px-2.5 text-[12px] transition-colors',
-                    tab === item.id
-                      ? 'bg-console-selected font-medium text-console-ink'
-                      : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
-                  )}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="max-h-[360px] min-h-[120px] flex-1 overflow-auto p-2">
-              {breakdown.length === 0 && (
-                <div className="px-2 py-8 text-center text-[12px] text-console-faint">
-                  {loading ? '读取中…' : '暂无数据'}
-                </div>
+        <section className="console-card mt-4 flex flex-wrap items-center gap-2 px-3 py-2">
+          <span className="text-[11px] text-console-faint">筛选</span>
+          <select
+            value={filter.symbol ?? ''}
+            onChange={(event) =>
+              setFilter((prev) => ({ ...prev, symbol: event.target.value || undefined }))
+            }
+            className="console-input h-7 w-[116px] text-[12px]"
+            aria-label="按品种筛选"
+          >
+            <option value="">全部品种</option>
+            {(stats?.bySymbol ?? []).map((row) => (
+              <option key={row.key} value={row.key}>
+                {row.key}
+              </option>
+            ))}
+            {filter.symbol &&
+              !(stats?.bySymbol ?? []).some((row) => row.key === filter.symbol) && (
+                <option value={filter.symbol}>{filter.symbol}</option>
               )}
-              {breakdown.map((row) => (
-                <div key={row.key} className="relative rounded-md px-2 py-2">
-                  <div
-                    className={clsx(
-                      'absolute inset-y-1 left-0 rounded-sm opacity-70',
-                      row.pnl >= 0 ? 'bg-console-gain-soft' : 'bg-console-loss-soft',
-                    )}
-                    style={{
-                      width:
-                        breakdownMax > 0 ? `${(Math.abs(row.pnl) / breakdownMax) * 100}%` : '0%',
-                    }}
-                  />
-                  <div className="relative flex items-center gap-2 text-[12px]">
-                    <span className="w-16 shrink-0 truncate font-medium text-console-ink">
-                      {row.key}
-                    </span>
-                    <span className="num w-12 shrink-0 text-right font-mono text-[11px] text-console-muted">
-                      {row.trades} 笔
-                    </span>
-                    <span className="num w-10 shrink-0 text-right font-mono text-[11px] text-console-muted">
-                      {row.winRate.toFixed(0)}%
-                    </span>
-                    <span
-                      className={clsx('num flex-1 text-right font-mono font-medium', signedClass(row.pnl))}
-                    >
-                      {fmtSigned(row.pnl)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
+          </select>
+          <select
+            value={filter.tag ?? ''}
+            onChange={(event) =>
+              setFilter((prev) => ({ ...prev, tag: event.target.value || undefined }))
+            }
+            className="console-input h-7 w-[116px] text-[12px]"
+            aria-label="按标签筛选"
+          >
+            <option value="">全部标签</option>
+            {(stats?.byTag ?? []).map((row) => (
+              <option key={row.key} value={row.key}>
+                {row.key}
+              </option>
+            ))}
+            {filter.tag &&
+              !(stats?.byTag ?? []).some((row) => row.key === filter.tag) && (
+                <option value={filter.tag}>{filter.tag}</option>
+              )}
+          </select>
+          {(
+            [
+              { value: undefined, label: '全部' },
+              { value: 'win' as const, label: '盈利' },
+              { value: 'loss' as const, label: '亏损' },
+            ]
+          ).map((item) => (
+            <button
+              key={item.label}
+              onClick={() => setFilter((prev) => ({ ...prev, result: item.value }))}
+              className={clsx('console-chip', (filter.result ?? undefined) === item.value && 'console-chip-active')}
+            >
+              {item.label}
+            </button>
+          ))}
+          <span className="mx-1 h-4 w-px bg-console-line" />
+          {(
+            [
+              { value: undefined, label: '全部复盘' },
+              { value: 0 as const, label: '待复盘' },
+              { value: 1 as const, label: '已复盘' },
+            ]
+          ).map((item) => (
+            <button
+              key={item.label}
+              onClick={() => setFilter((prev) => ({ ...prev, reviewed: item.value }))}
+              className={clsx('console-chip', filter.reviewed === item.value && 'console-chip-active')}
+            >
+              {item.label}
+            </button>
+          ))}
+          {filterActive && (
+            <button
+              onClick={() => setFilter({})}
+              className="ml-1 text-[11px] text-console-muted hover:text-console-ink"
+            >
+              清除筛选
+            </button>
+          )}
+          <span className="ml-auto text-[10px] text-console-faint">
+            统计卡与列表按同一筛选口径
+          </span>
+        </section>
 
-          <section className="console-card min-w-0 overflow-hidden">
-            <div className="max-h-[calc(100vh-320px)] min-h-[240px] overflow-auto">
-              <table className="w-full min-w-[760px] border-collapse text-[12px]">
-                <thead className="sticky top-0 z-10 bg-console-card">
-                  <tr className="text-left text-[11px] text-console-faint shadow-[inset_0_-1px_0_var(--color-console-line)]">
-                    <th className="w-[116px] px-4 py-2 font-normal">平仓时间</th>
-                    <th className="w-[96px] px-2 py-2 font-normal">品种 / 方向</th>
-                    <th className="w-[48px] px-2 py-2 text-right font-normal">手数</th>
-                    <th className="w-[150px] px-3 py-2 text-right font-normal">开 → 平</th>
-                    <th className="w-[112px] px-3 py-2 text-right font-normal">盈亏</th>
-                    <th className="w-[62px] px-2 py-2 text-right font-normal">持仓</th>
+        <section className="console-card mt-2 min-w-0 overflow-hidden">
+          <div className="max-h-[calc(100vh-320px)] min-h-[240px] overflow-auto">
+            <table className="w-full min-w-[760px] border-collapse text-[12px]">
+              <thead className="sticky top-0 z-10 bg-console-card">
+                <tr className="text-left text-[11px] text-console-faint shadow-[inset_0_-1px_0_var(--color-console-line)]">
+                  <th className="w-[116px] px-4 py-2 font-normal">平仓时间</th>
+                  <th className="w-[96px] px-2 py-2 font-normal">品种 / 方向</th>
+                  <th className="w-[48px] px-2 py-2 text-right font-normal">手数</th>
+                  <th className="w-[150px] px-3 py-2 text-right font-normal">开 → 平</th>
+                  <th className="w-[112px] px-3 py-2 text-right font-normal">盈亏</th>
+                  <th className="w-[62px] px-2 py-2 text-right font-normal">持仓</th>
                     <th className="w-[110px] px-2 py-2 font-normal">标签</th>
                     <th className="w-[72px] px-2 py-2 text-right font-normal">操作</th>
                   </tr>
@@ -296,7 +296,11 @@ export function JournalView() {
                   {records.length === 0 && (
                     <tr>
                       <td colSpan={8} className="px-4 py-14 text-center text-[12px] text-console-faint">
-                        {loading ? '读取中…' : '这段时间还没有已平仓交易'}
+                        {loading
+                          ? '读取中…'
+                          : filterActive
+                            ? '当前筛选下没有已平仓交易'
+                            : '这段时间还没有已平仓交易'}
                       </td>
                     </tr>
                   )}
@@ -309,10 +313,18 @@ export function JournalView() {
                         onClick={() => setShot({ record, tab: 'chart' })}
                         className="cursor-pointer border-t border-console-line/70 transition-colors hover:bg-console-hover/50"
                       >
-                        <td className="num whitespace-nowrap px-4 py-1.5 font-mono text-[11px] text-console-muted">
-                          {fmtTime(record.close_time)}
+                        <td
+                          className="num whitespace-nowrap px-4 py-1.5 font-mono text-[11px] text-console-muted"
+                          title="本机时区"
+                        >
+                          {fmtLocalTime(record.close_time, rowOffset(record, serverOffset))}
                           {closedBy && (
                             <span className="ml-1.5 text-[10px] text-console-faint">· {closedBy}</span>
+                          )}
+                          {!record.reviewed_at && (
+                            <span className="ml-1.5 text-[10px] text-console-faint" title="还没有复盘">
+                              · 待复盘
+                            </span>
                           )}
                         </td>
                         <td className="whitespace-nowrap px-2 py-1.5">
@@ -385,12 +397,14 @@ export function JournalView() {
                         </td>
                         <td className="px-2 py-1.5">
                           <div className="flex items-center justify-end gap-0.5">
-                            <RowAction
-                              label="交易图"
-                              onClick={() => setShot({ record, tab: 'chart' })}
-                            >
-                              <ChartCandlestick size={14} strokeWidth={1.6} />
-                            </RowAction>
+                            {!!record.has_shot && (
+                              <RowAction
+                                label="截图"
+                                onClick={() => setShot({ record, tab: 'shot' })}
+                              >
+                                <Camera size={14} strokeWidth={1.6} />
+                              </RowAction>
+                            )}
                             <RowAction
                               label="复盘"
                               onClick={() => setReviewing(record.position_id)}
@@ -426,8 +440,7 @@ export function JournalView() {
                 )}
               </div>
             )}
-          </section>
-        </div>
+        </section>
       </div>
 
       <TradeReviewDrawer
@@ -443,12 +456,6 @@ export function JournalView() {
           onClose={() => setShot(null)}
         />
       )}
-
-      <ReferenceCapacityDialog
-        pending={replay.pending}
-        onConfirm={replay.confirm}
-        onCancel={replay.cancel}
-      />
     </div>
   );
 }

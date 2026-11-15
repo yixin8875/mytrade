@@ -7,6 +7,7 @@ from worker_account import WorkerAccount
 from worker_data import WorkerData
 from worker_discipline import WorkerDiscipline
 from worker_market import WorkerMarket
+from worker_replay import WorkerReplay
 from worker_risk import WorkerRisk
 from worker_trading import WorkerTrading
 
@@ -18,6 +19,7 @@ class Mt5Worker(
     WorkerRisk,
     WorkerTrading,
     WorkerDiscipline,
+    WorkerReplay,
 ):
     """唯一允许调用 MetaTrader5 API 的工作线程。"""
 
@@ -83,6 +85,9 @@ class Mt5Worker(
         self._limits: dict[str, float | int] = cfg.risk_limits(self._account_id)
         # 券商服务器时间与 UTC 的差（秒），供前端换算图表时区
         self._server_offset = 0
+        # 只有从真实 tick 推算过才算已知；未知时不拿 0 冒充时区
+        self._server_offset_known = False
+        self._offset_checked_at = 0.0
         # 风控状态（当日盈亏、开仓次数、连亏、冷却、停机），由 _poll_risk 刷新
         self._risk: dict | None = None
         # 停机开关：持久化，重启后仍然禁止开新仓
@@ -291,7 +296,9 @@ class Mt5Worker(
                         last_journal = now
                         login = self._login()
                         if login:
-                            self._journal.sync(login)
+                            self._journal.sync(
+                                login, server_offset=self._server_offset_value()
+                            )
             except Exception as exc:  # noqa: BLE001
                 self._last_error = {"code": -1, "message": str(exc)}
 
@@ -338,6 +345,7 @@ class Mt5Worker(
 
 
     def health(self) -> dict:
+        self._refresh_server_offset()
         terminal = None
         if self._connected:
             info = mt5.terminal_info()
@@ -426,7 +434,7 @@ class Mt5Worker(
             "orders.get": lambda _: self._orders,
             "executions.get": self._executions,
             "executions.stats": lambda p: self.store.execution_stats(
-                int(p.get("days") or 30), self._login()
+                int(p["days"]) if p.get("days") is not None else 30, self._login()
             ),
             "audit.query": lambda p: self.store.audit_query(
                 str(p.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")),
@@ -452,11 +460,16 @@ class Mt5Worker(
             "journal.list": self._journal_list,
             "journal.get": self._journal_get,
             "journal.stats": lambda p: self._journal.stats(
-                int(p.get("days") or 30), self._login()
+                int(p.get("days") if p.get("days") is not None else 30),
+                self._login(),
+                int(self._server_offset or 0),
+                self._journal_filters(p),
             ),
             "journal.tag": self._journal_tag,
             "journal.sync": lambda _: {
-                "written": self._journal.sync(self._login(), force=True)
+                "written": self._journal.sync(
+                    self._login(), force=True, server_offset=self._server_offset_value()
+                )
             },
             "journal.screenshot.save": self._journal_shot,
             "score.get": lambda p: self._review_call(
@@ -497,6 +510,9 @@ class Mt5Worker(
             ),
             "strategy.tradeNote.save": lambda p: self._review_call(
                 lambda: self._review.trade_note_save(p, self._login())
+            ),
+            "strategy.tradeNote.reviewed": lambda p: self._review_call(
+                lambda: self._review.trade_note_reviewed(p, self._login())
             ),
             "strategy.check": lambda p: self._review_call(
                 lambda: self._review.check(p, self._login())
@@ -543,6 +559,9 @@ class Mt5Worker(
             "missed.simulate": lambda p: self._missed_call(
                 lambda: self._missed.simulate(p, self._login(), self._missed_bars)
             ),
+            "replay.list": self._replay_list,
+            "replay.save": self._replay_save,
+            "replay.delete": self._replay_delete,
             "ai.status": lambda _: self._ai_call(lambda: self._ai.status()),
             "ai.payload": lambda p: self._ai_call(
                 lambda: self._ai.preview(p, self._login(), self._server_offset)

@@ -6,8 +6,11 @@ import { GOLD_INFO } from '../replay/testUtils';
 import {
   activeTemplate,
   handleGlobalShortcut,
+  LEGACY_PAGES,
+  PAGES,
   routeFromHash,
   selectSymbolInfo,
+  syncPageFromHash,
   useApp,
 } from './useApp';
 
@@ -86,11 +89,34 @@ function savedTemplates(): { activeId: string; list: TradeTemplate[] } {
 
 describe('routeFromHash', () => {
   it('取第一段作为页面', () => {
-    window.history.replaceState(null, '', '/#/reports');
-    expect(routeFromHash()).toBe('reports');
+    window.history.replaceState(null, '', '/#/insights');
+    expect(routeFromHash()).toBe('insights');
 
     window.history.replaceState(null, '', '#/replay/session-1');
     expect(routeFromHash()).toBe('replay');
+  });
+
+  it('旧深链映射到容器页', () => {
+    window.history.replaceState(null, '', '/#/reports');
+    expect(routeFromHash()).toBe('insights');
+
+    window.history.replaceState(null, '', '/#/diary');
+    expect(routeFromHash()).toBe('records');
+
+    window.history.replaceState(null, '', '/#/missed');
+    expect(routeFromHash()).toBe('discipline');
+  });
+
+  it('运行时旧深链同时切换页签', () => {
+    window.history.replaceState(null, '', '/#/diary');
+    syncPageFromHash();
+    expect(useApp.getState().page).toBe('records');
+    expect(useApp.getState().recordsTab).toBe('calendar');
+
+    window.history.replaceState(null, '', '/#/missed');
+    syncPageFromHash();
+    expect(useApp.getState().page).toBe('discipline');
+    expect(useApp.getState().disciplineTab).toBe('missed');
   });
 
   it('未知或空 hash 回到概览', () => {
@@ -107,6 +133,18 @@ describe('setPage', () => {
     useApp.getState().setPage('trade');
     expect(useApp.getState().page).toBe('trade');
     expect(window.location.hash).toBe('#/trade');
+  });
+
+  it('旧页面落到容器页并切到对应页签', () => {
+    useApp.getState().setPage('diary');
+    expect(useApp.getState().page).toBe('records');
+    expect(useApp.getState().recordsTab).toBe('calendar');
+    expect(window.location.hash).toBe('#/records');
+
+    useApp.getState().setPage('trends');
+    expect(useApp.getState().page).toBe('insights');
+    expect(useApp.getState().insightsTab).toBe('trends');
+    expect(window.location.hash).toBe('#/insights');
   });
 
   it('复盘子路由不会被覆盖', () => {
@@ -435,5 +473,66 @@ describe('handleGlobalShortcut', () => {
     expect(state.paletteOpen).toBe(false);
     expect(state.templateArmed).toBe(false);
     expect(state.draft.active).toBe(false);
+  });
+});
+
+describe('容器页与设置返回', () => {
+  it('页签 setter 只改页签，不动当前页面', () => {
+    useApp.getState().setPage('overview');
+    useApp.getState().setRecordsTab('calendar');
+    useApp.getState().setInsightsTab('executions');
+    useApp.getState().setDisciplineTab('routines');
+
+    const state = useApp.getState();
+    expect(state.page).toBe('overview');
+    expect(state.recordsTab).toBe('calendar');
+    expect(state.insightsTab).toBe('executions');
+    expect(state.disciplineTab).toBe('routines');
+  });
+
+  it('旧页面全部落到容器页，且旧页面不在顶层导航里', () => {
+    const legacyPages = Object.keys(LEGACY_PAGES);
+    expect(legacyPages.sort()).toEqual([
+      'analysis',
+      'diary',
+      'executions',
+      'journal',
+      'missed',
+      'reports',
+      'routines',
+      'strategy',
+      'trends',
+    ]);
+
+    for (const page of legacyPages) {
+      expect(PAGES).not.toContain(page);
+      useApp.getState().setPage(page as never);
+      expect(useApp.getState().page).toBe(LEGACY_PAGES[page].page);
+      expect(window.location.hash).toBe(`#/${LEGACY_PAGES[page].page}`);
+    }
+  });
+
+  it('openSettings 记住来源页，重复打开不覆盖', () => {
+    useApp.getState().setPage('trade');
+    useApp.getState().openSettings('diagnostics');
+
+    expect(useApp.getState().page).toBe('settings');
+    expect(useApp.getState().settingsSection).toBe('diagnostics');
+    expect(useApp.getState().settingsReturn).toBe('trade');
+
+    // 已经在设置页时再切分区，返回目标保持最初来源
+    useApp.getState().openSettings('ai');
+    expect(useApp.getState().settingsReturn).toBe('trade');
+
+    useApp.getState().setPage(useApp.getState().settingsReturn as never);
+    expect(useApp.getState().page).toBe('trade');
+  });
+
+  it('导出天数默认 30 天，可改成全部（0）', () => {
+    expect(useApp.getState().exportDays).toBe(30);
+    useApp.getState().setExportDays(0);
+    expect(useApp.getState().exportDays).toBe(0);
+    useApp.getState().setExportDays(90);
+    expect(useApp.getState().exportDays).toBe(90);
   });
 });

@@ -5,14 +5,31 @@ from worker_base import _num  # noqa: F401
 
 
 class WorkerData:
+    def _journal_filters(self, p: dict) -> dict:
+        raw = p.get("filters")
+        if not isinstance(raw, dict):
+            return {}
+        out: dict = {}
+        for key in ("symbol", "tag", "result", "reviewed"):
+            value = raw.get(key)
+            if value is not None and str(value) != "":
+                out[key] = value
+        return out
+
     def _journal_list(self, p: dict) -> list[dict]:
-        days = int(p.get("days") or 30)
+        days = int(p.get("days") if p.get("days") is not None else 30)
         limit = min(1000, int(p.get("limit") or 200))
         login = self._login()
         if login:
-            self._journal.sync(login)
-        since = int(time.time()) - days * 86400 if days > 0 else 0
-        return self.store.journal_list(limit=limit, since=since, login=login)
+            self._journal.sync(login, server_offset=self._server_offset_value())
+        # 库里是服务器时间：窗口起点按本机时间加回偏移；days=0 表示全部历史
+        since = int(time.time()) - days * 86400 + int(self._server_offset or 0) if days > 0 else 0
+        return self.store.journal_list(
+            limit=limit,
+            since=since,
+            login=login,
+            filters=self._journal_filters(p),
+        )
 
     def _journal_get(self, p: dict) -> dict:
         """按持仓号取完整交易记录，供散点等入口打开回放。"""
@@ -62,6 +79,8 @@ class WorkerData:
                 return exporter.export_executions(self.store, login, days)
             if kind == "audit":
                 return exporter.export_audit(self.store, days)
+            if kind == "replay":
+                return exporter.export_replay(self.store, login)
             if kind == "settings":
                 settings = p.get("settings") if isinstance(p.get("settings"), dict) else None
                 return exporter.export_settings(self.store, self.cfg, login, settings)

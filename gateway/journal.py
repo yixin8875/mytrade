@@ -73,6 +73,12 @@ def _r_multiple(profit: float, risk: float | None) -> float | None:
     return profit / risk
 
 
+def _row_offset(row: dict, fallback: int) -> int:
+    """单笔交易同步时记下的服务器时区差；老数据回退到当前账户的偏移。"""
+    value = row.get("server_offset")
+    return int(value) if value is not None else int(fallback)
+
+
 def _duration_bucket(seconds: int) -> str:
     if seconds < 15 * 60:
         return "15 分内"
@@ -192,14 +198,23 @@ class TradeJournal:
         self._plan_cache: tuple[int, float, dict, dict] | None = None
         self.shots_dir = store.base_dir / "data" / "shots"
         self.shots_dir.mkdir(parents=True, exist_ok=True)
+        # 已经给哪些账户回填过 server_offset
+        self._offset_backfilled: set[int] = set()
 
     # ---------- 同步 ----------
 
-    def sync(self, login: int, force: bool = False) -> int:
+    def sync(
+        self, login: int, force: bool = False, server_offset: int | None = None
+    ) -> int:
         now = time.monotonic()
         if not force and now - self._last_sync < 4.0:
             return 0
         self._last_sync = now
+        # 老记录没有服务器时区差：每个账户补一次，已有值的不覆盖。
+        # 放在读历史之前，账户暂时没有新成交时也能补上。
+        if server_offset is not None and login not in self._offset_backfilled:
+            self.store.journal_backfill_offset(login, int(server_offset))
+            self._offset_backfilled.add(login)
         try:
             raw = mt5.history_deals_get(
                 datetime.now() - timedelta(days=30), datetime.now() + timedelta(days=1)
@@ -304,6 +319,7 @@ class TradeJournal:
                     "risk_source": "order" if risk and risk > 0 else None,
                     "sl": order_sl,
                     "tp": order_tp,
+                    "server_offset": server_offset,
                 }
             )
             # 截图可能在日志记录之前就上传了（成交后立刻截图，收盘后才配对完成），
@@ -395,10 +411,19 @@ class TradeJournal:
 
     # ---------- 统计 ----------
 
-    def stats(self, days: int = 30, login: int = 0) -> dict:
-        since = int(time.time()) - max(1, days) * 86400
+    def stats(
+        self,
+        days: int = 30,
+        login: int = 0,
+        server_offset: int = 0,
+        filters: dict | None = None,
+    ) -> dict:
+        # journal 里存的是券商服务器时间；窗口边界要按本机「现在」加回偏移
+        offset = int(server_offset or 0)
+        # days <= 0 表示全部历史（报表的「全部」区间）
+        since = 0 if days <= 0 else int(time.time()) - max(1, days) * 86400 + offset
         # 多取一条用来判断是否截断；journal_list 按平仓时间倒序，保留最新的 5000 笔
-        rows = self.store.journal_list(limit=5001, since=since, login=login)
+        rows = self.store.journal_list(limit=5001, since=since, login=login, filters=filters)
         truncated = len(rows) > 5000
         if truncated:
             rows = rows[:5000]
@@ -433,7 +458,8 @@ class TradeJournal:
             )
         curve = self._downsample(full_curve)
         r_curve, hit1r = self._r_curve(rows, risks)
-        plans, steps = self._template_events(days)
+        # 「全部」区间时审计日志按一年内扫，够覆盖本地账户的历史
+        plans, steps = self._template_events(days if days > 0 else 365)
 
         summary = {
             "trades": len(rows),
@@ -466,7 +492,9 @@ class TradeJournal:
             "bySymbol": self._breakdown(rows, lambda r: r["symbol"], risks),
             "byHour": self._breakdown(
                 rows,
-                lambda r: f"{datetime.fromtimestamp(int(r['open_time'])).hour:02d}:00",
+                lambda r: (
+                    f"{datetime.fromtimestamp(int(r['open_time']) - _row_offset(r, offset), timezone.utc).hour:02d}:00"
+                ),
                 risks,
             ),
             "byTag": self._breakdown(rows, lambda r: (r.get("tag") or "未标记"), risks),

@@ -296,3 +296,34 @@ def test_trades_clamps_days_and_ignores_other_logins(store: Store):
     assert len(result["trades"]) == 1
     assert result["trades"][0]["positionId"] == 1
 
+
+
+def test_trade_note_reviewed_toggles_without_touching_content(store: Store):
+    add_trade(store, 11, epoch(2026, 11, 3, 12), 10.0)
+    review = Review(store)
+
+    marked = review.trade_note_reviewed({"positionId": 11, "reviewed": True}, 1)
+    assert marked["reviewedAt"] > 0
+    note = store.trade_note_get(11, 1) or {}
+    assert note["note"] == ""
+    assert note["rating"] is None
+    assert note["mistakes"] == []
+    # journal.list 带上复盘标记，日志行才能显示徽标
+    assert store.journal_list(100, 0, 1)[0]["reviewed_at"] == marked["reviewedAt"]
+
+    cleared = review.trade_note_reviewed({"positionId": 11, "reviewed": False}, 1)
+    assert cleared["reviewedAt"] is None
+    assert store.journal_list(100, 0, 1)[0]["reviewed_at"] is None
+
+
+def test_trade_note_reviewed_requires_owned_trade(store: Store):
+    review = Review(store)
+
+    with pytest.raises(ReviewError) as missing:
+        review.trade_note_reviewed({}, 1)
+    assert missing.value.code == "BAD_ID"
+
+    # 别的账户的交易不能标记已复盘
+    add_trade(store, 12, epoch(2026, 11, 3, 12), 10.0, login=2)
+    with pytest.raises(ReviewError):
+        review.trade_note_reviewed({"positionId": 12, "reviewed": True}, 1)

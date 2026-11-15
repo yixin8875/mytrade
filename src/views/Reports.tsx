@@ -2,25 +2,21 @@ import { useEffect, useMemo, useState } from 'react';
 import { clsx } from 'clsx';
 import { ShieldCheck } from 'lucide-react';
 import { gateway } from '../gateway/client';
+import { RangeChips } from '../components/RangeChips';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtSigned, signedClass } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
+import { fmtLocalDay } from '../lib/time';
 import type {
   JournalBreakdown,
   JournalExecutionCross,
+  JournalFilter,
   JournalRStats,
   JournalStats,
   JournalTemplateStats,
 } from '../gateway/types';
 
-const RANGES = [7, 30, 90];
-
 type CurveMode = 'pnl' | 'r';
-
-function fmtDay(ts: number): string {
-  if (!ts) return '—';
-  return new Date(ts * 1000).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
-}
 
 function fmtDuration(sec: number): string {
   if (!Number.isFinite(sec) || sec <= 0) return '—';
@@ -48,7 +44,10 @@ function fmtPoints(value: number | null | undefined): string {
 /** 统计报表页：区间汇总、盈亏 / R 曲线、模板执行与分组表现 */
 export function ReportsView() {
   const setPage = useApp((s) => s.setPage);
+  const setJournalFilter = useApp((s) => s.setJournalFilter);
+  const setJournalDays = useApp((s) => s.setJournalDays);
   const activeLogin = useApp((s) => s.account?.login ?? 0);
+  const serverOffset = useApp((s) => s.health?.serverOffset ?? 0);
   usePrivacyMask();
 
   const [days, setDays] = useState(30);
@@ -56,6 +55,13 @@ export function ReportsView() {
   const [stats, setStats] = useState<JournalStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 下钻：把分组行变成交易日志的筛选，跳过去后卡片与列表用同一口径
+  const drill = (filter: JournalFilter) => {
+    setJournalFilter(filter);
+    setJournalDays(days);
+    setPage('journal');
+  };
 
   useEffect(() => {
     let alive = true;
@@ -113,17 +119,7 @@ export function ReportsView() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              {RANGES.map((value) => (
-                <button
-                  key={value}
-                  onClick={() => setDays(value)}
-                  className={clsx('console-chip', days === value && 'console-chip-active')}
-                >
-                  {value} 天
-                </button>
-              ))}
-            </div>
+            <RangeChips value={days} onChange={setDays} />
             <button
               onClick={() => setPage('executions')}
               className="console-btn console-btn-secondary"
@@ -279,7 +275,12 @@ export function ReportsView() {
                       : '还没有可用的 R 数据：下单时带止损的交易会自动折算 R'}
                 </div>
               ) : (
-                <CurveChart points={points} mode={mode} loading={loading} />
+                <CurveChart
+                  points={points}
+                  mode={mode}
+                  loading={loading}
+                  serverOffset={serverOffset}
+                />
               )}
             </div>
           </section>
@@ -343,9 +344,19 @@ export function ReportsView() {
         </div>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-          <BreakdownCard title="按品种" rows={stats?.bySymbol ?? []} loading={loading} />
+          <BreakdownCard
+            title="按品种"
+            rows={stats?.bySymbol ?? []}
+            loading={loading}
+            onPick={(key) => drill({ symbol: key })}
+          />
           <BreakdownCard title="按时段" rows={stats?.byHour ?? []} loading={loading} />
-          <BreakdownCard title="按策略标签" rows={stats?.byTag ?? []} loading={loading} />
+          <BreakdownCard
+            title="按策略标签"
+            rows={stats?.byTag ?? []}
+            loading={loading}
+            onPick={(key) => drill({ tag: key })}
+          />
           <BreakdownCard title="按持仓时长" rows={stats?.byDuration ?? []} loading={loading} />
         </div>
 
@@ -363,10 +374,12 @@ function CurveChart({
   points,
   mode,
   loading,
+  serverOffset,
 }: {
   points: { t: number; value: number }[];
   mode: CurveMode;
   loading: boolean;
+  serverOffset: number;
 }) {
   const W = 900;
   const H = 260;
@@ -454,7 +467,9 @@ function CurveChart({
         />
       </svg>
       <div className="mt-2 flex items-center justify-between text-[11px] text-console-faint">
-        <span className="font-mono">{fmtDay(geometry.first)}</span>
+        <span className="font-mono" title="本机时区">
+          {fmtLocalDay(geometry.first, serverOffset)}
+        </span>
         <span className="font-mono">
           {mode === 'pnl' ? '最高' : '最好'} {show(geometry.max)} ·{' '}
           {mode === 'pnl' ? '最低' : '最差'} {show(geometry.min)}
@@ -462,7 +477,9 @@ function CurveChart({
         <span className={clsx('num font-mono font-medium', signedClass(geometry.lastValue))}>
           {show(geometry.lastValue)}
         </span>
-        <span className="font-mono">{fmtDay(geometry.end)}</span>
+        <span className="font-mono" title="本机时区">
+          {fmtLocalDay(geometry.end, serverOffset)}
+        </span>
       </div>
     </div>
   );
@@ -574,10 +591,12 @@ function BreakdownCard({
   title,
   rows,
   loading,
+  onPick,
 }: {
   title: string;
   rows: JournalBreakdown[];
   loading: boolean;
+  onPick?: (key: string) => void;
 }) {
   const max = rows.reduce((value, row) => Math.max(value, Math.abs(row.pnl)), 0);
 
@@ -585,7 +604,9 @@ function BreakdownCard({
     <section className="console-card overflow-hidden">
       <div className="flex items-baseline justify-between border-b border-console-line px-5 py-3.5">
         <span className="text-[13px] font-semibold">{title}</span>
-        <span className="num font-mono text-[11px] text-console-faint">{rows.length} 组</span>
+        <span className="num font-mono text-[11px] text-console-faint">
+          {onPick ? '点击行看明细' : `${rows.length} 组`}
+        </span>
       </div>
       <div className="p-2">
         {rows.length === 0 && (
@@ -594,7 +615,17 @@ function BreakdownCard({
           </div>
         )}
         {rows.map((row) => (
-          <div key={row.key} className="relative rounded-lg px-2.5 py-2">
+          <button
+            key={row.key}
+            type="button"
+            disabled={!onPick}
+            onClick={onPick ? () => onPick(row.key) : undefined}
+            title={onPick ? `在交易日志中查看 ${row.key}` : undefined}
+            className={clsx(
+              'relative block w-full rounded-lg px-2.5 py-2 text-left',
+              onPick ? 'transition-colors hover:bg-console-hover/60' : 'cursor-default',
+            )}
+          >
             <div
               className={clsx(
                 'absolute inset-y-1 left-0 rounded-sm opacity-70',
@@ -627,7 +658,7 @@ function BreakdownCard({
                 {row.avgR != null && <span>· 均 {fmtR(row.avgR)}</span>}
               </div>
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </section>

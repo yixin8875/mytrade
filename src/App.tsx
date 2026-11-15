@@ -16,16 +16,12 @@ import { UpdatePanel } from './components/UpdatePanel';
 import { WatchlistPanel } from './components/WatchlistPanel';
 import { Overview } from './views/Overview';
 import { ReplayView } from './replay/ReplayView';
-import { JournalView } from './views/Journal';
-import { DiaryView } from './views/Diary';
-import { StrategyView } from './views/Strategy';
-import { RoutinesView } from './views/Routines';
-import { MissedView } from './views/Missed';
-import { TrendsView } from './views/Trends';
-import { AnalysisView } from './views/Analysis';
+import { useReplay } from './replay/store';
+import { clearReplayBack } from './replay/back';
+import { RecordsView } from './views/RecordsView';
+import { InsightsView } from './views/InsightsView';
+import { DisciplineView } from './views/DisciplineView';
 import { ScoreView } from './views/Score';
-import { ReportsView } from './views/Reports';
-import { ExecutionsView } from './views/Executions';
 import { AuditView } from './views/Audit';
 import { primaryHost, primaryWidget } from './chart/tv/registry';
 import { buildShotMeta } from './chart/tv/shotMeta';
@@ -33,7 +29,7 @@ import { gateway } from './gateway/client';
 import { applyAccent } from './lib/accent';
 import { beep, desktopNotify } from './lib/alert';
 import { mountBootProgress } from './lib/boot';
-import { handleGlobalShortcut, routeFromHash, useApp, type SidebarTab } from './store/useApp';
+import { handleGlobalShortcut, syncPageFromHash, useApp, type SidebarTab } from './store/useApp';
 import type {
   Account,
   AlertEvent,
@@ -76,6 +72,8 @@ async function refresh(): Promise<void> {
     latest.setOrders(orders);
     latest.setRiskStatus(riskStatus);
     latest.setAlerts(alerts);
+    // 复盘会话按登录号存在网关 SQLite；连接后补一次，切换账户时自动换列表
+    void useReplay.getState().hydrate(account.login);
   } catch (error) {
     state.notify('error', (error as Error).message);
   }
@@ -231,10 +229,15 @@ export default function App() {
   const [tradeMounted, setTradeMounted] = useState(page === 'trade');
 
   useEffect(() => {
-    const onHash = () => setPage(routeFromHash());
+    const onHash = () => syncPageFromHash();
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, [setPage]);
+
+  // 离开回放域后清掉返回来源，避免下次从其它页面进来时显示旧入口
+  useEffect(() => {
+    if (page !== 'replay') clearReplayBack();
+  }, [page]);
 
   useEffect(() => {
     if (page === 'trade') setTradeMounted(true);
@@ -344,16 +347,10 @@ export default function App() {
       )}
 
       {page === 'replay' && <ReplayView />}
-      {page === 'journal' && <JournalView />}
-      {page === 'diary' && <DiaryView />}
-      {page === 'strategy' && <StrategyView />}
-      {page === 'routines' && <RoutinesView />}
-      {page === 'missed' && <MissedView />}
-      {page === 'trends' && <TrendsView />}
-      {page === 'analysis' && <AnalysisView />}
+      {page === 'records' && <RecordsView />}
+      {page === 'insights' && <InsightsView />}
+      {page === 'discipline' && <DisciplineView />}
       {page === 'score' && <ScoreView />}
-      {page === 'reports' && <ReportsView />}
-      {page === 'executions' && <ExecutionsView />}
       {page === 'audit' && <AuditView />}
       {page === 'settings' && <SettingsPanel />}
 

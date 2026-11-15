@@ -3,13 +3,15 @@ import { Lock } from 'lucide-react';
 import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
 import { ReferenceLayer } from '../chart/tv/referenceLayer';
 import { ChartChips, type ChartBand } from '../components/ChartChips';
+import { DrawingTemplates } from '../components/DrawingTemplates';
+import { StudyTemplates } from '../components/StudyTemplates';
 import { fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
 import { useApp, type Theme } from '../store/useApp';
 import type { OrderType, Side, SymbolInfo } from '../gateway/types';
 import { aggregateBars, ReplayDatafeed } from './datafeed';
 import { holdingRange, referenceVisible } from './reference';
 import { replayBars, sourceFor } from './source';
-import { useReplay } from './store';
+import { useReplay, chartStateKey, drawingsKey, flushViewSaves, queueViewSave } from './store';
 import { calcProfit, roundPrice } from './engine';
 import type {
   ChartingLibraryWidgetOptions,
@@ -73,10 +75,6 @@ export interface ReplayChartProps {
 }
 
 /** 图表状态按会话保存：复盘的画线/指标不会串到交易台，反之亦然 */
-function chartStateKey(sessionId: string): string {
-  return `mytrade.replay.chart.${sessionId}`;
-}
-
 function readChartState(sessionId: string): object | null {
   try {
     const raw = window.localStorage.getItem(chartStateKey(sessionId));
@@ -97,10 +95,6 @@ function writeChartState(sessionId: string, state: object): void {
 }
 
 /** 画线单独存：低层 save() 不含绘图对象，要用 getLineToolsState/applyLineToolsState */
-function drawingsKey(sessionId: string): string {
-  return `mytrade.replay.drawings.${sessionId}`;
-}
-
 function serializeDrawings(chart: IChartWidgetApi): string | null {
   try {
     const state = chart.getLineToolsState();
@@ -128,6 +122,7 @@ function writeDrawings(sessionId: string, chart: IChartWidgetApi): void {
     // 从没存过画线时不要写空对象；但已经存过就要写空，才能记住「用户删光了」
     if (!hasContent && !window.localStorage.getItem(drawingsKey(sessionId))) return;
     window.localStorage.setItem(drawingsKey(sessionId), raw);
+    queueViewSave(sessionId, { drawings: raw });
   } catch {
     /* 存储满时忽略 */
   }
@@ -356,7 +351,14 @@ export function ReplayChart({
           if (!current || disposed) return;
           current
             .save()
-            .then((state) => writeChartState(sessionId, state))
+            .then((state) => {
+              writeChartState(sessionId, state);
+              try {
+                queueViewSave(sessionId, { chart: JSON.stringify(state) });
+              } catch {
+                /* 状态无法序列化时只留本地 */
+              }
+            })
             .catch(() => {});
           try {
             writeDrawings(sessionId, current.activeChart());
@@ -376,6 +378,7 @@ export function ReplayChart({
           if (!raw || raw === lastDrawings) return;
           lastDrawings = raw;
           window.localStorage.setItem(drawingsKey(sessionId), raw);
+          queueViewSave(sessionId, { drawings: raw });
         } catch {
           /* 图表未就绪或存储被禁用 */
         }
@@ -526,11 +529,20 @@ export function ReplayChart({
         }
         current
           .save()
-          .then((state) => writeChartState(sessionId, state))
+          .then((state) => {
+            writeChartState(sessionId, state);
+            try {
+              queueViewSave(sessionId, { chart: JSON.stringify(state) });
+            } catch {
+              /* 状态无法序列化时只留本地 */
+            }
+          })
           .catch(() => {});
         current.remove();
       }
       widgetRef.current = null;
+      // 离开会话时把 5 秒防抖里的图表视图立刻写入网关
+      void flushViewSaves();
     };
     // 只在会话 / 重新开始时重建；周期切换走 setResolution
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -718,6 +730,9 @@ export function ReplayChart({
     <div className="relative h-full w-full overflow-hidden bg-console-card">
       <div ref={hostRef} className="absolute inset-0" />
       <ChartChips chips={[]} bands={rBands} host={hostRef} chart={chart} syncCrosshair={false} />
+      {/* 指标/画线模板与交易台同一套面板；回放槽位没存过模板时沿用主图那套 */}
+      {chart && <DrawingTemplates chart={chart} slot="replay" />}
+      {chart && <StudyTemplates chart={chart} slot="replay" />}
       <div className="pointer-events-none absolute bottom-8 right-[72px] z-10 flex items-center gap-1 text-[10px] text-console-faint">
         <Lock size={14} strokeWidth={1.5} />
         复盘 · 模拟

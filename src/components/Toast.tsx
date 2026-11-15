@@ -6,22 +6,35 @@ export function Toast() {
   const clear = useApp((s) => s.clearToast);
   if (!toast) return null;
 
+  const runAction = () => {
+    const action = toast.action;
+    clear();
+    action?.run();
+  };
+
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-10 z-[60] flex justify-center px-4">
-      <button
-        onClick={clear}
-        className="pointer-events-auto flex max-w-lg items-start gap-2.5 rounded-lg border border-tv-border bg-tv-panel px-3.5 py-2.5 text-left text-[12px] leading-relaxed text-tv-text shadow-[0_12px_32px_-12px_rgba(0,0,0,0.35)]"
-      >
-        <span
-          className={clsx(
-            'mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
-            toast.kind === 'error' && 'bg-tv-down',
-            toast.kind === 'success' && 'bg-tv-up',
-            toast.kind === 'info' && 'bg-tv-accent',
-          )}
-        />
-        <span className="break-words">{toast.text}</span>
-      </button>
+      <div className="pointer-events-auto flex max-w-lg items-start gap-2.5 rounded-lg border border-tv-border bg-tv-panel px-3.5 py-2.5 text-[12px] leading-relaxed text-tv-text shadow-[0_12px_32px_-12px_rgba(0,0,0,0.35)]">
+        <button onClick={clear} className="flex min-w-0 flex-1 items-start gap-2.5 text-left">
+          <span
+            className={clsx(
+              'mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
+              toast.kind === 'error' && 'bg-tv-down',
+              toast.kind === 'success' && 'bg-tv-up',
+              toast.kind === 'info' && 'bg-tv-accent',
+            )}
+          />
+          <span className="break-words">{toast.text}</span>
+        </button>
+        {toast.action && (
+          <button
+            onClick={runAction}
+            className="shrink-0 rounded-md border border-tv-border bg-tv-raised px-2 py-0.5 text-[11px] font-medium text-tv-text transition-colors hover:bg-tv-hover"
+          >
+            {toast.action.label}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,23 +1,20 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
-import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { fmtPrice, fmtVolume } from '../lib/format';
+import { cancelOrderWithUndo } from '../lib/orderActions';
+import type { Order } from '../gateway/types';
 
 export function OrdersPanel() {
   const orders = useApp((s) => s.orders);
   const symbols = useApp((s) => s.symbols);
   const notify = useApp((s) => s.notify);
-  const [confirmTicket, setConfirmTicket] = useState<number | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
 
-  const cancel = async (ticket: number) => {
-    setBusy(ticket);
+  const cancel = async (order: Order) => {
+    setBusy(order.ticket);
     try {
-      await gateway.call('order.cancel', { ticket });
-      setConfirmTicket(null);
-    } catch (error) {
-      notify('error', (error as Error).message);
+      await cancelOrderWithUndo(order, notify);
     } finally {
       setBusy(null);
     }
@@ -76,18 +73,16 @@ export function OrdersPanel() {
                 </div>
               </div>
               <button
-                onClick={() =>
-                  confirmTicket === order.ticket ? cancel(order.ticket) : setConfirmTicket(order.ticket)
-                }
+                onClick={() => void cancel(order)}
                 disabled={busy === order.ticket}
+                title="撤销后可立即恢复"
                 className={clsx(
                   'h-6 shrink-0 rounded-md px-2 text-[11px] transition-colors',
-                  confirmTicket === order.ticket
-                    ? 'bg-tv-down text-white'
-                    : 'bg-tv-raised text-tv-text hover:bg-tv-hover',
+                  'bg-tv-raised text-tv-text hover:bg-tv-hover',
+                  busy === order.ticket && 'opacity-50',
                 )}
               >
-                {busy === order.ticket ? '…' : confirmTicket === order.ticket ? '确认' : '撤单'}
+                {busy === order.ticket ? '…' : '撤单'}
               </button>
             </div>
           );

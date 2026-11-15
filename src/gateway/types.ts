@@ -396,10 +396,17 @@ export interface TradeSizing {
   warnings: string[];
 }
 
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 export interface Toast {
   id: number;
   kind: 'info' | 'error' | 'success';
   text: string;
+  /** 可撤销提示：点击后执行，提示随即消失 */
+  action?: ToastAction | null;
 }
 
 export interface JournalRecord {
@@ -430,8 +437,21 @@ export interface JournalRecord {
   /** 初始风险（账户货币），用于把盈亏折成 R */
   risk: number | null;
   risk_source: string | null;
+  /** 同步这笔交易时的服务器时区差（服务器时间 - UTC，秒）；老记录可能为空 */
+  server_offset?: number | null;
+  /** 复盘标记时间；未复盘为空 */
+  reviewed_at?: number | null;
   has_shot: number;
   recorded_at: number;
+}
+
+/** 交易日志的统一筛选；列表与统计共用，保证两处行集合一致 */
+export interface JournalFilter {
+  symbol?: string;
+  tag?: string;
+  result?: 'win' | 'loss';
+  /** 0 = 待复盘，1 = 已复盘 */
+  reviewed?: 0 | 1;
 }
 
 export interface JournalBreakdown {

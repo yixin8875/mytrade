@@ -520,6 +520,20 @@ class Review:
         )
         return {"saved": True, "note": self.trade_note({"positionId": position_id}, login)}
 
+    def trade_note_reviewed(
+        self, params: dict[str, Any], login: int
+    ) -> dict[str, Any]:
+        position_id = _int_or_none(params.get("positionId"))
+        if position_id is None:
+            raise ReviewError("BAD_ID", "缺少 positionId")
+        self._require_trade(position_id, login)
+        reviewed = bool(params.get("reviewed"))
+        note = self.store.trade_note_set_reviewed(position_id, reviewed, login)
+        return {
+            "positionId": position_id,
+            "reviewedAt": note.get("reviewed_at"),
+        }
+
     def check(self, params: dict[str, Any], login: int) -> dict[str, Any]:
         position_id = _int_or_none(params.get("positionId"))
         if position_id is None:

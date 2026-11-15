@@ -16,6 +16,7 @@ import {
   toUtcEpoch,
 } from '../lib/missed';
 import { useApp } from '../store/useApp';
+import { useTradeReplay } from '../replay/useTradeReplay';
 import type { MissedList, MissedTrade, Playbook, Side } from '../gateway/types';
 
 interface Form {
@@ -56,6 +57,7 @@ export function MissedView() {
   const [form, setForm] = useState<Form | null>(null);
   const [saving, setSaving] = useState(false);
   const [simulating, setSimulating] = useState<number | null>(null);
+  const replay = useTradeReplay();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -368,6 +370,19 @@ export function MissedView() {
                     >
                       <Zap size={12} strokeWidth={1.8} />
                       {simulating === item.id ? '模拟中…' : '模拟'}
+                    </button>
+                    <button
+                      onClick={() =>
+                        replay.startWindow({
+                          symbol: item.symbol,
+                          anchorTs: item.observedAt,
+                          label: item.note || `#${item.id}`,
+                        })
+                      }
+                      className="console-btn console-btn-secondary"
+                      title="按观察时间前后生成一段回放"
+                    >
+                      在回放中看
                     </button>
                     <button
                       onClick={() => void remove(item)}

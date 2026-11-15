@@ -7,6 +7,7 @@ import type {
   ConnState,
   DraftOrder,
   GatewayHealth,
+  JournalFilter,
   Order,
   Position,
   PriceAlert,
@@ -15,6 +16,7 @@ import type {
   RiskStatus,
   SymbolInfo,
   Toast,
+  ToastAction,
   TradePreview,
   TradeTemplate,
   WatchlistRow,
@@ -40,11 +42,18 @@ export type Theme = 'light' | 'white' | 'dark';
 
 export const THEMES: Theme[] = ['light', 'white', 'dark'];
 
-/** 控制台页面：概览 / 交易台 / 交易日志 / 盈亏日历 / 策略手册 / 统计报表 / 执行质量 / 审计日志 / 设置 */
+/** 控制台页面：概览 / 交易台 / 复盘 / 记录 / 分析 / 纪律 / 设置 */
 export type Page =
   | 'overview'
   | 'trade'
   | 'replay'
+  | 'records'
+  | 'insights'
+  | 'discipline'
+  | 'score'
+  | 'audit'
+  | 'settings'
+  // 合并前的旧页面：只作为兼容入口，setPage 会映射到容器页 + 页签
   | 'journal'
   | 'diary'
   | 'strategy'
@@ -52,29 +61,44 @@ export type Page =
   | 'missed'
   | 'trends'
   | 'analysis'
-  | 'score'
   | 'reports'
-  | 'executions'
-  | 'audit'
-  | 'settings';
+  | 'executions';
 
 export const PAGES: Page[] = [
   'overview',
   'trade',
   'replay',
-  'journal',
-  'diary',
-  'strategy',
-  'routines',
-  'missed',
-  'trends',
-  'analysis',
+  'records',
+  'insights',
+  'discipline',
   'score',
-  'reports',
-  'executions',
   'audit',
   'settings',
 ];
+
+export type RecordsTab = 'list' | 'calendar';
+export type InsightsTab = 'reports' | 'trends' | 'deep' | 'executions';
+export type DisciplineTab = 'strategy' | 'routines' | 'missed';
+
+interface LegacyRoute {
+  page: Page;
+  recordsTab?: RecordsTab;
+  insightsTab?: InsightsTab;
+  disciplineTab?: DisciplineTab;
+}
+
+/** 旧深链 → 容器页页签；书签和命令面板的旧入口都走这里 */
+export const LEGACY_PAGES: Record<string, LegacyRoute> = {
+  journal: { page: 'records', recordsTab: 'list' },
+  diary: { page: 'records', recordsTab: 'calendar' },
+  reports: { page: 'insights', insightsTab: 'reports' },
+  trends: { page: 'insights', insightsTab: 'trends' },
+  analysis: { page: 'insights', insightsTab: 'deep' },
+  executions: { page: 'insights', insightsTab: 'executions' },
+  strategy: { page: 'discipline', disciplineTab: 'strategy' },
+  routines: { page: 'discipline', disciplineTab: 'routines' },
+  missed: { page: 'discipline', disciplineTab: 'missed' },
+};
 
 /** 设置页左侧分区，和 SettingsPanel 的 NAV 一一对应 */
 export type SettingsSection =
@@ -87,6 +111,7 @@ export type SettingsSection =
   | 'accounts'
   | 'alerts'
   | 'data'
+  | 'diagnostics'
   | 'ai'
   | 'updates'
   | 'about';
@@ -96,7 +121,42 @@ export function routeFromHash(): Page {
   const raw = window.location.hash.replace(/^#\/?/, '');
   // 复盘页用 #/replay/<id> 保存当前会话，取第一段判断页面
   const head = raw.split('/')[0];
+  const legacy = LEGACY_PAGES[head];
+  if (legacy) return legacy.page;
   return (PAGES as string[]).includes(head) ? (head as Page) : 'overview';
+}
+
+/** 从旧深链推导容器页签；新 hash 没有页签信息时用默认值 */
+function initialTabs(): {
+  recordsTab: RecordsTab;
+  insightsTab: InsightsTab;
+  disciplineTab: DisciplineTab;
+} {
+  const head = window.location.hash.replace(/^#\/?/, '').split('/')[0];
+  const legacy = LEGACY_PAGES[head];
+  return {
+    recordsTab: legacy?.recordsTab ?? 'list',
+    insightsTab: legacy?.insightsTab ?? 'reports',
+    disciplineTab: legacy?.disciplineTab ?? 'strategy',
+  };
+}
+
+/**
+ * 浏览器前进/后退或手改 hash 时同步页面与页签。
+ * 书签里的旧深链（#/diary、#/trends、#/missed…）不光要落到容器页，
+ * 还要选中对应页签，和首次加载时的 initialTabs() 表现一致。
+ */
+export function syncPageFromHash(): void {
+  const head = window.location.hash.replace(/^#\/?/, '').split('/')[0];
+  const legacy = LEGACY_PAGES[head];
+  if (legacy) {
+    useApp.setState({
+      ...(legacy.recordsTab ? { recordsTab: legacy.recordsTab } : {}),
+      ...(legacy.insightsTab ? { insightsTab: legacy.insightsTab } : {}),
+      ...(legacy.disciplineTab ? { disciplineTab: legacy.disciplineTab } : {}),
+    });
+  }
+  useApp.getState().setPage(routeFromHash());
 }
 
 interface AppStore {
@@ -136,6 +196,24 @@ interface AppStore {
   templateArmed: boolean;
   /** 设置页当前分区 */
   settingsSection: SettingsSection;
+  /** 记录页页签：日志列表 / 盈亏日历 */
+  recordsTab: RecordsTab;
+  /** 分析页页签：报表 / 趋势 / 深度 / 执行质量 */
+  insightsTab: InsightsTab;
+  /** 纪律页页签：策略 / 例行 / 错过 */
+  disciplineTab: DisciplineTab;
+  /** 打开设置前所在的页面；设置页「返回」回到这里 */
+  settingsReturn: Page | null;
+  /** 设置页数据导出区间（天，0 = 全部）；命令面板复用同一选择 */
+  exportDays: number;
+  /** 每次请求「新建策略」递增，策略页看到变化就打开空白表单 */
+  strategyNew: number;
+  /** 从复盘/回放跳到日志时要直接打开的交易；Journal 消费后清空 */
+  journalFocus: number | null;
+  /** 从报表/执行质量下钻到日志时带的筛选；Journal 消费后清空 */
+  journalFilter: JournalFilter;
+  /** 下钻时一并切换区间（天数，0 = 全部）；null 表示不改 */
+  journalDays: number | null;
   layout: ChartLayout;
   layoutSync: ChartSync;
   /** 深色 / 浅色主题，存 localStorage */
@@ -198,8 +276,19 @@ interface AppStore {
   setWatchRows: (rows: WatchlistRow[]) => void;
   setOrderTag: (tag: string) => void;
   setSidebarTab: (tab: SidebarTab) => void;
-  notify: (kind: Toast['kind'], text: string) => void;
+  notify: (kind: Toast['kind'], text: string, action?: ToastAction) => void;
   clearToast: () => void;
+  /** 跳到设置页并打开指定分区 */
+  openSettings: (section: SettingsSection) => void;
+  setRecordsTab: (tab: RecordsTab) => void;
+  setInsightsTab: (tab: InsightsTab) => void;
+  setDisciplineTab: (tab: DisciplineTab) => void;
+  setExportDays: (days: number) => void;
+  /** 跳到策略手册并直接打开新建表单 */
+  openStrategyNew: () => void;
+  setJournalFocus: (positionId: number | null) => void;
+  setJournalFilter: (filter: JournalFilter) => void;
+  setJournalDays: (days: number | null) => void;
   /** 切换 MT5 账户后清空上一个账户的运行时状态 */
   resetForAccountSwitch: () => void;
 }
@@ -447,6 +536,13 @@ export const useApp = create<AppStore>((set, get) => ({
   ...loadTemplates(),
   templateArmed: false,
   settingsSection: 'appearance',
+  ...initialTabs(),
+  settingsReturn: null,
+  exportDays: 30,
+  strategyNew: 0,
+  journalFocus: null,
+  journalFilter: {},
+  journalDays: null,
   layout: loadLayout(),
   layoutSync: loadLayoutSync(),
   theme: loadTheme(),
@@ -462,12 +558,23 @@ export const useApp = create<AppStore>((set, get) => ({
   toast: null,
 
   setPage: (page) => {
-    const hash = `#/${page}`;
+    // 旧页面直接映射成容器页 + 页签，书签和旧调用点都不用改
+    const legacy = LEGACY_PAGES[page];
+    const base: Page = legacy?.page ?? page;
+    const hash = `#/${base}`;
     // 复盘内部路由（#/replay/<id>）由复盘页自己维护，这里不要覆盖
-    const keepSubRoute = page === 'replay' && /^#\/replay\//.test(window.location.hash);
+    const keepSubRoute = base === 'replay' && /^#\/replay\//.test(window.location.hash);
     if (!keepSubRoute && window.location.hash !== hash) window.location.hash = hash;
-    set({ page });
+    set({
+      page: base,
+      ...(legacy?.recordsTab ? { recordsTab: legacy.recordsTab } : {}),
+      ...(legacy?.insightsTab ? { insightsTab: legacy.insightsTab } : {}),
+      ...(legacy?.disciplineTab ? { disciplineTab: legacy.disciplineTab } : {}),
+    });
   },
+  setRecordsTab: (recordsTab) => set({ recordsTab }),
+  setInsightsTab: (insightsTab) => set({ insightsTab }),
+  setDisciplineTab: (disciplineTab) => set({ disciplineTab }),
   setConn: (conn) => set({ conn }),
   setHealth: (health) => set({ health }),
   setLatency: (latency) => set({ latency }),
@@ -509,8 +616,9 @@ export const useApp = create<AppStore>((set, get) => ({
     }),
   setRiskStatus: (riskStatus) => set({ riskStatus }),
   setAlerts: (alerts) => set({ alerts }),
-  setAlertsOpen: (alertsOpen) => set({ alertsOpen }),
-  setCalendarOpen: (calendarOpen) => set({ calendarOpen }),
+  setAlertsOpen: (open) => set(open ? { alertsOpen: true, calendarOpen: false } : { alertsOpen: false }),
+  setCalendarOpen: (open) =>
+    set(open ? { calendarOpen: true, alertsOpen: false } : { calendarOpen: false }),
   setCalendarOverlay: (calendarOverlay) => {
     try {
       window.localStorage.setItem(CALENDAR_OVERLAY_KEY, calendarOverlay ? '1' : '0');
@@ -571,6 +679,22 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   setTemplateArmed: (templateArmed) => set({ templateArmed }),
   setSettingsSection: (settingsSection) => set({ settingsSection }),
+  openSettings: (section) => {
+    const current = get().page;
+    set((state) => ({
+      settingsSection: section,
+      settingsReturn: current === 'settings' ? state.settingsReturn : current,
+    }));
+    get().setPage('settings');
+  },
+  setExportDays: (exportDays) => set({ exportDays }),
+  openStrategyNew: () => {
+    get().setPage('strategy');
+    set((state) => ({ strategyNew: state.strategyNew + 1 }));
+  },
+  setJournalFocus: (journalFocus) => set({ journalFocus }),
+  setJournalFilter: (journalFilter) => set({ journalFilter }),
+  setJournalDays: (journalDays) => set({ journalDays }),
   setLayout: (layout) => {
     const next = normalizeLayoutId(layout);
     writeJson(LAYOUT_KEY, next);
@@ -624,12 +748,15 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   setSidebarTab: (sidebarTab) => set({ sidebarTab }),
 
-  notify: (kind, text) => {
+  notify: (kind, text, action) => {
     const id = ++toastSeq;
-    set({ toast: { id, kind, text } });
-    window.setTimeout(() => {
-      if (get().toast?.id === id) set({ toast: null });
-    }, 4500);
+    set({ toast: { id, kind, text, action: action ?? null } });
+    window.setTimeout(
+      () => {
+        if (get().toast?.id === id) set({ toast: null });
+      },
+      action ? 6000 : 4500,
+    );
   },
   clearToast: () => set({ toast: null }),
   resetForAccountSwitch: () =>
@@ -678,7 +805,7 @@ export function handleGlobalShortcut(event: KeyboardEvent): void {
     state.setAlertsOpen(false);
     state.setCalendarOpen(false);
     state.setPaletteOpen(false);
-    if (state.draft.active) state.patchDraft({ active: false });
+    if (state.draft.active || state.draft.sl || state.draft.tp) state.resetDraft();
     if (state.templateArmed) state.setTemplateArmed(false);
     return;
   }

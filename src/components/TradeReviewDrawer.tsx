@@ -37,6 +37,7 @@ export function TradeReviewDrawer({
   onChanged?: () => void;
 }) {
   const notify = useApp((s) => s.notify);
+  const openStrategyNew = useApp((s) => s.openStrategyNew);
   const serverOffset = useApp((s) => s.health?.serverOffset ?? 0);
 
   const [detail, setDetail] = useState<TradeNoteDetail | null>(null);
@@ -108,6 +109,25 @@ export function TradeReviewDrawer({
       });
     } catch (err) {
       notify('error', (err as Error).message);
+    }
+  };
+
+  const toggleReviewed = async () => {
+    if (!detail) return;
+    const next = !detail.reviewedAt;
+    setSaving(true);
+    try {
+      const res = await gateway.call<{ positionId: number; reviewedAt: number | null }>(
+        'strategy.tradeNote.reviewed',
+        { positionId, reviewed: next },
+      );
+      setDetail({ ...detail, reviewedAt: res.reviewedAt });
+      notify('success', next ? '已标记为已复盘' : '已取消复盘标记');
+      onChanged?.();
+    } catch (err) {
+      notify('error', (err as Error).message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -224,9 +244,15 @@ export function TradeReviewDrawer({
                 ))}
               </select>
               {detail.playbooks.length === 0 && (
-                <p className="mt-2 text-[11px] text-console-faint">
-                  还没有策略手册。先到「策略手册」建一本，再回来逐条勾规则。
-                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-console-faint">
+                  <span>还没有策略手册。</span>
+                  <button
+                    onClick={openStrategyNew}
+                    className="rounded border border-console-line px-2 py-0.5 text-console-ink-2 transition-colors hover:bg-console-hover"
+                  >
+                    新建一本
+                  </button>
+                </div>
               )}
               {selectedBook?.description && (
                 <p className="mt-2 text-[12px] leading-relaxed text-console-muted">
@@ -373,11 +399,22 @@ export function TradeReviewDrawer({
         )}
 
         <footer className="flex items-center justify-between gap-3 border-t border-console-line px-5 py-3">
-          <span className="text-[11px] text-console-faint">
-            {detail?.reviewedAt
-              ? `上次复盘 ${fmtReviewTime(detail.reviewedAt, 0, true)}`
-              : '只记事实，不改成交'}
-          </span>
+          <div className="flex min-w-0 items-center gap-2 text-[11px] text-console-faint">
+            <span className="truncate">
+              {detail?.reviewedAt
+                ? `已复盘 ${fmtReviewTime(detail.reviewedAt, 0, true)}`
+                : '只记事实，不改成交'}
+            </span>
+            {detail && (
+              <button
+                onClick={() => void toggleReviewed()}
+                disabled={saving}
+                className="shrink-0 rounded border border-console-line px-2 py-0.5 text-console-ink-2 transition-colors hover:bg-console-hover disabled:opacity-50"
+              >
+                {detail.reviewedAt ? '取消标记' : '标记已复盘'}
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="console-btn console-btn-secondary">
               关闭

@@ -1,8 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Bar } from '../gateway/types';
+import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { setReplayBars } from './source';
-import { useReplay, type OrderInput } from './store';
+import {
+  chartStateKey,
+  queueViewSave,
+  useReplay,
+  type OrderInput,
+} from './store';
 import { makeBar, makeSession } from './testUtils';
 import type { ReplayPosition, ReplaySession } from './types';
 
@@ -695,5 +701,144 @@ describe('成交后的交易路径', () => {
     expect(session.positions[0].templateStep).toBe(1);
     // 最新事件留给界面提示，模板阶段不再悄无声息
     expect(useReplay.getState().lastEvent).toBe('模板 1R 移到保本');
+  });
+});
+
+describe('网关持久化', () => {
+  function mockGateway(rows: unknown[] = []) {
+    return vi.spyOn(gateway, 'call').mockImplementation((async (method: string) => {
+      if (method === 'replay.list') return { sessions: rows };
+      if (method === 'replay.save') return { saved: true };
+      if (method === 'replay.delete') return { deleted: true };
+      throw new Error(`未预置的方法：${method}`);
+    }) as typeof gateway.call);
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('库里为空时把本机会话复制到网关，并留下迁移标记', async () => {
+    const session = makeSession({ id: 'local-migrate', updatedAt: 1_000 });
+    window.localStorage.setItem('mytrade.replay.sessions', JSON.stringify([session]));
+    useReplay.setState({ sessions: [], hydrated: false, storageMode: 'local' });
+    const call = mockGateway([]);
+    vi.useFakeTimers();
+
+    await state().hydrate(881);
+
+    expect(state().storageMode).toBe('gateway');
+    expect(state().sessions.map((item) => item.id)).toContain('local-migrate');
+    await vi.advanceTimersByTimeAsync(150);
+    expect(call).toHaveBeenCalledWith(
+      'replay.save',
+      expect.objectContaining({
+        session: expect.objectContaining({ id: 'local-migrate' }),
+      }),
+      expect.anything(),
+    );
+    expect(window.localStorage.getItem('mytrade.replay.storage')).toBe('2');
+  });
+
+  it('网关已有会话时直接载入，图表视图回填本地缓存且不重复保存', async () => {
+    window.localStorage.clear();
+    const session = makeSession({ id: 'remote-1', updatedAt: 5_000 });
+    const call = mockGateway([
+      {
+        id: session.id,
+        updatedAt: session.updatedAt,
+        session,
+        chart: '{"symbol":"XAUUSD"}',
+        drawings: null,
+      },
+    ]);
+    useReplay.setState({ sessions: [], hydrated: false, storageMode: 'local' });
+    vi.useFakeTimers();
+
+    await state().hydrate(882);
+    await vi.advanceTimersByTimeAsync(2_500);
+
+    expect(state().sessions.map((item) => item.id)).toEqual(['remote-1']);
+    expect(window.localStorage.getItem(chartStateKey('remote-1'))).toBe(
+      '{"symbol":"XAUUSD"}',
+    );
+    expect(call).not.toHaveBeenCalledWith('replay.save', expect.anything(), expect.anything());
+
+    state().rename('remote-1', '改名后');
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(call).toHaveBeenCalledWith(
+      'replay.save',
+      expect.objectContaining({
+        session: expect.objectContaining({ id: 'remote-1', name: '改名后' }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('网关不可用时退回本机快照，只读不写', async () => {
+    window.localStorage.clear();
+    const session = makeSession({ id: 'offline-1', updatedAt: 1_000 });
+    window.localStorage.setItem('mytrade.replay.sessions', JSON.stringify([session]));
+    const call = vi
+      .spyOn(gateway, 'call')
+      .mockRejectedValue(Object.assign(new Error('网关未连接'), { code: 'OFFLINE' }));
+    useReplay.setState({ sessions: [], hydrated: false, storageMode: 'local' });
+
+    await state().hydrate(883);
+
+    expect(state().storageMode).toBe('local');
+    expect(state().hydrated).toBe(true);
+    expect(state().sessions.map((item) => item.id)).toEqual(['offline-1']);
+    expect(call).not.toHaveBeenCalledWith('replay.save', expect.anything(), expect.anything());
+  });
+
+  it('图表视图按 5 秒防抖单独写入会话行', async () => {
+    window.localStorage.clear();
+    const call = mockGateway([]);
+    useReplay.setState({ sessions: [], hydrated: false, storageMode: 'local' });
+    vi.useFakeTimers();
+
+    await state().hydrate(884);
+    queueViewSave('view-1', { chart: '{"symbol":"XAUUSD"}' });
+    await vi.advanceTimersByTimeAsync(5_100);
+
+    expect(call).toHaveBeenCalledWith(
+      'replay.save',
+      { id: 'view-1', chart: '{"symbol":"XAUUSD"}' },
+      expect.anything(),
+    );
+  });
+
+  it('保存失败时回放不中断，同一类失败只提示一次', async () => {
+    window.localStorage.clear();
+    const session = makeSession({ id: 'fail-1', updatedAt: 1_000 });
+    useReplay.setState({ sessions: [session], hydrated: true, storageMode: 'gateway' });
+    vi.useFakeTimers();
+    const call = vi.spyOn(gateway, 'call').mockImplementation((async (method: string) => {
+      if (method === 'replay.save') {
+        throw Object.assign(new Error('只读'), { code: 'EACCES' });
+      }
+      return {};
+    }) as typeof gateway.call);
+    const notify = vi.spyOn(useApp.getState(), 'notify');
+
+    state().rename('fail-1', '改名后');
+    await vi.advanceTimersByTimeAsync(2_500);
+
+    // 回放照常可用：会话还在，改动退回本机快照
+    expect(state().sessions[0].name).toBe('改名后');
+    const local = JSON.parse(
+      window.localStorage.getItem('mytrade.replay.sessions') ?? '[]',
+    ) as ReplaySession[];
+    expect(local[0].name).toBe('改名后');
+    const offline = () => notify.mock.calls.filter(([, text]) => text.includes('先保存在本机'));
+    expect(offline()).toHaveLength(1);
+    expect(useApp.getState().toast?.text).toContain('先保存在本机');
+
+    // 15 秒后自动重试仍失败：回放不中断，提示不重复弹
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(call).toHaveBeenCalledWith('replay.save', expect.anything(), expect.anything());
+    expect(offline()).toHaveLength(1);
   });
 });

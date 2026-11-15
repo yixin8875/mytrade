@@ -32,6 +32,34 @@ def _json_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _journal_filter_sql(filters: dict[str, Any] | None) -> tuple[list[str], list[Any]]:
+    """交易日志的统一筛选：列表与统计共用，保证两处行集合一致。"""
+    clauses: list[str] = []
+    args: list[Any] = []
+    data = filters or {}
+    symbol = str(data.get("symbol") or "").strip()
+    if symbol:
+        clauses.append("j.symbol=?")
+        args.append(symbol)
+    tag = str(data.get("tag") or "").strip()
+    if tag == "未标记":
+        clauses.append("(j.tag IS NULL OR j.tag = '')")
+    elif tag:
+        clauses.append("j.tag=?")
+        args.append(tag)
+    result = str(data.get("result") or "").strip()
+    if result == "win":
+        clauses.append("j.profit > 0")
+    elif result == "loss":
+        clauses.append("j.profit < 0")
+    reviewed = data.get("reviewed")
+    if reviewed is not None and str(reviewed) in ("0", "1"):
+        clauses.append(
+            "n.reviewed_at IS NULL" if str(reviewed) == "0" else "n.reviewed_at IS NOT NULL"
+        )
+    return clauses, args
+
+
 class Store:
     """订单意图 + 审计日志。只允许 MT5 工作线程调用。"""
 
@@ -243,6 +271,34 @@ class Store:
             self._db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_checks_book ON playbook_checks(login, playbook_id)"
             )
+            # 回放会话主体存 payload（订单/持仓/成交/笔记/权益曲线），
+            # 图表状态与画线分列存放，便于单独覆盖而不重写整份 payload。
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS replay_sessions (
+                    login INTEGER NOT NULL,
+                    id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    origin TEXT,
+                    reference_key TEXT,
+                    start_ts INTEGER NOT NULL,
+                    end_ts INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    archived INTEGER NOT NULL DEFAULT 0,
+                    payload TEXT NOT NULL,
+                    chart TEXT,
+                    drawings TEXT,
+                    PRIMARY KEY (login, id)
+                )
+                """
+            )
+            self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_replay_sessions_updated "
+                "ON replay_sessions(login, updated_at DESC)"
+            )
             # 开仓纪律门禁：一次开仓尝试一行，client_id 与 order.place 的 clientOrderId 同键。
             # rules 存开单时的规则快照，清单后来被编辑/归档也不影响历史显示。
             self._db.execute(
@@ -371,6 +427,9 @@ class Store:
             self._db.execute("ALTER TABLE journal ADD COLUMN sl REAL")
         if "tp" not in journal_columns:
             self._db.execute("ALTER TABLE journal ADD COLUMN tp REAL")
+        # 同步这笔交易时券商服务器与本机的时间差；展示时用它换成本地时间
+        if "server_offset" not in journal_columns:
+            self._db.execute("ALTER TABLE journal ADD COLUMN server_offset INTEGER")
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_journal_login ON journal(login, close_time)"
         )
@@ -590,8 +649,8 @@ class Store:
                 INSERT INTO journal
                     (login, position_id, symbol, side, volume, entry_price, exit_price, profit,
                      swap, commission, open_time, close_time, duration_sec, mfe, mae,
-                     tag, closed_by, risk, risk_source, sl, tp, recorded_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     tag, closed_by, risk, risk_source, sl, tp, recorded_at, server_offset)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(login, position_id) DO UPDATE SET
                     exit_price=excluded.exit_price,
                     profit=excluded.profit,
@@ -611,7 +670,8 @@ class Store:
                         THEN excluded.risk_source ELSE journal.risk_source END,
                     sl=COALESCE(journal.sl, excluded.sl),
                     tp=COALESCE(journal.tp, excluded.tp),
-                    tag=COALESCE(journal.tag, excluded.tag)
+                    tag=COALESCE(journal.tag, excluded.tag),
+                    server_offset=COALESCE(journal.server_offset, excluded.server_offset)
                 """,
                 (
                     int(record.get("login") or 0),
@@ -636,19 +696,33 @@ class Store:
                     _positive_or_none(record.get("sl")),
                     _positive_or_none(record.get("tp")),
                     int(time.time()),
+                    (
+                        int(record["server_offset"])
+                        if record.get("server_offset") is not None
+                        else None
+                    ),
                 ),
             )
             self._db.commit()
 
     def journal_list(
-        self, limit: int = 200, since: int = 0, login: int = 0
+        self,
+        limit: int = 200,
+        since: int = 0,
+        login: int = 0,
+        filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
+        clauses, args = _journal_filter_sql(filters)
+        where = " AND ".join(["j.login=?", "j.close_time >= ?", *clauses])
         with self._lock:
             rows = self._db.execute(
-                """SELECT * FROM journal
-                   WHERE login=? AND close_time >= ?
-                   ORDER BY close_time DESC LIMIT ?""",
-                (int(login), int(since), int(limit)),
+                f"""SELECT j.*, n.reviewed_at AS reviewed_at
+                   FROM journal j
+                   LEFT JOIN trade_notes n
+                     ON n.login = j.login AND n.position_id = j.position_id
+                   WHERE {where}
+                   ORDER BY j.close_time DESC LIMIT ?""",
+                (int(login), int(since), *args, int(limit)),
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -675,6 +749,16 @@ class Store:
                 (int(login), int(position_id)),
             )
             self._db.commit()
+
+    def journal_backfill_offset(self, login: int, offset: int) -> int:
+        """老记录没有服务器时区差时补一次；已有值的不覆盖。"""
+        with self._lock:
+            cursor = self._db.execute(
+                "UPDATE journal SET server_offset=? WHERE login=? AND server_offset IS NULL",
+                (int(offset), int(login)),
+            )
+            self._db.commit()
+            return int(cursor.rowcount or 0)
 
     def journal_tag_for_position(self, position_id: int, login: int = 0) -> str | None:
         with self._lock:
@@ -932,7 +1016,8 @@ class Store:
         return [dict(r) for r in rows]
 
     def execution_stats(self, days: int = 30, login: int = 0) -> dict[str, Any]:
-        since = int(time.time()) - max(1, days) * 86400
+        # days<=0 表示全部历史，与 journal.stats 的区间语义保持一致
+        since = 0 if days <= 0 else int(time.time()) - days * 86400
         with self._lock:
             rows = [
                 dict(r)
@@ -1377,6 +1462,32 @@ class Store:
                     now,
                 ),
             )
+            self._db.commit()
+        return self.trade_note_get(position_id, login) or {}
+
+    def trade_note_set_reviewed(
+        self, position_id: int, reviewed: bool, login: int = 0
+    ) -> dict[str, Any]:
+        """只切换「已复盘」标记，不碰评分/笔记内容；没有记录时建一条空笔记。"""
+        now = int(time.time())
+        with self._lock:
+            if reviewed:
+                self._db.execute(
+                    """
+                    INSERT INTO trade_notes
+                        (login, position_id, playbook_id, rating, mistakes, note, reviewed_at, updated_at)
+                    VALUES (?, ?, NULL, NULL, '[]', '', ?, ?)
+                    ON CONFLICT(login, position_id) DO UPDATE SET
+                        reviewed_at=excluded.reviewed_at,
+                        updated_at=excluded.updated_at
+                    """,
+                    (int(login), int(position_id), now, now),
+                )
+            else:
+                self._db.execute(
+                    "UPDATE trade_notes SET reviewed_at=NULL, updated_at=? WHERE login=? AND position_id=?",
+                    (now, int(login), int(position_id)),
+                )
             self._db.commit()
         return self.trade_note_get(position_id, login) or {}
 
@@ -1948,6 +2059,149 @@ class Store:
             cursor = self._db.execute(
                 "DELETE FROM missed_trades WHERE id=? AND login=?",
                 (int(missed_id), int(login)),
+            )
+            self._db.commit()
+        return cursor.rowcount > 0
+
+    # ------------------------------------------------------------ 回放会话
+    # updated_at 用毫秒（与前端 session.updatedAt 同源），只做顺序比较，
+    # 不参与复盘层的按日分桶。
+
+    @staticmethod
+    def _replay_row(row: Any) -> dict[str, Any]:
+        item = dict(row)
+        raw = item.pop("payload", None)
+        try:
+            session = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            session = {}
+        if not isinstance(session, dict):
+            session = {}
+        return {
+            "id": item["id"],
+            "updatedAt": int(item["updated_at"]),
+            "session": session,
+            "chart": item.get("chart"),
+            "drawings": item.get("drawings"),
+        }
+
+    def replay_list(self, login: int = 0, limit: int = 200) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                """SELECT * FROM replay_sessions WHERE login=?
+                   ORDER BY updated_at DESC LIMIT ?""",
+                (int(login), int(limit)),
+            ).fetchall()
+        return [self._replay_row(row) for row in rows]
+
+    def replay_get(self, replay_id: str, login: int = 0) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM replay_sessions WHERE id=? AND login=?",
+                (replay_id, int(login)),
+            ).fetchone()
+        return self._replay_row(row) if row else None
+
+    def replay_save(
+        self,
+        login: int,
+        session: dict[str, Any],
+        payload: str,
+        chart: str | None = None,
+        drawings: str | None = None,
+    ) -> bool:
+        """写入一条会话；磁盘上的 updated_at 比 payload 新时返回 False（冲突）。
+
+        chart / drawings 未提供时保留原值，便于前端只保存图表视图。
+        """
+        replay_id = str(session.get("id") or "")
+        updated_at = int(session.get("updatedAt") or 0)
+        created_at = int(session.get("createdAt") or updated_at)
+        reference = session.get("reference") or {}
+        reference_key = reference.get("key") if isinstance(reference, dict) else None
+        archived = 1 if session.get("status") == "archived" else 0
+        with self._lock:
+            existing = self._db.execute(
+                "SELECT updated_at FROM replay_sessions WHERE login=? AND id=?",
+                (int(login), replay_id),
+            ).fetchone()
+            if existing is not None and int(existing["updated_at"]) > updated_at:
+                return False
+            self._db.execute(
+                """
+                INSERT INTO replay_sessions
+                    (login, id, name, symbol, status, origin, reference_key,
+                     start_ts, end_ts, created_at, updated_at, archived,
+                     payload, chart, drawings)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(login, id) DO UPDATE SET
+                    name=excluded.name,
+                    symbol=excluded.symbol,
+                    status=excluded.status,
+                    origin=excluded.origin,
+                    reference_key=excluded.reference_key,
+                    start_ts=excluded.start_ts,
+                    end_ts=excluded.end_ts,
+                    created_at=excluded.created_at,
+                    updated_at=excluded.updated_at,
+                    archived=excluded.archived,
+                    payload=excluded.payload,
+                    chart=COALESCE(excluded.chart, replay_sessions.chart),
+                    drawings=COALESCE(excluded.drawings, replay_sessions.drawings)
+                """,
+                (
+                    int(login),
+                    replay_id,
+                    str(session.get("name") or ""),
+                    str(session.get("symbol") or ""),
+                    str(session.get("status") or ""),
+                    session.get("origin"),
+                    reference_key,
+                    int(session.get("startTs") or 0),
+                    int(session.get("endTs") or 0),
+                    created_at,
+                    updated_at,
+                    archived,
+                    payload,
+                    chart,
+                    drawings,
+                ),
+            )
+            self._db.commit()
+        return True
+
+    def replay_save_view(
+        self,
+        login: int,
+        replay_id: str,
+        chart: str | None = None,
+        drawings: str | None = None,
+    ) -> bool:
+        """只更新图表视图与画线；不推进 updated_at，避免和会话保存互相覆盖。"""
+        sets: list[str] = []
+        args: list[Any] = []
+        if chart is not None:
+            sets.append("chart=?")
+            args.append(chart)
+        if drawings is not None:
+            sets.append("drawings=?")
+            args.append(drawings)
+        if not sets:
+            return False
+        args.extend([replay_id, int(login)])
+        with self._lock:
+            cursor = self._db.execute(
+                f"UPDATE replay_sessions SET {', '.join(sets)} WHERE id=? AND login=?",
+                tuple(args),
+            )
+            self._db.commit()
+        return cursor.rowcount > 0
+
+    def replay_delete(self, replay_id: str, login: int = 0) -> bool:
+        with self._lock:
+            cursor = self._db.execute(
+                "DELETE FROM replay_sessions WHERE id=? AND login=?",
+                (replay_id, int(login)),
             )
             self._db.commit()
         return cursor.rowcount > 0
