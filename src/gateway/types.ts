@@ -152,8 +152,51 @@ export interface GatewayConfig extends RiskLimits {
   deviation_points: number;
   trailing_step_points: number;
   magic: number;
+  /** 开仓纪律门禁：off 关闭 / confirm 二次确认 / block 未完成则拒绝 */
+  discipline_mode: DisciplineMode;
+  /** 默认清单（playbook id），空串表示未配置 */
+  discipline_playbook: string;
+  /** 强行跳过清单时是否必须填写理由 */
+  discipline_require_reason: boolean;
   /** 已配置的第三方推送通道名（不含密钥） */
   alert_channel_names?: string[];
+}
+
+export type DisciplineMode = 'off' | 'confirm' | 'block';
+export type DisciplineGateState =
+  | 'pending'
+  | 'passed'
+  | 'overridden'
+  | 'blocked'
+  | 'skipped';
+
+/** 开仓清单里的一条规则：evaluated=false 表示还没勾选 */
+export interface DisciplineRule {
+  rule: string;
+  followed: boolean | null;
+  evaluated: boolean;
+}
+
+export interface DisciplineGate {
+  clientId: string;
+  playbookId: string | null;
+  mode: DisciplineMode;
+  state: DisciplineGateState;
+  reason: string | null;
+  positionId: number | null;
+  createdAt: number;
+  updatedAt: number;
+  rules: DisciplineRule[];
+  missing: string[];
+  violated: string[];
+}
+
+/** order.place 里附带的门禁信息；confirmed 只表示接受风险，不表示清单已完成 */
+export interface DisciplinePayload {
+  clientOrderId: string;
+  playbookId?: string;
+  confirmed: boolean;
+  reason?: string;
 }
 
 /** 当日风控状态（网关按服务器时间计算） */
@@ -214,6 +257,22 @@ export interface GatewayHealth {
   /** 券商服务器时间与 UTC 的差（秒），用于图表时区 */
   serverOffset: number;
   version: string;
+  /** 启动时的 SQLite 完整性自检结果；ok 为 null 表示还没跑完 */
+  database?: {
+    ok: boolean | null;
+    messages: string[];
+    checkedAt: number;
+  };
+  /** 网关运行观测：队列深度、慢命令、当前正在执行的命令 */
+  runtime?: {
+    queueDepth: number;
+    commands: number;
+    lastCommand: { method: string; ms: number; at: number } | null;
+    slowestCommandMs: number;
+    busy: { method: string | null; seconds: number } | null;
+    pendingReconcile: boolean;
+    lastIterationMs: number;
+  };
 }
 
 /** account.switch 的返回值 */
@@ -411,6 +470,8 @@ export interface JournalStats {
   days: number;
   summary: {
     trades: number;
+    /** 区间内超过 5000 笔时只统计最近 5000 笔 */
+    truncated?: boolean;
     wins: number;
     losses: number;
     winRate: number | null;
@@ -591,6 +652,8 @@ export interface BackupInfo {
   createdAt: number;
   auditDays?: number;
   screenshots?: number;
+  /** 自动备份（tally-auto-*），只保留最近 7 份；手动备份永不自动清理 */
+  auto?: boolean;
 }
 
 export interface DataPaths {

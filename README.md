@@ -284,12 +284,15 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
   - 成交与审计分别导出为 CSV 和 JSON；设置导出为 `{version, app, exportedAt, config, ui, login}`。
   - 文件写在本机数据目录下的 `exports/`，面板里显示完整路径，桌面版可直接在资源管理器里定位。
 - 整库备份：把数据库（SQLite 在线快照）、设置、审计日志与截图打成一个 zip（`backups/tally-backup-<时间>.zip`）；不包含 `config.json` 与 MT5 登录凭据，换机后重新登录账户即可。
+- 自动备份：网关每小时检查一次，24 小时内没有自动备份就生成 `backups/tally-auto-<时间>.zip`，只保留最近 7 份；手动备份不会被自动清理。备份列表里自动备份标有「自动」。
+- 「导出诊断」：下载一份 JSON 诊断包（见下文「崩溃恢复与诊断」），界面崩溃或行情异常时先导出它再反馈。
 - 恢复：桌面版里点备份行的「恢复」，会先停掉网关、校验备份里的数据库，再把旧的 `data/`、`audit/` 改名成 `*.old-<时间>` 保留，换上新数据并重启网关；本地 MT5 凭据会保留。恢复失败时保留现场并直接报错。
 - 顶栏左侧「搜索命令」或 **Ctrl/Cmd+K** 打开命令面板，可以直接跳页、切主题、打开日历、导出日志、创建备份、检查更新。
 
 ### 稳定性与审计
 
 - 前端 WebSocket 断开后自动重连（最长 5 秒间隔），状态栏显示「自动重连中」；重连成功会重新拉取账户、持仓、挂单、风控与告警。
+- 网关启动时在后台检查一次 SQLite 完整性，结果在 `/health` 的 `database` 字段；前端渲染异常会被 ErrorBoundary 兜住，可重新加载或导出诊断包。
 - 网关与 MT5 断开后每 3 秒重连；连上时把 `sending/unknown` 的意图按 `clientOrderId` 与挂单、持仓、最近 7 天成交重新对账，并写审计。
 - 左侧「记录 → 审计日志」独立页面，可按 UTC 日期、类型前缀、文本查询 `gateway/audit/YYYY-MM-DD.jsonl`，展开看完整 payload；「立即对账」手动触发一次对账，显示检查/找到/未找到数量。
 - 同一价格附近的多笔持仓/挂单，右边缘小块会竖直错行（每行 18px），不会叠在一起。
@@ -316,6 +319,14 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
 - `clientOrderId` 幂等 + SQLite 意图记录 + 重启对账
 - 全量审计日志：`gateway/audit/YYYY-MM-DD.jsonl`
 
+网关只监听 `127.0.0.1`，并校验每个连接的页面来源：WebSocket 握手、CORS 和截图接口只接受 Vite 开发页（`http://localhost:5173`）与 Tauri 桌面壳（`tauri://localhost`、`http(s)://tauri.localhost`）。浏览器里的其它网页即使向本机发起 WebSocket，或按已知文件名读取 `/shots`，也会被拒绝；`Origin: null`（沙箱 iframe、`file://` 页面）同样拒绝。没有 Origin 的本机脚本（如 `scripts/verify_trade.py`）按原样放行。
+
+需要从别的地址打开界面时，在 `gateway/config.json` 里追加来源（会与默认白名单合并）：
+
+```json
+{ "allowed_origins": ["http://192.168.1.10:5173"] }
+```
+
 实盘需要同时满足：
 
 1. 在「设置 → 交易与风控 → 实盘开关」里打开（等价于 `gateway/config.json` 的 `allow_live: true`，立即生效）
@@ -324,6 +335,38 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
 4. 前端手动切到实盘模式
 
 即使如此，仍建议先在模拟账户用小手数完整走一遍：开仓 → 拖止损 → 平仓 → 重启应用恢复状态。
+
+---
+
+## 命令超时与「结果未知」
+
+网关给每条命令设了服务端超时：普通命令 7 秒，历史行情、统计、AI 复盘、导出/备份等长命令 18–85 秒；前端超时始终比服务端多留几秒，保证先收到明确错误码，而不是笼统的「请求超时」。
+
+- 只读命令超时返回 `TIMEOUT`，可以安全重试。
+- 可能已经改变券商状态的命令（`order.place`、`order.modify`、`order.cancel`、`position.modify`、`position.breakeven`、`position.close`、`position.closeAll`）超时返回 `RESULT_UNKNOWN`：网关不会误报「失败」，而是在工作线程恢复空闲后自动对账，界面提示稍后核对持仓与挂单。
+- 命令队列有上限（256 条）；工作线程长时间卡住时新请求会快速返回 `BUSY`，不会无限堆积。
+- `/health` 的 `runtime` 字段暴露队列深度、当前执行中的命令、最近命令耗时与慢命令计数；超过服务端超时的命令会写入审计日志 `command.slow`。
+
+---
+
+## 统计口径
+
+前后端共用同一套判定（`gateway/metrics.py` 与 `src/lib/metrics.ts`，`WIN_EPSILON = 0.005`）：
+
+- 盈亏 > 0.005 记胜，< -0.005 记负；两者之间（含 0 与手续费造成的毛刺）不计入胜/负。
+- 前端 `winRate` 是 0–1 的比例，网关 `journal.stats` 返回 0–100 的百分数。
+- `journal.stats` 最多统计最近 5000 笔；被截断时 `summary.truncated = true`，交易日志页提示「仅统计最近 5000 笔」。
+- `testdata/stats_golden.json` 是两端共用的黄金样本，pytest 与 vitest 都会读取，口径漂移会直接测试失败。
+
+---
+
+## 崩溃恢复与诊断
+
+- 网关启动时在独立线程跑一次 SQLite `PRAGMA integrity_check`，结果进入 `/health` 的 `database`；失败会写审计 `database.integrity_failed`，不影响网关继续运行。
+- 自动备份线程每小时检查一次：超过 24 小时没有自动备份就创建一份，轮转只保留最近 7 份；手动与自动备份共用一把锁，避免同时写 SQLite 快照。
+- 网关日志同时写入 `logs/gateway.log`（2MB 轮转，保留 4 份）。
+- 设置 → 数据与备份 →「导出诊断」下载 JSON，包含网关 health、数据库自检、备份列表、日志尾部（password/token/authorization 已脱敏）以及前端未捕获异常与 Promise 拒绝（最近 30 条）。
+- 前端由 ErrorBoundary 兜底：渲染崩溃时显示错误信息，可一键重新加载或导出诊断包；交易数据仍在网关和本地库里，不会因此丢失。
 
 ---
 
@@ -408,8 +451,18 @@ mytrade/
 │  ├─ components/          顶栏、图表、下单票、持仓、挂单、自选、告警面板、更新提示、状态栏
 │  └─ store/               Zustand 状态
 ├─ gateway/                Python MT5 网关
-│  ├─ app.py               FastAPI + WebSocket
-│  ├─ mt5_worker.py        单线程 MT5 调用、交易、对账
+│  ├─ app.py               FastAPI + WebSocket、来源白名单、命令超时
+│  ├─ mt5_worker.py        工作线程生命周期、命令分派、健康状态
+│  ├─ worker_base.py       共享常量、依赖代理、超时与队列参数
+│  ├─ worker_account.py    连接、多账户、配置与服务器时间
+│  ├─ worker_market.py     品种、历史行情、报价/分时订阅、自选
+│  ├─ worker_trading.py    预检、下单、改单、平仓、挂单模板计划
+│  ├─ worker_risk.py       风控、持仓快照、移动止损与分批止盈
+│  ├─ worker_data.py       日志、导出/备份、价格告警
+│  ├─ metrics.py           胜负口径（与 src/lib/metrics.ts 一致）
+│  ├─ security.py          Origin/Referer 白名单
+│  ├─ diagnostics.py       诊断包（health + 自检 + 日志尾部）
+│  ├─ exporter.py          CSV/JSON 导出与 zip 备份
 │  ├─ accounts.py          账户校验、增删改、当前账户切换
 │  ├─ secure_store.py      Windows DPAPI 加密保存 MT5 密码
 │  ├─ journal.py           交易日志：成交配对、MFE/MAE、统计、截图

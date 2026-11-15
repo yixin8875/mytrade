@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { ChartCandlestick, NotebookPen, RefreshCw } from 'lucide-react';
+import { ChartCandlestick, NotebookPen, Play, RefreshCw } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { TradeDetailModal } from '../components/TradeDetailModal';
 import { TradeReviewDrawer } from '../components/TradeReviewDrawer';
+import { ReferenceCapacityDialog, useTradeReplay } from '../replay/useTradeReplay';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
@@ -61,6 +62,7 @@ export function JournalView() {
   const [editing, setEditing] = useState<{ id: number; value: string } | null>(null);
   const [shot, setShot] = useState<{ record: JournalRecord; tab: 'chart' | 'shot' } | null>(null);
   const [reviewing, setReviewing] = useState<number | null>(null);
+  const replay = useTradeReplay();
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -175,7 +177,11 @@ export function JournalView() {
         )}
 
         <div className="readout mt-6 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
-          <StatCard label="交易笔数" value={summary ? String(summary.trades) : '—'} />
+          <StatCard
+            label="交易笔数"
+            value={summary ? String(summary.trades) : '—'}
+            hint={summary?.truncated ? '仅统计最近 5000 笔' : undefined}
+          />
           <StatCard
             label="胜率"
             value={summary?.winRate != null ? `${summary.winRate.toFixed(1)}%` : '—'}
@@ -391,6 +397,12 @@ export function JournalView() {
                             >
                               <NotebookPen size={13} strokeWidth={1.6} />
                             </RowAction>
+                            <RowAction
+                              label="回放"
+                              onClick={() => replay.start(record)}
+                            >
+                              <Play size={13} strokeWidth={1.6} />
+                            </RowAction>
                           </div>
                         </td>
                       </tr>
@@ -431,6 +443,12 @@ export function JournalView() {
           onClose={() => setShot(null)}
         />
       )}
+
+      <ReferenceCapacityDialog
+        pending={replay.pending}
+        onConfirm={replay.confirm}
+        onCancel={replay.cancel}
+      />
     </div>
   );
 }

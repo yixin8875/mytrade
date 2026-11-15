@@ -1,145 +1,40 @@
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
-import math
-import queue
-import threading
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import ROUND_DOWN, Decimal
-from typing import Any, Awaitable, Callable
-
-import MetaTrader5 as mt5
-
-import exporter
-from accounts import AccountError, AccountManager
-from ai import AI, AIError
-from calendar_feed import week_payload
-from config import BASE_DIR, Config
-from journal import TradeJournal
-from missed import Missed, MissedError
-from score import Score
-from notify import Notifier
-from review import Review, ReviewError
-from routines import RoutineError, Routines
-from secure_store import CredentialStore
-from store import Store
-
-TIMEFRAMES = {
-    "1": mt5.TIMEFRAME_M1,
-    "5": mt5.TIMEFRAME_M5,
-    "15": mt5.TIMEFRAME_M15,
-    "30": mt5.TIMEFRAME_M30,
-    "60": mt5.TIMEFRAME_H1,
-    "240": mt5.TIMEFRAME_H4,
-    "1D": mt5.TIMEFRAME_D1,
-    "1W": mt5.TIMEFRAME_W1,
-    "1M": mt5.TIMEFRAME_MN1,
-}
-
-RES_SECONDS = {
-    "1": 60,
-    "5": 300,
-    "15": 900,
-    "30": 1800,
-    "60": 3600,
-    "240": 14400,
-    "1D": 86400,
-    "1W": 604800,
-    "1M": 2592000,
-}
-
-RETCODE_TEXT = {
-    10004: "价格变动，请重试",
-    10006: "请求被拒绝",
-    10007: "请求被交易者取消",
-    10008: "挂单已放置",
-    10009: "成交完成",
-    10010: "部分成交",
-    10011: "请求处理中",
-    10012: "请求超时",
-    10013: "请求参数无效",
-    10014: "手数无效",
-    10015: "价格无效",
-    10016: "止损/止盈无效（距离过近或方向错误）",
-    10017: "交易被禁用",
-    10018: "市场已关闭",
-    10019: "保证金不足",
-    10020: "价格已变化",
-    10021: "当前无报价",
-    10022: "挂单有效期无效",
-    10023: "订单状态已变化",
-    10024: "请求过于频繁",
-    10025: "没有变化",
-    10026: "服务器禁止自动交易",
-    10027: "客户端禁止自动交易",
-    10028: "交易被锁定",
-    10029: "订单/持仓已冻结",
-    10030: "填充模式无效",
-    10031: "与交易服务器无连接",
-    10032: "仅允许实盘账户操作",
-    10033: "挂单数量已达上限",
-    10034: "交易量已达上限",
-    10035: "订单类型无效",
-    10036: "持仓已关闭",
-}
-
-OK_RETCODES = {10008, 10009, 10010}
-
-# 挂单计划：成交后登记的宽限（成交与持仓快照之间有几百毫秒空档）与最长存活时间
-PENDING_PLAN_GRACE = 3.0
-PENDING_PLAN_TTL = 30 * 24 * 3600
-
-ORDER_STATES = {
-    0: "started",
-    1: "working",
-    2: "cancelled",
-    3: "partial",
-    4: "filled",
-    5: "rejected",
-    6: "expired",
-    7: "request_add",
-    8: "request_modify",
-    9: "request_cancel",
-}
+import diagnostics
+from worker_base import *  # noqa: F401,F403
+from worker_base import _num  # noqa: F401
+from worker_account import WorkerAccount
+from worker_data import WorkerData
+from worker_discipline import WorkerDiscipline
+from worker_market import WorkerMarket
+from worker_risk import WorkerRisk
+from worker_trading import WorkerTrading
 
 
-class GatewayError(Exception):
-    def __init__(self, code: str, message: str, detail: Any = None) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.detail = detail
-
-
-def round_volume(volume: float, step: float) -> float:
-    if step <= 0:
-        return volume
-    d = Decimal(str(step))
-    q = (Decimal(str(volume)) / d).to_integral_value(rounding=ROUND_DOWN)
-    return float(q * d)
-
-
-def align_price(price: float, info: Any) -> float:
-    tick = float(getattr(info, "trade_tick_size", 0) or getattr(info, "point", 0) or 0)
-    digits = int(info.digits)
-    if tick <= 0:
-        return round(price, digits)
-    return round(round(price / tick) * tick, digits)
-
-
-def _num(value: Any, default: float = 0.0) -> float:
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-class Mt5Worker:
+class Mt5Worker(
+    WorkerAccount,
+    WorkerData,
+    WorkerMarket,
+    WorkerRisk,
+    WorkerTrading,
+    WorkerDiscipline,
+):
     """唯一允许调用 MetaTrader5 API 的工作线程。"""
+
+    # 观测字段的类级默认值：测试里用 __new__ 构造 worker 时 health() 也能正常返回
+    _queue: queue.Queue | None = None
+    _command_count = 0
+    _slowest_command_ms = 0
+    _last_command: dict | None = None
+    _last_iteration_ms = 0
+    _busy_since: float | None = None
+    _busy_method: str | None = None
+    _needs_reconcile = False
+    _reconcile_reason: str | None = None
+    # 崩溃排查：启动时间、数据库自检结果、备份互斥锁（测试用 __new__ 构造时可为空）
+    _started_at = 0.0
+    _db_integrity: dict | None = None
+    _backup_lock: threading.Lock | None = None
 
     def __init__(
         self,
@@ -151,10 +46,24 @@ class Mt5Worker:
         self.store = store
         self._publish = publish
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._queue: queue.Queue[tuple[concurrent.futures.Future, str, dict]] = queue.Queue()
+        # 有界队列：工作线程卡住时宁可快速返回 BUSY，也不要无限堆积请求
+        self._queue: queue.Queue[tuple[concurrent.futures.Future, str, dict]] = queue.Queue(
+            maxsize=256
+        )
         self._thread = threading.Thread(target=self._run, name="mt5-worker", daemon=True)
         self._stop = threading.Event()
         self._ready = threading.Event()
+
+        # 命令执行观测：队列深度、慢命令、当前正在执行的命令
+        self._command_count = 0
+        self._slowest_command_ms = 0
+        self._last_command: dict | None = None
+        self._last_iteration_ms = 0
+        self._busy_since: float | None = None
+        self._busy_method: str | None = None
+        # 超时后的补对账请求（由 app 层置位，工作线程空闲时执行）
+        self._needs_reconcile = False
+        self._reconcile_reason: str | None = None
 
         self._account_id = cfg.active_profile()["id"]
         self._connected = False
@@ -204,11 +113,22 @@ class Mt5Worker:
         self._alert_last: dict[str, float] = {}
         self._watch_day: dict[str, tuple[float, float]] = {}
 
+        # 启动自检 / 自动备份：独立守护线程，不占用行情与命令循环
+        self._started_at = time.time()
+        self._db_integrity = None
+        self._backup_lock = threading.Lock()
+
     # ---------- lifecycle ----------
 
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
         self._thread.start()
+        threading.Thread(
+            target=self._check_database, name="db-check", daemon=True
+        ).start()
+        threading.Thread(
+            target=self._auto_backup_loop, name="auto-backup", daemon=True
+        ).start()
         self._ready.wait(5)
 
     def stop(self) -> None:
@@ -222,8 +142,72 @@ class Mt5Worker:
 
     def submit(self, method: str, params: dict) -> concurrent.futures.Future:
         fut: concurrent.futures.Future = concurrent.futures.Future()
-        self._queue.put((fut, method, params))
+        try:
+            self._queue.put_nowait((fut, method, params))
+        except queue.Full:
+            raise GatewayError("BUSY", "网关命令队列已满，请稍后重试") from None
         return fut
+
+    def request_reconcile(self, method: str) -> None:
+        """命令超时后由 app 层调用：等工作线程空闲时补一次对账。"""
+        self._reconcile_reason = method
+        self._needs_reconcile = True
+
+    # ---------- maintenance ----------
+
+    def _create_backup(self, settings: dict | None = None, auto: bool = False) -> dict:
+        """手动与自动备份共用同一把锁，避免两个 zip 同时写快照。"""
+        lock = self._backup_lock
+        if lock is None:
+            return exporter.create_backup(self.store, self.cfg, settings, auto=auto)
+        with lock:
+            return exporter.create_backup(self.store, self.cfg, settings, auto=auto)
+
+    def database_status(self) -> dict:
+        status = self._db_integrity
+        if status is None:
+            return {"ok": None, "messages": [], "checkedAt": 0}
+        return status
+
+    def _check_database(self) -> None:
+        try:
+            result = self.store.integrity_check()
+        except Exception as exc:  # noqa: BLE001
+            result = {"ok": False, "messages": [f"{type(exc).__name__}: {exc}"]}
+        result["checkedAt"] = int(time.time())
+        self._db_integrity = result
+        if result["ok"]:
+            return
+        log.error("database integrity check failed: %s", result["messages"])
+        try:
+            self.store.audit("database.integrity_failed", result)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _auto_backup_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._auto_backup_once()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("auto backup failed: %s", exc)
+            self._stop.wait(AUTO_BACKUP_INTERVAL)
+
+    def _auto_backup_once(self) -> None:
+        backups = exporter.list_backups(self.store.base_dir)
+        newest = max(
+            (item["createdAt"] for item in backups if item.get("auto")), default=0
+        )
+        if time.time() - newest < AUTO_BACKUP_MIN_AGE:
+            return
+        out = self._create_backup(auto=True)
+        removed = exporter.prune_auto_backups(self.store.base_dir, AUTO_BACKUP_KEEP)
+        self.store.audit(
+            "data.backup.auto",
+            {"name": out["name"], "bytes": out["bytes"], "removed": removed},
+        )
+
+    def _diagnostics(self, _p: dict) -> dict:
+        return diagnostics.build(self, self.store, self._started_at)
 
     def _run(self) -> None:
         self._ready.set()
@@ -237,19 +221,45 @@ class Mt5Worker:
         last_journal = 0.0
 
         while not self._stop.is_set():
-            try:
-                while True:
+            loop_started = time.monotonic()
+
+            # 每轮最多处理固定条数，命令洪峰时也要给行情/持仓轮询留出时间片
+            for _ in range(MAX_COMMANDS_PER_TICK):
+                try:
                     fut, method, params = self._queue.get_nowait()
-                    if fut.cancelled():
-                        continue
-                    try:
-                        fut.set_result(self._dispatch(method, params))
-                    except GatewayError as exc:
-                        fut.set_exception(exc)
-                    except Exception as exc:  # noqa: BLE001
-                        fut.set_exception(GatewayError("INTERNAL", f"{type(exc).__name__}: {exc}"))
-            except queue.Empty:
-                pass
+                except queue.Empty:
+                    break
+                if fut.cancelled():
+                    continue
+                started = time.monotonic()
+                self._busy_since = started
+                self._busy_method = method
+                try:
+                    fut.set_result(self._dispatch(method, params))
+                except GatewayError as exc:
+                    fut.set_exception(exc)
+                except Exception as exc:  # noqa: BLE001
+                    fut.set_exception(GatewayError("INTERNAL", f"{type(exc).__name__}: {exc}"))
+                finally:
+                    self._busy_since = None
+                    self._busy_method = None
+                    self._note_command(method, time.monotonic() - started)
+
+            # 下单类命令超时后，等工作线程恢复空闲补一次对账
+            if self._needs_reconcile and self._connected:
+                self._needs_reconcile = False
+                reason = self._reconcile_reason
+                self._reconcile_reason = None
+                try:
+                    counts = self._reconcile()
+                    self.store.audit(
+                        "trade.reconcile_after_timeout",
+                        {"method": reason, "counts": counts},
+                    )
+                    if any(counts.values()):
+                        self._emit("gateway", self.health())
+                except Exception as exc:  # noqa: BLE001
+                    self._last_error = {"code": -1, "message": str(exc)}
 
             now = time.monotonic()
             try:
@@ -285,7 +295,26 @@ class Mt5Worker:
             except Exception as exc:  # noqa: BLE001
                 self._last_error = {"code": -1, "message": str(exc)}
 
+            self._last_iteration_ms = int((time.monotonic() - loop_started) * 1000)
             time.sleep(0.02)
+
+    def _note_command(self, method: str, seconds: float) -> None:
+        """记录命令耗时；超过服务端超时视为慢命令，写审计便于事后定位。"""
+        self._command_count += 1
+        ms = int(seconds * 1000)
+        self._last_command = {"method": method, "ms": ms, "at": int(time.time())}
+        self._slowest_command_ms = max(self._slowest_command_ms, ms)
+        limit = command_timeout(method)
+        if seconds < limit:
+            return
+        log.warning("command %s took %.1fs (limit %.1fs)", method, seconds, limit)
+        try:
+            self.store.audit(
+                "command.slow",
+                {"method": method, "ms": ms, "limitMs": int(limit * 1000)},
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---------- connection ----------
 
@@ -295,414 +324,18 @@ class Mt5Worker:
     def _login(self) -> int:
         return int((self._account or {}).get("login") or 0)
 
-    def _accounts_payload(self) -> list[dict]:
-        active = self._account_id
-        out: list[dict] = []
-        for profile in self.cfg.account_profiles():
-            is_active = profile["id"] == active
-            connected = is_active and self._connected
-            login = int(profile["login"])
-            server = profile["server"]
-            if is_active and self._account:
-                login = int(self._account.get("login") or login)
-                server = str(self._account.get("server") or server)
-            out.append(
-                {
-                    "id": profile["id"],
-                    "label": profile["label"],
-                    "login": login,
-                    "server": server,
-                    "terminalPath": profile["terminal_path"],
-                    "active": is_active,
-                    "connected": connected,
-                    "hasPassword": self._account_mgr.has_password(profile["id"]),
-                    "configured": bool(self.cfg.configured_accounts()),
-                }
-            )
-        return out
 
-    def _try_connect(self, force_login: bool = False) -> None:
-        if force_login:
-            self._connect_blocked = False
-            self._auth_failures = 0
-        elif self._connect_blocked:
-            return
-        try:
-            mt5.shutdown()
-            profile = self._profile()
-            self._account_id = profile["id"]
-            path = str(profile.get("terminal_path") or "")
-            expected = int(profile.get("login") or 0)
-            kwargs: dict[str, Any] = {}
-            if path:
-                kwargs["path"] = path
-            if not mt5.initialize(**kwargs):
-                code, msg = mt5.last_error()
-                self._last_error = {
-                    "code": int(code),
-                    "message": f"账户「{profile['label']}」连接失败：{msg}",
-                }
-                return
 
-            try:
-                password = self._account_mgr.password(profile["id"])
-            except AccountError as exc:
-                self._connect_blocked = True
-                self._last_error = {"code": "CREDENTIAL_STORE", "message": str(exc)}
-                mt5.shutdown()
-                self._emit("gateway", self.health())
-                return
 
-            account = mt5.account_info()
-            needs_login = (
-                force_login
-                or account is None
-                or bool(expected and int(account.login) != expected)
-            )
-            if needs_login and password:
-                if expected <= 0:
-                    self._connect_blocked = True
-                    self._last_error = {
-                        "code": "AUTH_CONFIG",
-                        "message": f"账户「{profile['label']}」未配置登录号，无法自动登录",
-                    }
-                    mt5.shutdown()
-                    self._emit("gateway", self.health())
-                    return
-                try:
-                    logged_in = mt5.login(
-                        expected,
-                        password=password,
-                        server=str(profile.get("server") or ""),
-                    )
-                    code, msg = (0, "") if logged_in else mt5.last_error()
-                except Exception as exc:  # noqa: BLE001 - 登录异常也按认证失败处理
-                    logged_in = False
-                    code, msg = -1, f"{type(exc).__name__}: {exc}"
-                if not logged_in:
-                    self._auth_failures += 1
-                    # 给终端刚启动/网络抖动留两次重试，连续失败后再停下等用户改密码
-                    if self._auth_failures >= 3:
-                        self._connect_blocked = True
-                    self._last_error = {
-                        "code": "AUTH_FAILED",
-                        "message": (
-                            f"账户「{profile['label']}」自动登录失败：{msg}（错误 {code}）。"
-                            "请检查登录号、服务器和密码。"
-                        ),
-                    }
-                    self._connected = False
-                    mt5.shutdown()
-                    try:
-                        self.store.audit(
-                            "account.login_failed",
-                            {
-                                "accountId": profile["id"],
-                                "login": expected,
-                                "attempt": self._auth_failures,
-                                "error": int(code),
-                            },
-                        )
-                    except Exception:  # noqa: BLE001 - 审计失败不影响重试
-                        pass
-                    self._emit("gateway", self.health())
-                    return
-                account = mt5.account_info()
 
-            terminal = mt5.terminal_info()
-            if terminal is None or account is None:
-                self._last_error = {
-                    "code": "NOT_LOGGED_IN",
-                    "message": (
-                        "终端已启动但账户未登录；请在设置里为该账户保存密码，"
-                        "或在 MT5 终端里手动登录"
-                    ),
-                }
-                mt5.shutdown()
-                return
-            if expected and int(account.login) != expected:
-                self._last_error = {
-                    "code": "ACCOUNT_MISMATCH",
-                    "message": (
-                        f"账户「{profile['label']}」期望登录 {expected}，实际是 {account.login}；"
-                        "请检查登录号、服务器、密码和终端路径"
-                    ),
-                }
-                mt5.shutdown()
-                return
-            login = int(account.login)
-            try:
-                # 旧库没有账户维度，第一次连上真实账户时把历史数据归到该账户
-                self.store.migrate_legacy(login)
-            except Exception:  # noqa: BLE001 - 迁移失败不影响交易
-                pass
-            self._connected = True
-            self._connect_blocked = False
-            self._auth_failures = 0
-            self._last_error = None
-            self._account = self._account_payload(account)
-            self._sync_server_time()
-            if not self._state_loaded:
-                self._state_loaded = True
-                self._halted = self.store.get_state("halted", login)
-                stored = self.store.get_state("trailing", login) or {}
-                try:
-                    self._trailing = {int(k): v for k, v in stored.items()}
-                except (TypeError, ValueError):
-                    self._trailing = {}
-                auto_be = self.store.get_state("autoBreakeven", login) or {}
-                self._auto_be = self._restore_auto_be(auto_be)
-                pending = self.store.get_state("pendingTemplatePlans", login) or {}
-                self._pending_plans = self._restore_pending_plans(pending)
-                self._auto_be_pause_reason = ""
-            self._poll_trade_state()
-            self._poll_account()
-            self._reconcile()
-            self._poll_risk(force=True)
-            self._alerts = self.store.alerts_list(login)
-            self._notifier.start()
-            try:
-                self._journal.sync(login, force=True)
-            except Exception:  # noqa: BLE001 - 日志同步失败不影响交易
-                pass
-            self._emit("gateway", self.health())
-            self.store.audit(
-                "gateway.connected", {"login": login, "accountId": profile["id"]}
-            )
-        except Exception as exc:  # noqa: BLE001
-            self._connected = False
-            self._last_error = {"code": -1, "message": f"{type(exc).__name__}: {exc}"}
 
-    def _refresh_limits(self) -> None:
-        """重新计算当前账户的生效风控（全局默认被账户覆盖改写）。"""
-        self._limits = self.cfg.risk_limits(self._account_id)
 
-    def _reset_for_switch(self) -> None:
-        """断开当前终端并清空账户相关内容，随后由 _try_connect 重新连到目标终端。"""
-        self._refresh_limits()
-        try:
-            mt5.shutdown()
-        except Exception:  # noqa: BLE001
-            pass
-        self._connected = False
-        self._connect_blocked = False
-        self._auth_failures = 0
-        self._account = None
-        self._positions = []
-        self._orders = []
-        self._risk = None
-        self._last_error = None
-        self._halted = None
-        self._trailing = {}
-        self._trail_next = {}
-        self._auto_be = {}
-        self._pending_plans = {}
-        self._auto_be_pause_reason = ""
-        self._alerts = []
-        self._alert_last = {}
-        self._watch_day = {}
-        self._subs.clear()
-        self._bar_subs.clear()
-        self._risk_tracked = {}
-        self._server_offset = 0
-        # 换账户后默认回到只读，避免把上一个账户的交易模式带过去
-        self._trade_mode = "readonly"
-        self._state_loaded = False
-        self._emit("positions", [])
-        self._emit("orders", [])
-        self._emit("gateway", self.health())
 
-    def _switch_account(self, p: dict) -> dict:
-        target = str(p.get("id") or "").strip()
-        profile = next(
-            (item for item in self.cfg.account_profiles() if item["id"] == target), None
-        )
-        if profile is None:
-            raise GatewayError("BAD_ACCOUNT", f"未知账户: {target}")
-        if self._positions and not bool(p.get("force")):
-            raise GatewayError(
-                "HAS_POSITIONS",
-                f"当前账户还有 {len(self._positions)} 个持仓，切换后移动止损和自动保本将停止管理",
-                {"positions": len(self._positions)},
-            )
-        if profile["id"] == self._account_id and self._connected:
-            return {
-                "activeId": self._account_id,
-                "account": self._account,
-                "accounts": self._accounts_payload(),
-                "health": self.health(),
-            }
 
-        try:
-            self.cfg.set_active_account(profile["id"])
-        except (ValueError, OSError) as exc:
-            raise GatewayError("CONFIG_SAVE", f"保存账户选择失败：{exc}") from exc
 
-        previous = self._account_id
-        self._account_id = profile["id"]
-        self.store.audit(
-            "account.switch",
-            {
-                "from": previous,
-                "to": profile["id"],
-                "label": profile["label"],
-                "login": profile["login"],
-            },
-        )
-        self._reset_for_switch()
-        self._try_connect()
-        if not self._connected:
-            message = str((self._last_error or {}).get("message") or "未知错误")
-            raise GatewayError(
-                "ACCOUNT_SWITCH_FAILED", f"已切换账户配置，但连接失败：{message}"
-            )
-        self._emit("gateway", self.health())
-        return {
-            "activeId": self._account_id,
-            "account": self._account,
-            "accounts": self._accounts_payload(),
-            "health": self.health(),
-        }
 
-    def _account_hint(self) -> dict:
-        return {
-            "login": self._login(),
-            "server": str((self._account or {}).get("server") or ""),
-            "terminalPath": str(self._profile().get("terminal_path") or ""),
-        }
 
-    def _accounts_result(self) -> dict:
-        return {
-            "activeId": self._account_id,
-            "accounts": self._accounts_payload(),
-            "health": self.health(),
-        }
 
-    def _create_account(self, p: dict) -> dict:
-        try:
-            created = self._account_mgr.create(p, self._account_hint())
-        except AccountError as exc:
-            raise GatewayError("BAD_ACCOUNT", str(exc)) from exc
-        except OSError as exc:
-            raise GatewayError("CONFIG_SAVE", f"保存账户失败：{exc}") from exc
-
-        self._account_id = self.cfg.active_profile()["id"]
-        self._refresh_limits()
-        self.store.audit(
-            "account.create",
-            {
-                "id": created["id"],
-                "activeId": self._account_id,
-                "seeded": bool(created.get("seeded")),
-            },
-        )
-        self._emit("gateway", self.health())
-        return self._accounts_result()
-
-    def _update_account(self, p: dict) -> dict:
-        try:
-            updated = self._account_mgr.update(p)
-        except AccountError as exc:
-            raise GatewayError("BAD_ACCOUNT", str(exc)) from exc
-        except OSError as exc:
-            raise GatewayError("CONFIG_SAVE", f"保存账户失败：{exc}") from exc
-
-        self._account_id = self.cfg.active_profile()["id"]
-        self._refresh_limits()
-        reconnected = self._account_id == updated["id"] and (
-            bool(updated.get("connectionChanged")) or bool(updated.get("passwordChanged"))
-        )
-        self.store.audit(
-            "account.update",
-            {
-                "id": updated["id"],
-                "connectionChanged": bool(updated.get("connectionChanged")),
-                "passwordChanged": bool(updated.get("passwordChanged")),
-            },
-        )
-
-        if reconnected:
-            self._reset_for_switch()
-            self._try_connect(force_login=True)
-            message = str((self._last_error or {}).get("message") or "")
-            if not self._connected:
-                raise GatewayError(
-                    "ACCOUNT_RECONNECT_FAILED",
-                    f"账户已保存，但自动登录失败：{message or '未知错误'}",
-                    {"health": self.health()},
-                )
-            self._emit("gateway", self.health())
-        else:
-            self._emit("gateway", self.health())
-        return self._accounts_result()
-
-    def _delete_account(self, p: dict) -> dict:
-        try:
-            deleted = self._account_mgr.delete(str(p.get("id") or ""))
-        except AccountError as exc:
-            raise GatewayError("BAD_ACCOUNT", str(exc)) from exc
-        except OSError as exc:
-            raise GatewayError("CONFIG_SAVE", f"删除账户失败：{exc}") from exc
-
-        self.store.audit("account.delete", {"id": deleted["id"]})
-        self._emit("gateway", self.health())
-        return self._accounts_result()
-
-    def _set_config(self, p: dict) -> dict:
-        """设置页保存风控字段；立即生效并写回 config.json。"""
-        try:
-            updated = self.cfg.update(p)
-        except ValueError as exc:
-            raise GatewayError("BAD_CONFIG", str(exc)) from exc
-        except OSError as exc:
-            raise GatewayError("CONFIG_SAVE", f"保存配置失败：{exc}") from exc
-
-        self.store.audit("config.update", {"changes": p})
-        self._refresh_limits()
-        self._poll_risk(force=True)
-        self._emit("gateway", self.health())
-        return updated
-
-    def _set_account_risk(self, p: dict) -> dict:
-        """设置页保存账户级风控覆盖；risk 里值为 None 表示恢复跟随全局。"""
-        account_id = str(p.get("id") or self._account_id).strip()
-        patch = p.get("risk")
-        if not isinstance(patch, dict) or not patch:
-            raise GatewayError("BAD_CONFIG", "risk 必须是非空对象，值为 null 表示恢复全局")
-        try:
-            updated = self.cfg.set_account_risk(account_id, patch)
-        except ValueError as exc:
-            raise GatewayError("BAD_CONFIG", str(exc)) from exc
-        except OSError as exc:
-            raise GatewayError("CONFIG_SAVE", f"保存配置失败：{exc}") from exc
-
-        if account_id == self._account_id:
-            self._refresh_limits()
-            self._poll_risk(force=True)
-        self.store.audit("config.account_risk", {"id": account_id, "changes": patch})
-        self._emit("gateway", self.health())
-        return {
-            "config": updated,
-            "limits": self._limits,
-            "accountRisk": self.cfg.account_risk(self._account_id),
-        }
-
-    def _set_allow_live(self, p: dict) -> dict:
-        """设置页的实盘开关：写回 config.json，立即生效。"""
-        allow = p.get("allow")
-        if not isinstance(allow, bool):
-            raise GatewayError("BAD_CONFIG", "allow 必须是布尔值")
-        try:
-            updated = self.cfg.set_allow_live(allow)
-        except OSError as exc:
-            raise GatewayError("CONFIG_SAVE", f"保存配置失败：{exc}") from exc
-
-        # 关闭实盘时如果正处在实盘模式，立即回到只读
-        if not allow and self._trade_mode == "live":
-            self._trade_mode = "readonly"
-        self.store.audit("config.allow_live", {"allow": allow})
-        self._emit("gateway", self.health())
-        return {"config": updated, "tradeMode": self._trade_mode}
 
     def health(self) -> dict:
         terminal = None
@@ -718,6 +351,12 @@ class Mt5Worker:
                     "tradeAllowed": bool(info.trade_allowed),
                     "dllsAllowed": bool(info.dlls_allowed),
                 }
+        busy = None
+        if self._busy_since is not None:
+            busy = {
+                "method": self._busy_method,
+                "seconds": round(time.monotonic() - self._busy_since, 1),
+            }
         return {
             "connected": self._connected,
             "terminal": terminal,
@@ -733,6 +372,18 @@ class Mt5Worker:
             "serverTime": int(time.time()),
             "serverOffset": int(self._server_offset),
             "version": "0.7.2",
+            # 启动时的 SQLite 完整性自检结果（后台线程执行）
+            "database": self.database_status(),
+            # 运行观测：队列积压、慢命令、当前正在执行的命令、事件循环上一轮耗时
+            "runtime": {
+                "queueDepth": self._queue.qsize() if self._queue is not None else 0,
+                "commands": self._command_count,
+                "lastCommand": self._last_command,
+                "slowestCommandMs": self._slowest_command_ms,
+                "busy": busy,
+                "pendingReconcile": self._needs_reconcile,
+                "lastIterationMs": self._last_iteration_ms,
+            },
         }
 
     # ---------- dispatch ----------
@@ -785,6 +436,10 @@ class Mt5Worker:
             "trade.preview": self._preview,
             "trade.size": self._size,
             "order.place": self._place,
+            "discipline.start": self._discipline_start,
+            "discipline.check": self._discipline_check,
+            "discipline.state": self._discipline_state,
+            "discipline.reset": self._discipline_reset,
             "order.modify": self._modify_order,
             "order.cancel": self._cancel_order,
             "position.modify": self._modify_position,
@@ -919,6 +574,7 @@ class Mt5Worker:
                 int(p.get("limit") or 50), self._login()
             ),
             "audit.tail": lambda p: self.store.audit_tail(int(p.get("limit") or 50)),
+            "diagnostics.get": self._diagnostics,
         }
         handler = handlers.get(method)
         if handler is None:
@@ -950,2397 +606,109 @@ class Mt5Worker:
         except AIError as exc:
             raise GatewayError(exc.code, exc.message) from exc
 
-    def _missed_bars(self, symbol: str, start: int, end: int) -> list[dict[str, Any]]:
-        """模拟错过机会用的 M1；时间口径与 _history 一致（服务器时间当 UTC 喂库）。"""
-        self._ensure_symbol(symbol)
-        try:
-            rates = mt5.copy_rates_range(
-                symbol,
-                mt5.TIMEFRAME_M1,
-                datetime.fromtimestamp(start),
-                datetime.fromtimestamp(end),
-            )
-        except Exception:  # noqa: BLE001 - 历史缺失按没有数据处理
-            rates = None
-        if rates is None:
-            return []
-        return [
-            {
-                "time": int(rate["time"]),
-                "open": float(rate["open"]),
-                "high": float(rate["high"]),
-                "low": float(rate["low"]),
-                "close": float(rate["close"]),
-                "volume": float(rate["tick_volume"]),
-            }
-            for rate in rates
-        ]
 
     # ---------- system ----------
 
-    def _require_account(self) -> dict:
-        if not self._connected or self._account is None:
-            raise GatewayError("DISCONNECTED", "MT5 终端未连接")
-        return self._account
 
-    def _auto_trading_on(self) -> bool:
-        info = mt5.terminal_info()
-        return bool(info and info.trade_allowed)
 
-    def _set_trade_mode(self, p: dict) -> dict:
-        mode = str(p.get("mode") or "")
-        if mode not in ("readonly", "demo", "live"):
-            raise GatewayError("BAD_MODE", "未知交易模式")
-        account = self._require_account()
-        if mode != "readonly" and not self._auto_trading_on():
-            raise GatewayError("TRADE_DISABLED", "请在 MT5 工具栏打开 Algo Trading（自动交易）")
-        if mode == "live":
-            if not self.cfg.allow_live:
-                raise GatewayError("LIVE_DISABLED", "实盘交易未在 gateway/config.json 中开启")
-            if account["accountType"] != "real":
-                raise GatewayError("NOT_REAL", "当前账户不是实盘账户")
-        if mode == "demo" and account["accountType"] == "real":
-            raise GatewayError("REAL_ACCOUNT", "当前是实盘账户，模拟模式已被阻止")
-        if mode != "readonly" and not account["tradeAllowed"]:
-            raise GatewayError("TRADE_DISABLED", "请在 MT5 中开启 Algo Trading")
-        self._trade_mode = mode
-        self.store.audit("trade.mode", {"mode": mode, "login": account["login"]})
-        self._emit("gateway", self.health())
-        return self.health()
 
-    def _guard_trade(self) -> dict:
-        account = self._require_account()
-        if self._trade_mode == "readonly":
-            raise GatewayError("READ_ONLY", "只读模式：请先在顶部切换到模拟交易")
-        if not self._auto_trading_on():
-            raise GatewayError("TRADE_DISABLED", "请在 MT5 工具栏打开 Algo Trading（自动交易）")
-        if not account["tradeAllowed"]:
-            raise GatewayError("TRADE_DISABLED", "MT5 账户未允许交易")
-        if self._trade_mode == "demo" and account["accountType"] == "real":
-            raise GatewayError("REAL_ACCOUNT", "实盘账户不允许模拟模式下单")
-        if self._trade_mode == "live" and account["accountType"] != "real":
-            raise GatewayError("NOT_REAL", "非实盘账户不允许实盘模式下单")
-        return account
 
     # ---------- 风控状态 ----------
 
-    def _server_now(self) -> int:
-        return int(time.time() + self._server_offset)
 
-    def _day_start(self) -> int:
-        now = self._server_now()
-        return now - now % 86400
 
-    def _compute_risk(self) -> dict:
-        """当日盈亏、开仓次数、连亏、冷却和停机状态，全部按券商服务器时间算。"""
-        account = self._account or {}
-        limits = self._limits
-        day_start = self._day_start()
 
-        deals: list[Any] = []
-        try:
-            raw = mt5.history_deals_get(
-                datetime.now() - timedelta(days=3), datetime.now() + timedelta(days=2)
-            )
-            if raw:
-                deals = [d for d in raw if int(getattr(d, "time", 0)) >= day_start]
-        except Exception:  # noqa: BLE001 - 历史读不到时按 0 处理
-            deals = []
 
-        # DEAL_TYPE_BALANCE(2) 及以后是出入金等非交易记录
-        trades = [d for d in deals if int(getattr(d, "type", 2)) < 2]
-        realized = sum(
-            float(d.profit)
-            + float(d.swap)
-            + float(d.commission)
-            + float(getattr(d, "fee", 0) or 0)
-            for d in trades
-        )
-        floating = sum(
-            float(p.get("profit") or 0) + float(p.get("swap") or 0) for p in self._positions
-        )
-        day_pnl = realized + floating
 
-        balance = float(account.get("balance") or 0)
-        day_start_balance = balance - realized
-        limit = (
-            max(0.0, day_start_balance * limits["daily_loss_pct"] / 100.0)
-            if limits["daily_loss_pct"] > 0
-            else 0.0
-        )
-        daily_loss = max(0.0, -day_pnl)
-        remaining = max(0.0, limit - daily_loss) if limit > 0 else 0.0
 
-        entries = [d for d in trades if int(getattr(d, "entry", 0)) == 0]
-        closed = sorted(
-            (d for d in trades if int(getattr(d, "entry", 0)) in (1, 3)),
-            key=lambda d: int(getattr(d, "time", 0)),
-        )
-        consecutive = 0
-        for deal in reversed(closed):
-            net = (
-                float(deal.profit)
-                + float(deal.swap)
-                + float(deal.commission)
-                + float(getattr(deal, "fee", 0) or 0)
-            )
-            if net < 0:
-                consecutive += 1
-            else:
-                break
-
-        cooldown_until = 0
-        if (
-            limits["max_consecutive_losses"]
-            and consecutive >= limits["max_consecutive_losses"]
-            and closed
-        ):
-            cooldown_until = int(getattr(closed[-1], "time", 0)) + int(
-                limits["cooldown_minutes"] * 60
-            )
-        now = self._server_now()
-        cooldown_remaining = max(0, cooldown_until - now) if cooldown_until else 0
-
-        halted = bool(self._halted)
-        block_reason = ""
-        if halted:
-            block_reason = "已停机：" + str((self._halted or {}).get("reason") or "手动停止")
-        elif limit > 0 and daily_loss >= limit:
-            block_reason = f"今日亏损 {daily_loss:.2f} 已达上限 {limit:.2f}"
-        elif cooldown_remaining > 0:
-            block_reason = (
-                f"连续亏损 {consecutive} 次，冷却 {max(1, cooldown_remaining // 60)} 分钟"
-            )
-        elif limits["max_trades_per_day"] and len(entries) >= limits["max_trades_per_day"]:
-            block_reason = f"今日开仓 {len(entries)} 次已达上限 {limits['max_trades_per_day']}"
-
-        return {
-            "dayStartBalance": round(day_start_balance, 2),
-            "dayPnl": round(day_pnl, 2),
-            "dailyLoss": round(daily_loss, 2),
-            "dailyLossLimit": round(limit, 2),
-            "remaining": round(remaining, 2),
-            "tradesToday": len(entries),
-            "maxTrades": int(limits["max_trades_per_day"] or 0),
-            "consecutiveLosses": consecutive,
-            "maxConsecutiveLosses": int(limits["max_consecutive_losses"] or 0),
-            "cooldownUntil": cooldown_until,
-            "cooldownRemainingSec": cooldown_remaining,
-            "halted": halted,
-            "haltReason": str((self._halted or {}).get("reason") or ""),
-            "canTrade": not block_reason,
-            "blockReason": block_reason,
-        }
-
-    def _poll_risk(self, force: bool = False) -> dict | None:
-        if not self._connected or self._account is None:
-            return self._risk
-        try:
-            risk = self._compute_risk()
-        except Exception as exc:  # noqa: BLE001
-            self._last_error = {"code": -1, "message": f"风控状态计算失败: {exc}"}
-            return self._risk
-        if force or risk != self._risk:
-            self._risk = risk
-            self._emit("risk", risk)
-        return risk
-
-    def _risk_block(self) -> str:
-        """开新仓前的硬风控检查，返回拦截原因；空串表示可以开仓。"""
-        risk = self._risk or self._compute_risk()
-        return str(risk.get("blockReason") or "")
-
-    def _halt(self, p: dict) -> dict:
-        reason = str(p.get("reason") or "手动停机")
-        close_all = bool(p.get("closeAll"))
-        self._halted = {"reason": reason, "at": int(time.time())}
-        self.store.set_state("halted", self._halted, self._login())
-        self.store.audit("system.halt", {"reason": reason, "closeAll": close_all})
-        closed: list[dict] = []
-        if close_all:
-            try:
-                closed = self._close_all({}).get("results", [])
-            except GatewayError as exc:
-                closed = [{"error": exc.message}]
-        self._poll_risk(force=True)
-        self._emit("gateway", self.health())
-        return {"halted": True, "reason": reason, "closed": closed}
-
-    def _resume(self, p: dict) -> dict:
-        self._halted = None
-        self.store.set_state("halted", None, self._login())
-        self.store.audit("system.resume", {})
-        self._poll_risk(force=True)
-        self._emit("gateway", self.health())
-        return {"halted": False}
 
     # ---------- 交易日志 ----------
 
-    def _journal_list(self, p: dict) -> list[dict]:
-        days = int(p.get("days") or 30)
-        limit = min(1000, int(p.get("limit") or 200))
-        login = self._login()
-        if login:
-            self._journal.sync(login)
-        since = int(time.time()) - days * 86400 if days > 0 else 0
-        return self.store.journal_list(limit=limit, since=since, login=login)
 
-    def _journal_tag(self, p: dict) -> dict:
-        position_id = int(p.get("positionId") or 0)
-        login = self._login()
-        if not self.store.journal_get(position_id, login):
-            raise GatewayError("NO_TRADE", f"日志里没有这笔交易 {position_id}")
-        tag = str(p.get("tag") or "").strip()[:40] or None
-        self.store.journal_set_tag(position_id, tag, login)
-        self.store.audit(
-            "journal.tag", {"positionId": position_id, "tag": tag, "login": login}
-        )
-        return self.store.journal_get(position_id, login) or {}
 
-    def _journal_shot(self, p: dict) -> dict:
-        position_id = int(p.get("positionId") or 0)
-        data = str(p.get("data") or "")
-        login = self._login()
-        if position_id <= 0 or not data:
-            raise GatewayError("BAD_SHOT", "缺少持仓号或截图数据")
-        try:
-            out = self._journal.save_shot(login, position_id, data, p.get("meta"))
-        except ValueError as exc:
-            raise GatewayError("BAD_SHOT", str(exc)) from exc
-        self.store.audit(
-            "journal.screenshot",
-            {"positionId": position_id, "bytes": out["bytes"], "login": login},
-        )
-        return out
 
     # ---------- 导出 / 备份 ----------
 
-    def _data_export(self, p: dict) -> dict:
-        kind = str(p.get("kind") or "journal")
-        days = int(p.get("days") or 30)
-        login = self._login()
-        try:
-            if kind == "journal":
-                return exporter.export_journal(self.store, login, days)
-            if kind == "executions":
-                return exporter.export_executions(self.store, login, days)
-            if kind == "audit":
-                return exporter.export_audit(self.store, days)
-            if kind == "settings":
-                settings = p.get("settings") if isinstance(p.get("settings"), dict) else None
-                return exporter.export_settings(self.store, self.cfg, login, settings)
-        except OSError as exc:
-            raise GatewayError("EXPORT_FAILED", f"导出失败: {exc}") from exc
-        raise GatewayError("BAD_EXPORT", f"未知导出类型: {kind}")
 
-    def _data_backup(self, p: dict) -> dict:
-        settings = p.get("settings") if isinstance(p.get("settings"), dict) else None
-        try:
-            out = exporter.create_backup(self.store, self.cfg, settings)
-        except OSError as exc:
-            raise GatewayError("BACKUP_FAILED", f"备份失败: {exc}") from exc
-        self.store.audit(
-            "data.backup",
-            {"name": out["name"], "bytes": out["bytes"], "login": self._login()},
-        )
-        return out
 
     # ---------- 告警 ----------
 
-    def _alert_create(self, p: dict) -> dict:
-        symbol = str(p.get("symbol") or "").upper().strip()
-        kind = str(p.get("kind") or "above")
-        price = _num(p.get("price"))
-        if kind not in ("above", "below"):
-            raise GatewayError("BAD_ALERT", "告警方向必须是 above 或 below")
-        if not symbol or price <= 0:
-            raise GatewayError("BAD_ALERT", "缺少品种或价格")
-        info = mt5.symbol_info(symbol)
-        if info is None:
-            raise GatewayError("NO_SYMBOL", f"找不到品种 {symbol}")
-        note = str(p.get("note") or "").strip()[:80] or None
-        cooldown = max(0, int(_num(p.get("cooldownSec"), 60)))
-        login = self._login()
-        alert = self.store.alert_create(
-            symbol,
-            kind,
-            align_price(price, info),
-            note,
-            bool(p.get("repeat")),
-            cooldown if p.get("repeat") else 0,
-            login,
-        )
-        self._alerts = self.store.alerts_list(login)
-        self.store.audit("alert.create", alert)
-        return alert
 
-    def _alert_update(self, p: dict) -> dict:
-        alert_id = int(p.get("id") or 0)
-        login = self._login()
-        if not self.store.alert_get(alert_id, login):
-            raise GatewayError("NO_ALERT", f"找不到告警 {alert_id}")
-        fields: dict[str, Any] = {}
-        for key in ("kind", "note", "price"):
-            if key in p:
-                fields[key] = p[key]
-        if "price" in fields:
-            fields["price"] = _num(fields["price"])
-        for key in ("enabled", "repeat"):
-            if key in p:
-                fields[key] = 1 if p[key] else 0
-        if "cooldownSec" in p:
-            fields["cooldown_sec"] = max(0, int(_num(p.get("cooldownSec"), 60)))
-        alert = self.store.alert_update(alert_id, fields, login) or {}
-        self._alerts = self.store.alerts_list(login)
-        self.store.audit("alert.update", {"id": alert_id, "fields": fields})
-        return alert
 
-    def _alert_delete(self, p: dict) -> dict:
-        alert_id = int(p.get("id") or 0)
-        login = self._login()
-        self.store.alert_delete(alert_id, login)
-        self._alerts = self.store.alerts_list(login)
-        self.store.audit("alert.delete", {"id": alert_id})
-        return {"deleted": alert_id}
 
-    def _alert_test(self, p: dict) -> dict:
-        symbol = str(p.get("symbol") or "").upper().strip()
-        if not symbol:
-            symbol = next((pos["symbol"] for pos in self._positions), "")
-        info = mt5.symbol_info(symbol) if symbol else None
-        tick = mt5.symbol_info_tick(symbol) if symbol else None
-        price = float(tick.bid) if tick else 0.0
-        payload = {
-            "id": 0,
-            "symbol": symbol or "TEST",
-            "kind": "above",
-            "price": align_price(price, info) if info and price else 0.0,
-            "note": "测试告警",
-            "marketPrice": price or None,
-            "at": int(time.time()),
-            "test": True,
-        }
-        self._notifier.send(payload)
-        self._emit("alert", payload)
-        self.store.audit("alert.test", payload)
-        return {"sent": True, "channels": self._notifier.info()}
 
-    def _check_alerts(self) -> None:
-        if not self._alerts:
-            return
-        now = time.time()
-        changed = False
-        for alert in list(self._alerts):
-            if not int(alert.get("enabled") or 0):
-                continue
-            symbol = str(alert["symbol"])
-            tick = mt5.symbol_info_tick(symbol)
-            if tick is None:
-                continue
-            price = float(tick.bid)
-            prev = self._alert_last.get(symbol)
-            self._alert_last[symbol] = price
-            target = float(alert["price"])
-            if alert["kind"] == "above":
-                hit = price >= target and (prev is None or prev < target)
-            else:
-                hit = price <= target and (prev is None or prev > target)
-            if not hit:
-                continue
-            repeat = bool(alert.get("repeat"))
-            triggered = float(alert.get("triggered_at") or 0)
-            if triggered and not repeat:
-                continue
-            if repeat and triggered and now - triggered < float(alert.get("cooldown_sec") or 60):
-                continue
-            self.store.alert_mark_triggered(
-                int(alert["id"]), disable=not repeat, login=self._login()
-            )
-            payload = {
-                "id": int(alert["id"]),
-                "symbol": symbol,
-                "kind": alert["kind"],
-                "price": target,
-                "note": alert.get("note") or "",
-                "marketPrice": price,
-                "at": int(now),
-            }
-            self._emit("alert", payload)
-            self._notifier.send(payload)
-            self.store.audit("alert.triggered", payload)
-            changed = True
-        if changed:
-            self._alerts = self.store.alerts_list(self._login())
 
     # ---------- 自选表 ----------
 
-    def _watchlist(self, p: dict) -> list[dict]:
-        names = [str(item).upper() for item in (p.get("symbols") or []) if str(item).strip()]
-        if not names:
-            names = [
-                str(item)
-                for item in (self.store.get_state("watchlist", self._login()) or [])
-            ]
-        if not names:
-            infos = mt5.symbols_get() or ()
-            names = [info.name for info in infos if getattr(info, "visible", False)][:12]
-        held = {str(pos["symbol"]) for pos in self._positions}
-        out: list[dict] = []
-        for name in names[:50]:
-            info = mt5.symbol_info(name)
-            tick = mt5.symbol_info_tick(name)
-            if info is None or tick is None:
-                continue
-            day_open = self._day_open(name)
-            change = ((float(tick.bid) - day_open) / day_open * 100) if day_open else None
-            out.append(
-                {
-                    "symbol": name,
-                    "description": info.description or name,
-                    "digits": int(info.digits),
-                    "point": float(info.point),
-                    "bid": float(tick.bid),
-                    "ask": float(tick.ask),
-                    "spreadPoints": round((tick.ask - tick.bid) / float(info.point), 1)
-                    if info.point
-                    else 0.0,
-                    "changePct": round(change, 2) if change is not None else None,
-                    "hasPosition": name in held,
-                }
-            )
-        return out
 
-    def _watchlist_set(self, p: dict) -> dict:
-        names = [str(item).upper().strip() for item in (p.get("symbols") or []) if str(item).strip()]
-        names = names[:50]
-        self.store.set_state("watchlist", names, self._login())
-        return {"symbols": names}
 
-    def _day_open(self, symbol: str) -> float:
-        cached = self._watch_day.get(symbol)
-        now = time.time()
-        if cached and now - cached[1] < 60:
-            return cached[0]
-        try:
-            bars = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 2)
-        except Exception:  # noqa: BLE001
-            bars = None
-        value = float(bars[-1]["open"]) if bars is not None and len(bars) else 0.0
-        self._watch_day[symbol] = (value, now)
-        return value
 
     # ---------- symbols ----------
 
-    def _symbol_payload(self, info: Any) -> dict:
-        return {
-            "name": info.name,
-            "description": info.description or info.name,
-            "digits": int(info.digits),
-            "point": float(info.point),
-            "tickSize": _num(getattr(info, "trade_tick_size", 0), float(info.point)),
-            "tickValue": _num(getattr(info, "trade_tick_value", 0), 1.0),
-            "contractSize": _num(getattr(info, "trade_contract_size", 0), 1.0),
-            "minVolume": float(info.volume_min),
-            "maxVolume": float(info.volume_max),
-            "volumeStep": float(info.volume_step),
-            "stopsLevelPoints": int(getattr(info, "trade_stops_level", 0) or 0),
-            "freezeLevelPoints": int(getattr(info, "trade_freeze_level", 0) or 0),
-            "spreadPoints": int(round(_num(info.spread))),
-            "tradeMode": int(info.trade_mode),
-            "fillingMode": int(info.filling_mode),
-            "visible": bool(info.visible),
-            "currency": info.currency_profit or "USD",
-            "marginMode": (self._account or {}).get("marginMode", "netting"),
-        }
 
-    def _symbols_list(self, p: dict) -> list[dict]:
-        if not self._connected:
-            raise GatewayError("DISCONNECTED", "MT5 终端未连接")
-        query = str(p.get("query") or "").strip().lower()
-        limit = int(p.get("limit") or 300)
-        infos = mt5.symbols_get()
-        if infos is None:
-            raise GatewayError("MT5_ERROR", str(mt5.last_error()))
-        ordered = sorted(infos, key=lambda i: (0 if i.visible else 1, i.name))
-        out: list[dict] = []
-        for info in ordered:
-            if query and query not in info.name.lower() and query not in (info.description or "").lower():
-                continue
-            out.append(self._symbol_payload(info))
-            if len(out) >= limit:
-                break
-        return out
 
-    def _symbol_info(self, p: dict) -> dict:
-        name = str(p.get("symbol") or "")
-        info = mt5.symbol_info(name)
-        if info is None:
-            raise GatewayError("BAD_SYMBOL", f"找不到品种: {name}")
-        return self._symbol_payload(info)
 
-    def _ensure_symbol(self, symbol: str) -> Any:
-        info = mt5.symbol_info(symbol)
-        if info is None:
-            raise GatewayError("BAD_SYMBOL", f"找不到品种: {symbol}")
-        if not info.visible:
-            if not mt5.symbol_select(symbol, True):
-                raise GatewayError("SYMBOL_SELECT", f"无法把 {symbol} 加入市场报价")
-            info = mt5.symbol_info(symbol)
-        return info
 
     # ---------- market data ----------
 
-    def _history(self, p: dict) -> dict:
-        symbol = str(p.get("symbol") or "")
-        resolution = str(p.get("resolution") or "1")
-        count = max(10, min(int(p.get("count") or 1000), 5000))
-        tf = TIMEFRAMES.get(resolution)
-        if tf is None:
-            raise GatewayError("BAD_RESOLUTION", f"不支持的周期: {resolution}")
-        info = self._ensure_symbol(symbol)
 
-        # TradingView 往左滚时会带着 from/to 再要一段更早的 K 线。
-        # copy_rates_from_pos 只能取「最近 N 根」，所以有 to 时改走区间查询。
-        # MT5 的 K 线时间按券商服务器时间存，这里把 epoch 秒当 UTC 直接喂给库，
-        # 和前端 datafeed 的「服务器时间当 UTC」约定保持一致。
-        to_ts = p.get("to")
-        from_ts = p.get("from")
-        rates = None
-        if to_ts:
-            end_ts = float(to_ts)
-            if from_ts:
-                start_ts = float(from_ts)
-            else:
-                start_ts = end_ts - RES_SECONDS.get(resolution, 60) * count * 1.2
-            try:
-                # MetaTrader5 会把 datetime 当成本地墙钟时间换算成时间戳；
-                # 而 K 线 time 我们按「服务器时间当作 UTC」处理，所以这里也要用
-                # 本地墙钟构造，才能查到对应的服务器时间区间。
-                date_to = datetime.fromtimestamp(end_ts)
-                date_from = datetime.fromtimestamp(max(0.0, start_ts))
-                rates = mt5.copy_rates_range(symbol, tf, date_from, date_to)
-            except Exception:
-                rates = None
-            if rates is not None and len(rates) > count:
-                rates = rates[-count:]
-            # 请求的窗口可能正好落在周末/休市，直接返回空会让图表以为左侧
-            # 再没有数据而停止翻页。这里往前找最近一段有数据的区间返回，
-            # 图表跨过休市继续加载更早的 K 线。
-            if (rates is None or len(rates) == 0) and from_ts:
-                probe_end = float(from_ts)
-                probe_span = RES_SECONDS.get(resolution, 60) * max(60, count) * 1.2
-                for _ in range(6):
-                    probe_start = probe_end - probe_span
-                    try:
-                        got = mt5.copy_rates_range(
-                            symbol,
-                            tf,
-                            datetime.fromtimestamp(max(0.0, probe_start)),
-                            datetime.fromtimestamp(probe_end),
-                        )
-                    except Exception:
-                        got = None
-                    if got is not None and len(got) > 0:
-                        rates = got[-count:]
-                        break
-                    probe_end = probe_start
-                else:
-                    rates = []
-            if rates is None:
-                rates = []
-        else:
-            rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
-        if rates is None:
-            raise GatewayError("NO_DATA", f"无法读取 {symbol} 历史数据: {mt5.last_error()}")
-        bars = [
-            {
-                "time": int(r["time"]),
-                "open": float(r["open"]),
-                "high": float(r["high"]),
-                "low": float(r["low"]),
-                "close": float(r["close"]),
-                "volume": float(r["tick_volume"]),
-            }
-            for r in rates
-        ]
-        return {
-            "symbol": symbol,
-            "resolution": resolution,
-            "digits": int(info.digits),
-            "bars": bars,
-        }
 
-    def _quotes_subscribe(self, p: dict) -> dict:
-        for symbol in p.get("symbols") or []:
-            self._subs[symbol] = self._subs.get(symbol, 0) + 1
-            self._emit_tick(symbol)
-        return {"subscribed": list(self._subs)}
 
-    def _quotes_unsubscribe(self, p: dict) -> dict:
-        for symbol in p.get("symbols") or []:
-            n = self._subs.get(symbol, 0) - 1
-            if n <= 0:
-                self._subs.pop(symbol, None)
-            else:
-                self._subs[symbol] = n
-        return {"subscribed": list(self._subs)}
 
-    def _bars_subscribe(self, p: dict) -> dict:
-        symbol = str(p.get("symbol") or "")
-        resolution = str(p.get("resolution") or "1")
-        key = (symbol, resolution)
-        if key not in self._bar_subs:
-            tf = TIMEFRAMES.get(resolution)
-            if tf is None:
-                raise GatewayError("BAD_RESOLUTION", f"不支持的周期: {resolution}")
-            self._ensure_symbol(symbol)
-            rates = mt5.copy_rates_from_pos(symbol, tf, 0, 2)
-            if rates is None or len(rates) == 0:
-                raise GatewayError("NO_DATA", f"无法读取 {symbol} 当前 K 线")
-            last = rates[-1]
-            self._bar_subs[key] = {
-                "bar": {
-                    "time": int(last["time"]),
-                    "open": float(last["open"]),
-                    "high": float(last["high"]),
-                    "low": float(last["low"]),
-                    "close": float(last["close"]),
-                    "volume": float(last["tick_volume"]),
-                },
-                "last_push": 0.0,
-            }
-        return {"symbol": symbol, "resolution": resolution}
 
-    def _bars_unsubscribe(self, p: dict) -> dict:
-        self._bar_subs.pop((str(p.get("symbol") or ""), str(p.get("resolution") or "")), None)
-        return {"ok": True}
 
-    def _executions(self, p: dict) -> list[dict]:
-        days = int(p.get("days") or 7)
-        limit = int(p.get("limit") or 100)
-        symbol = p.get("symbol")
-        start = datetime.now() - timedelta(days=days)
-        deals = mt5.history_deals_get(start, datetime.now())
-        if deals is None:
-            return []
-        out: list[dict] = []
-        for d in reversed(deals):
-            if symbol and d.symbol != symbol:
-                continue
-            out.append(
-                {
-                    "ticket": int(d.ticket),
-                    "order": int(d.order),
-                    "positionId": int(getattr(d, "position_id", 0) or 0),
-                    "symbol": d.symbol,
-                    "side": "buy" if d.type == 0 else "sell",
-                    "volume": float(d.volume),
-                    "price": float(d.price),
-                    "profit": float(d.profit),
-                    "commission": float(d.commission),
-                    "swap": float(d.swap),
-                    "time": int(d.time),
-                    "comment": d.comment,
-                    "magic": int(d.magic),
-                    "entry": int(getattr(d, "entry", 0) or 0),
-                }
-            )
-            if len(out) >= limit:
-                break
-        return out
 
-    def _sync_server_time(self) -> None:
-        """刚连上时还没有行情订阅，先从一个品种的报价推算服务器时区。
 
-        当日盈亏、开仓次数都按服务器日切分；offset 为 0 时会算错一整个时区。
-        """
-        try:
-            symbols = mt5.symbols_get() or []
-        except Exception:  # noqa: BLE001
-            return
-        for info in symbols[:300]:
-            try:
-                tick = mt5.symbol_info_tick(info.name)
-            except Exception:  # noqa: BLE001
-                continue
-            if tick is not None and int(getattr(tick, "time", 0) or 0):
-                self._note_server_time(tick)
-                return
 
-    def _note_server_time(self, tick: Any) -> None:
-        server_time = int(getattr(tick, "time", 0) or 0)
-        if not server_time:
-            return
-        raw = server_time - time.time()
-        # 券商时区都是整小时或半小时，按 15 分钟取整吸收网络延迟
-        self._server_offset = int(round(raw / 900.0)) * 900
 
-    def _emit_tick(self, symbol: str) -> None:
-        tick = mt5.symbol_info_tick(symbol)
-        if tick is None:
-            return
-        self._note_server_time(tick)
-        self._emit(
-            "tick",
-            {
-                "symbol": symbol,
-                "bid": float(tick.bid),
-                "ask": float(tick.ask),
-                "time": int(tick.time),
-                "timeMs": int(getattr(tick, "time_msc", tick.time * 1000)),
-                "serverOffset": int(self._server_offset),
-            },
-        )
-
-    def _poll_ticks(self) -> None:
-        if not self._subs and not self._bar_subs:
-            return
-        symbols = set(self._subs) | {key[0] for key in self._bar_subs}
-        for symbol in symbols:
-            tick = mt5.symbol_info_tick(symbol)
-            if tick is None:
-                continue
-            self._note_server_time(tick)
-            if symbol in self._subs:
-                self._emit(
-                    "tick",
-                    {
-                        "symbol": symbol,
-                        "bid": float(tick.bid),
-                        "ask": float(tick.ask),
-                        "time": int(tick.time),
-                        "timeMs": int(getattr(tick, "time_msc", tick.time * 1000)),
-                        "serverOffset": int(self._server_offset),
-                    },
-                )
-            if self._bar_subs:
-                for key, state in list(self._bar_subs.items()):
-                    if key[0] != symbol:
-                        continue
-                    self._update_bar(key[0], key[1], state, float(tick.bid), int(tick.time))
-
-    def _update_bar(self, symbol: str, resolution: str, state: dict, price: float, ts: int) -> None:
-        seconds = RES_SECONDS.get(resolution, 60)
-        bucket = (ts // seconds) * seconds
-        bar = state["bar"]
-        if bucket > int(bar["time"]):
-            bar = {
-                "time": bucket,
-                "open": float(bar["close"]),
-                "high": max(float(bar["close"]), price),
-                "low": min(float(bar["close"]), price),
-                "close": price,
-                "volume": 0.0,
-            }
-        else:
-            bar = {
-                "time": int(bar["time"]),
-                "open": float(bar["open"]),
-                "high": max(float(bar["high"]), price),
-                "low": min(float(bar["low"]), price),
-                "close": price,
-                "volume": float(bar["volume"]) + 1.0,
-            }
-        state["bar"] = bar
-        now = time.monotonic()
-        if now - state["last_push"] >= 0.25:
-            state["last_push"] = now
-            self._emit("bar", {"symbol": symbol, "resolution": resolution, "bar": bar})
 
     # ---------- account / positions / orders ----------
 
-    def _account_payload(self, ai: Any) -> dict:
-        return {
-            "login": int(ai.login),
-            "server": ai.server,
-            "company": ai.company,
-            "name": ai.name,
-            "currency": ai.currency,
-            "leverage": int(ai.leverage),
-            "balance": float(ai.balance),
-            "equity": float(ai.equity),
-            "margin": float(ai.margin),
-            "freeMargin": float(ai.margin_free),
-            "marginLevel": float(ai.margin_level) if ai.margin_level else None,
-            "marginSoCall": float(getattr(ai, "margin_so_call", 0) or 0),
-            "marginSoSo": float(getattr(ai, "margin_so_so", 0) or 0),
-            "marginMode": "hedging"
-            if ai.margin_mode == mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING
-            else "netting",
-            "tradeAllowed": bool(ai.trade_allowed),
-            "accountType": {0: "demo", 1: "contest", 2: "real"}.get(int(ai.trade_mode), "unknown"),
-        }
 
-    def _poll_account(self) -> None:
-        ai = mt5.account_info()
-        if ai is None:
-            if self._connected:
-                self._connected = False
-                self._account = None
-                self._positions = []
-                self._orders = []
-                self._last_error = {"code": -1, "message": "与 MT5 终端的连接已断开"}
-                self._emit("gateway", self.health())
-            return
-        payload = self._account_payload(ai)
-        if payload != self._account:
-            self._account = payload
-            self._emit("account", payload)
 
-    def _poll_trade_state(self) -> None:
-        positions = mt5.positions_get()
-        orders = mt5.orders_get()
-        next_positions = [self._position_payload(p) for p in positions] if positions else []
-        next_orders = [self._order_payload(o) for o in orders] if orders else []
-        if next_positions != self._positions:
-            self._positions = next_positions
-            self._emit("positions", next_positions)
-        if next_orders != self._orders:
-            self._orders = next_orders
-            self._emit("orders", next_orders)
-        self._capture_position_risks(positions)
 
-    def _risk_for(
-        self, symbol: str, side: str, volume: float, entry: float, sl: float
-    ) -> float | None:
-        """按开仓价与止损价折算初始风险（账户货币的绝对值）。"""
-        if entry <= 0 or sl <= 0 or volume <= 0:
-            return None
-        base = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
-        try:
-            value = mt5.order_calc_profit(base, symbol, volume, entry, sl)
-        except Exception:  # noqa: BLE001
-            return None
-        if value is None:
-            return None
-        risk = abs(float(value))
-        return risk if math.isfinite(risk) and risk > 0 else None
 
-    def _capture_position_risks(self, positions: Any) -> None:
-        """持仓一旦带上止损就把初始风险落库，之后统计 R 不再依赖下单意图。
 
-        手动在终端开的单、先开仓后补止损的单也能被覆盖。
-        """
-        login = self._login()
-        if login <= 0:
-            return
-        for position in positions or []:
-            ticket = int(position.ticket)
-            sl = float(position.sl or 0)
-            if sl <= 0 or ticket in self._risk_tracked:
-                continue
-            side = "buy" if int(position.type) == 0 else "sell"
-            risk = self._risk_for(
-                str(position.symbol), side, float(position.volume), float(position.price_open), sl
-            )
-            if risk is None:
-                continue
-            self.store.record_position_risk(
-                {
-                    "login": login,
-                    "position_id": ticket,
-                    "symbol": str(position.symbol),
-                    "side": side,
-                    "volume": float(position.volume),
-                    "entry": float(position.price_open),
-                    "sl": sl,
-                    "risk": risk,
-                    "source": "position",
-                }
-            )
-            self._risk_tracked[ticket] = sl
 
-    def _stop_out_price(self, position: Any, info: Any) -> float | None:
-        """只持有这一单时，账户净值跌到券商强平线对应的价格（估算）。"""
-        account = self._account or {}
-        margin_used = float(account.get("margin") or 0)
-        equity = float(account.get("equity") or 0)
-        level = float(account.get("marginSoSo") or 0)
-        if margin_used <= 0 or equity <= 0 or level <= 0 or level > 100:
-            return None
-        buy = int(position.type) == 0
-        base = mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL
-        volume = float(position.volume)
-        entry = float(position.price_open)
-        profit_now = float(position.profit)
-        point = float(getattr(info, "point", 0) or 0)
-        if point <= 0:
-            return None
-        target = level / 100.0 * margin_used - equity + profit_now
-        delta = max(point * 100.0, entry * 0.001)
-        test_price = entry - delta if buy else entry + delta
-        p_entry = mt5.order_calc_profit(base, position.symbol, volume, entry, entry)
-        p_test = mt5.order_calc_profit(base, position.symbol, volume, entry, test_price)
-        if p_entry is None or p_test is None:
-            return None
-        # test_price 对多头是向下、对空头是向上，斜率的分母要跟着方向取符号，
-        # 否则多头算出的强平价会跑到入场价上方被当成无效值丢掉。
-        move = -delta if buy else delta
-        slope = (float(p_test) - float(p_entry)) / move
-        if abs(slope) < 1e-12:
-            return None
-        price = entry + (target - float(p_entry)) / slope
-        if buy and price >= entry:
-            return None
-        if not buy and price <= entry:
-            return None
-        # 手数很小、净值远高于保证金时算出来会离谱到负数，直接不显示
-        if price <= 0 or abs(price - entry) > entry * 0.5:
-            return None
-        return align_price(price, info)
 
-    def _position_payload(self, p: Any) -> dict:
-        # 打到止损/止盈时的盈亏（账户货币），图表上直接显示金额
-        sl_profit = tp_profit = None
-        base = mt5.ORDER_TYPE_BUY if p.type == 0 else mt5.ORDER_TYPE_SELL
-        try:
-            if p.sl:
-                result = mt5.order_calc_profit(
-                    base, p.symbol, float(p.volume), float(p.price_open), float(p.sl)
-                )
-                sl_profit = None if result is None else float(result)
-            if p.tp:
-                result = mt5.order_calc_profit(
-                    base, p.symbol, float(p.volume), float(p.price_open), float(p.tp)
-                )
-                tp_profit = None if result is None else float(result)
-        except Exception:  # noqa: BLE001 - 显示用，算不出来就不显示
-            pass
-        trailing = self._trailing.get(int(p.ticket))
-        stop_out = None
-        try:
-            info = mt5.symbol_info(p.symbol)
-            if info is not None:
-                stop_out = self._stop_out_price(p, info)
-        except Exception:  # noqa: BLE001 - 估算失败就不显示
-            stop_out = None
-        return {
-            "ticket": int(p.ticket),
-            "identifier": int(getattr(p, "identifier", p.ticket)),
-            "symbol": p.symbol,
-            "side": "buy" if p.type == 0 else "sell",
-            "volume": float(p.volume),
-            "openPrice": float(p.price_open),
-            "sl": float(p.sl) or None,
-            "tp": float(p.tp) or None,
-            "profit": float(p.profit),
-            "slProfit": sl_profit,
-            "tpProfit": tp_profit,
-            "stopOutPrice": stop_out,
-            "trailing": trailing,
-            "swap": float(p.swap),
-            "commission": _num(getattr(p, "commission", 0)),
-            "magic": int(p.magic),
-            "comment": p.comment,
-            "openTime": int(p.time),
-        }
-
-    def _order_payload(self, o: Any) -> dict:
-        otype = int(o.type)
-        side = "buy" if otype in (0, 2, 4, 6) else "sell"
-        kind = "market" if otype in (0, 1) else ("limit" if otype in (2, 3) else "stop")
-        return {
-            "ticket": int(o.ticket),
-            "symbol": o.symbol,
-            "type": kind,
-            "side": side,
-            "volume": float(o.volume_current),
-            "initialVolume": float(o.volume_initial),
-            "filledVolume": max(0.0, float(o.volume_initial) - float(o.volume_current)),
-            "price": float(o.price_open),
-            "sl": float(o.sl) or None,
-            "tp": float(o.tp) or None,
-            "state": ORDER_STATES.get(int(o.state), "unknown"),
-            "comment": o.comment,
-            "magic": int(o.magic),
-            "createdAt": int(o.time_setup),
-            "expiration": int(o.time_expiration) or None,
-        }
 
     # ---------- trade analysis ----------
 
-    def _analyze(self, p: dict) -> dict:
-        if not self._connected:
-            raise GatewayError("DISCONNECTED", "MT5 终端未连接")
-        symbol = str(p.get("symbol") or "")
-        side = str(p.get("side") or "")
-        otype = str(p.get("type") or "market")
-        if side not in ("buy", "sell"):
-            raise GatewayError("BAD_SIDE", "方向必须是 buy 或 sell")
-        if otype not in ("market", "limit", "stop"):
-            raise GatewayError("BAD_TYPE", "订单类型必须是 market / limit / stop")
 
-        info = self._ensure_symbol(symbol)
-        tick = mt5.symbol_info_tick(symbol)
-        if tick is None:
-            raise GatewayError("NO_QUOTE", f"{symbol} 当前无报价")
 
-        if info.trade_mode == mt5.SYMBOL_TRADE_MODE_DISABLED:
-            raise GatewayError("SYMBOL_DISABLED", f"{symbol} 当前禁止交易")
-        if info.trade_mode == mt5.SYMBOL_TRADE_MODE_CLOSEONLY:
-            raise GatewayError("CLOSE_ONLY", f"{symbol} 当前只允许平仓")
-        if side == "buy" and info.trade_mode == mt5.SYMBOL_TRADE_MODE_SHORTONLY:
-            raise GatewayError("SHORT_ONLY", f"{symbol} 当前只允许卖出")
-        if side == "sell" and info.trade_mode == mt5.SYMBOL_TRADE_MODE_LONGONLY:
-            raise GatewayError("LONG_ONLY", f"{symbol} 当前只允许买入")
-
-        volume = round_volume(_num(p.get("volume"), float(info.volume_min)), float(info.volume_step))
-        if volume < float(info.volume_min):
-            raise GatewayError("VOLUME_MIN", f"手数不能小于 {info.volume_min}")
-        if volume > float(info.volume_max):
-            raise GatewayError("VOLUME_MAX", f"手数不能大于 {info.volume_max}")
-
-        if otype == "market":
-            price = float(tick.ask if side == "buy" else tick.bid)
-            order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
-            action = mt5.TRADE_ACTION_DEAL
-        else:
-            raw_price = p.get("price")
-            if not raw_price:
-                raise GatewayError("PRICE_REQUIRED", "限价/停损单必须指定价格")
-            price = align_price(_num(raw_price), info)
-            if otype == "limit":
-                order_type = mt5.ORDER_TYPE_BUY_LIMIT if side == "buy" else mt5.ORDER_TYPE_SELL_LIMIT
-                if side == "buy" and price >= float(tick.ask):
-                    raise GatewayError("BAD_LIMIT_PRICE", "买入限价必须低于当前卖价")
-                if side == "sell" and price <= float(tick.bid):
-                    raise GatewayError("BAD_LIMIT_PRICE", "卖出限价必须高于当前买价")
-            else:
-                order_type = mt5.ORDER_TYPE_BUY_STOP if side == "buy" else mt5.ORDER_TYPE_SELL_STOP
-                if side == "buy" and price <= float(tick.ask):
-                    raise GatewayError("BAD_STOP_PRICE", "买入停损必须高于当前卖价")
-                if side == "sell" and price >= float(tick.bid):
-                    raise GatewayError("BAD_STOP_PRICE", "卖出停损必须低于当前买价")
-            action = mt5.TRADE_ACTION_PENDING
-
-        sl = align_price(_num(p.get("sl")), info) if p.get("sl") else 0.0
-        tp = align_price(_num(p.get("tp")), info) if p.get("tp") else 0.0
-        stops = float(info.trade_stops_level) * float(info.point)
-
-        if sl:
-            if side == "buy" and sl >= price:
-                raise GatewayError("BAD_SL", "买单止损必须低于入场价")
-            if side == "sell" and sl <= price:
-                raise GatewayError("BAD_SL", "卖单止损必须高于入场价")
-            if stops > 0 and abs(price - sl) < stops:
-                raise GatewayError(
-                    "STOPS_LEVEL",
-                    f"止损距离小于券商最小 {info.trade_stops_level} 点（{stops:.{info.digits}f}）",
-                )
-        if tp:
-            if side == "buy" and tp <= price:
-                raise GatewayError("BAD_TP", "买单止盈必须高于入场价")
-            if side == "sell" and tp >= price:
-                raise GatewayError("BAD_TP", "卖单止盈必须低于入场价")
-            if stops > 0 and abs(tp - price) < stops:
-                raise GatewayError(
-                    "STOPS_LEVEL",
-                    f"止盈距离小于券商最小 {info.trade_stops_level} 点（{stops:.{info.digits}f}）",
-                )
-
-        base_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
-        margin = mt5.order_calc_margin(base_type, symbol, volume, price)
-        if margin is None:
-            raise GatewayError("MARGIN_CALC", str(mt5.last_error()))
-        risk = None
-        if sl:
-            profit = mt5.order_calc_profit(base_type, symbol, volume, price, sl)
-            if profit is not None:
-                risk = abs(float(profit))
-        reward = None
-        if tp:
-            profit = mt5.order_calc_profit(base_type, symbol, volume, price, tp)
-            if profit is not None:
-                reward = abs(float(profit))
-
-        spread_points = (float(tick.ask) - float(tick.bid)) / float(info.point or 1)
-        return {
-            "symbol": symbol,
-            "side": side,
-            "type": otype,
-            "volume": volume,
-            "price": price,
-            "sl": sl or None,
-            "tp": tp or None,
-            "orderType": order_type,
-            "action": action,
-            "margin": float(margin),
-            "riskAmount": risk,
-            "rewardAmount": reward,
-            "rr": (reward / risk) if reward is not None and risk not in (None, 0) else None,
-            "spreadPoints": spread_points,
-            "stopsLevelPoints": int(info.trade_stops_level),
-            "digits": int(info.digits),
-            "point": float(info.point),
-            "tick": tick,
-            "info": info,
-            "freeMargin": float((self._account or {}).get("freeMargin", 0.0)),
-            "equity": float((self._account or {}).get("equity", 0.0)),
-        }
-
-    def _preview(self, p: dict) -> dict:
-        a = self._analyze(p)
-        warnings: list[str] = []
-        risk = self._risk or self._compute_risk()
-        if risk.get("blockReason"):
-            warnings.append(f"当前禁止开仓：{risk['blockReason']}")
-        if not a["sl"]:
-            warnings.append("未设置止损")
-        if a["riskAmount"] is not None and a["equity"] > 0:
-            risk_pct = a["riskAmount"] / a["equity"] * 100
-            if risk_pct > self._limits["max_risk_pct"]:
-                warnings.append(f"风险 {risk_pct:.2f}% 超过上限 {self._limits['max_risk_pct']}%")
-        if (
-            self._limits["max_spread_points"]
-            and a["spreadPoints"] > self._limits["max_spread_points"]
-        ):
-            warnings.append(f"点差 {a['spreadPoints']:.0f} 点超过上限 {self._limits['max_spread_points']}")
-        if a["freeMargin"] and a["margin"] > a["freeMargin"] * 0.9:
-            warnings.append("保证金占用接近可用保证金的 90%")
-        return {
-            "symbol": a["symbol"],
-            "side": a["side"],
-            "type": a["type"],
-            "volume": a["volume"],
-            "price": a["price"],
-            "sl": a["sl"],
-            "tp": a["tp"],
-            "margin": a["margin"],
-            "freeMargin": a["freeMargin"],
-            "riskAmount": a["riskAmount"],
-            "rewardAmount": a["rewardAmount"],
-            "riskPct": (a["riskAmount"] / a["equity"] * 100)
-            if a["riskAmount"] is not None and a["equity"] > 0
-            else None,
-            "rr": a["rr"],
-            "spreadPoints": a["spreadPoints"],
-            "stopsLevelPoints": a["stopsLevelPoints"],
-            "digits": a["digits"],
-            "warnings": warnings,
-        }
-
-    def _size(self, p: dict) -> dict:
-        """按目标风险（固定金额或余额百分比）反推手数。
-
-        用券商自己的 order_calc_profit 算「1 手打到止损亏多少」，再缩放，
-        避免自己用 tick_value 近似算错交叉盘/黄金的合约价值。
-        """
-        a = self._analyze(p)
-        info = a["info"]
-        symbol = a["symbol"]
-        entry = float(a["price"])
-        sl = float(a["sl"] or 0.0)
-        tp = float(a["tp"] or 0.0)
-        if not sl:
-            raise GatewayError("NO_SL", "先设置止损，才能按风险计算手数")
-
-        # order_calc_profit 只认 BUY / SELL，不认 BUY_LIMIT / SELL_LIMIT
-        base_type = mt5.ORDER_TYPE_BUY if a["side"] == "buy" else mt5.ORDER_TYPE_SELL
-        per_lot = mt5.order_calc_profit(base_type, symbol, 1.0, entry, sl)
-        if per_lot is None:
-            raise GatewayError("RISK_CALC", str(mt5.last_error()))
-        risk_per_lot = abs(float(per_lot))
-        if risk_per_lot <= 0:
-            raise GatewayError("RISK_CALC", "止损与入场价的距离为 0，无法计算")
-
-        account = self._account or {}
-        equity = float(account.get("equity") or 0.0)
-        balance = float(account.get("balance") or 0.0)
-        mode = str(p.get("riskMode") or "amount")
-        risk_value = _num(p.get("riskValue"), 1.0 if mode == "percent" else 100.0)
-        if risk_value <= 0:
-            raise GatewayError("BAD_RISK", "风险值必须大于 0")
-        target = balance * risk_value / 100.0 if mode == "percent" else risk_value
-        if target <= 0:
-            raise GatewayError("BAD_RISK", "目标风险金额必须大于 0")
-
-        step = float(info.volume_step or 0.01)
-        vmin = float(info.volume_min)
-        vmax = min(float(info.volume_max), float(self._limits["max_lot"]))
-        volume = round_volume(target / risk_per_lot, step)
-        capped: list[str] = []
-        if volume < vmin:
-            volume = vmin
-            capped.append("min")
-        if volume > vmax:
-            volume = vmax
-            capped.append("max")
-
-        risk = None
-        actual = mt5.order_calc_profit(base_type, symbol, volume, entry, sl)
-        if actual is not None:
-            risk = abs(float(actual))
-        reward = None
-        if tp:
-            pl = mt5.order_calc_profit(base_type, symbol, volume, entry, tp)
-            if pl is not None:
-                reward = abs(float(pl))
-
-        warnings: list[str] = []
-        if "min" in capped:
-            warnings.append(f"按最小手数 {vmin} 计算，实际风险 {risk:.2f}" if risk else "已按最小手数")
-        if "max" in capped:
-            warnings.append(f"手数已到上限 {vmax}，未达到目标风险")
-        if risk is not None and equity > 0 and risk / equity * 100 > self._limits["max_risk_pct"]:
-            warnings.append(
-                f"风险 {risk / equity * 100:.2f}% 超过上限 {self._limits['max_risk_pct']}%"
-            )
-
-        return {
-            "symbol": symbol,
-            "side": a["side"],
-            "type": a["type"],
-            "price": entry,
-            "sl": sl or None,
-            "tp": tp or None,
-            "digits": int(info.digits),
-            "step": step,
-            "volume": volume,
-            "targetRisk": target,
-            "riskPerLot": risk_per_lot,
-            "riskAmount": risk,
-            "rewardAmount": reward,
-            "riskPct": (risk / equity * 100) if risk is not None and equity > 0 else None,
-            "rr": (reward / risk) if reward is not None and risk not in (None, 0) else None,
-            "balance": balance,
-            "equity": equity,
-            "capped": capped,
-            "warnings": warnings,
-        }
 
     # ---------- trade execution ----------
 
-    def _place(self, p: dict) -> dict:
-        account = self._guard_trade()
-        login = self._login()
-        a = self._analyze(p)
-        client_id = str(p.get("clientOrderId") or f"mt-{int(time.time() * 1000)}")[:31]
 
-        if a["volume"] > self._limits["max_lot"]:
-            raise GatewayError(
-                "MAX_LOT", f"单笔手数 {a['volume']} 超过上限 {self._limits['max_lot']}"
-            )
-        if (
-            self._limits["max_spread_points"]
-            and a["spreadPoints"] > self._limits["max_spread_points"]
-        ):
-            raise GatewayError("SPREAD_LIMIT", f"点差 {a['spreadPoints']:.0f} 点超过上限")
-        if len(self._positions) >= self._limits["max_positions"]:
-            raise GatewayError("MAX_POSITIONS", f"持仓数已达上限 {self._limits['max_positions']}")
-        if a["riskAmount"] is not None and a["equity"] > 0:
-            risk_pct = a["riskAmount"] / a["equity"] * 100
-            if risk_pct > self._limits["max_risk_pct"]:
-                raise GatewayError(
-                    "RISK_LIMIT",
-                    f"本单风险 {risk_pct:.2f}% 超过上限 {self._limits['max_risk_pct']}%",
-                )
-        risk = self._risk or self._compute_risk()
-        self._risk = risk
-        if risk.get("blockReason"):
-            raise GatewayError("RISK_BLOCK", str(risk["blockReason"]))
-        if a["freeMargin"] and a["margin"] > a["freeMargin"] * 0.9:
-            raise GatewayError("NO_MARGIN", "保证金占用过高，拒绝下单")
-        if self.store.recent_duplicate(a["symbol"], a["side"], a["price"], login=login):
-            raise GatewayError("DUPLICATE", "3 秒内已提交相同方向/价格的订单")
 
-        existing = self.store.get_intent(client_id, login)
-        if existing and existing["state"] in ("sending", "accepted", "working", "filled"):
-            return {
-                "clientOrderId": client_id,
-                "state": existing["state"],
-                "ticket": existing["ticket"],
-            }
 
-        self.store.save_intent(
-            {
-                "client_id": client_id,
-                "login": login,
-                "symbol": a["symbol"],
-                "side": a["side"],
-                "type": a["type"],
-                "volume": a["volume"],
-                "price": a["price"],
-                "sl": a["sl"],
-                "tp": a["tp"],
-                "state": "sending",
-                "ticket": None,
-                "tag": str(p.get("tag") or "").strip()[:40] or None,
-            }
-        )
-        self.store.audit(
-            "order.place.request",
-            {
-                "clientId": client_id,
-                "symbol": a["symbol"],
-                "side": a["side"],
-                "type": a["type"],
-                "volume": a["volume"],
-                "price": a["price"],
-                "sl": a["sl"],
-                "tp": a["tp"],
-                "tradeMode": self._trade_mode,
-            },
-        )
 
-        request = {
-            "action": a["action"],
-            "symbol": a["symbol"],
-            "volume": a["volume"],
-            "type": a["orderType"],
-            "price": a["price"],
-            "sl": a["sl"] or 0.0,
-            "tp": a["tp"] or 0.0,
-            "deviation": self.cfg.deviation_points,
-            "magic": self.cfg.magic,
-            # 这家券商只接受较短注释（30 字符以上直接 Invalid "comment"），
-            # 前 20 位足够唯一，_enrich_place_payload 也按这 20 位前缀找成交
-            "comment": client_id[:20],
-            "type_time": mt5.ORDER_TIME_GTC,
-        }
-        if a["action"] == mt5.TRADE_ACTION_PENDING:
-            request["expiration"] = 0
-        else:
-            request["type_filling"] = self._filling_mode(a["info"])
 
-        started = time.perf_counter()
-        try:
-            result = mt5.order_send(request)
-        except Exception as exc:  # noqa: BLE001
-            latency = int((time.perf_counter() - started) * 1000)
-            self.store.update_intent(
-                client_id, "unknown", error=f"{type(exc).__name__}: {exc}", login=login
-            )
-            self.store.audit("order.place.exception", {"clientId": client_id, "error": str(exc)})
-            self._record_execution(client_id, 0, a, 0, latency, "unknown", f"{type(exc).__name__}: {exc}")
-            raise GatewayError("SEND_FAILED", f"下单异常: {exc}") from exc
 
-        latency = int((time.perf_counter() - started) * 1000)
-        if result is None:
-            self.store.update_intent(
-                client_id, "unknown", error=str(mt5.last_error()), login=login
-            )
-            self._record_execution(client_id, 0, a, 0, latency, "unknown", str(mt5.last_error()))
-            raise GatewayError("SEND_FAILED", f"下单失败: {mt5.last_error()}")
-        retcode = int(result.retcode)
-        payload = {
-            "clientOrderId": client_id,
-            "retcode": retcode,
-            "order": int(result.order or 0),
-            "deal": int(result.deal or 0),
-            "volume": float(result.volume or 0),
-            "price": float(result.price or 0),
-            "comment": getattr(result, "comment", ""),
-        }
-        if retcode not in OK_RETCODES:
-            self.store.audit("order.place.result", payload)
-            message = RETCODE_TEXT.get(retcode, result.comment or "下单被拒绝")
-            self.store.update_intent(
-                client_id, "rejected", error=f"{retcode}: {message}", login=login
-            )
-            self._record_execution(
-                client_id, 0, a, payload["price"], latency, "rejected", f"{retcode}: {message}", retcode
-            )
-            raise GatewayError(f"RET_{retcode}", message, payload)
 
-        # 部分终端对已成交的市价单只回 retcode，不回 deal/price，用实际持仓补齐
-        self._poll_trade_state()
-        self._poll_risk(force=True)
-        self._enrich_place_payload(payload, client_id, a)
-        self.store.audit("order.place.result", payload)
 
-        state = "filled" if a["action"] == mt5.TRADE_ACTION_DEAL else "accepted"
-        self.store.update_intent(
-            client_id, state, ticket=payload["order"] or None, login=login
-        )
-        ticket = int(payload["order"] or 0)
-        self._record_execution(
-            client_id, ticket, a, payload["price"], latency, state, None, retcode
-        )
-        if state == "filled" and ticket and a["sl"]:
-            entry = float(payload["price"] or a["price"])
-            risk = self._risk_for(a["symbol"], a["side"], a["volume"], entry, float(a["sl"]))
-            if risk is not None:
-                self.store.record_position_risk(
-                    {
-                        "login": login,
-                        "position_id": ticket,
-                        "symbol": a["symbol"],
-                        "side": a["side"],
-                        "volume": a["volume"],
-                        "entry": entry,
-                        "sl": float(a["sl"]),
-                        "risk": risk,
-                        "source": "order",
-                    }
-                )
-                self._risk_tracked[ticket] = float(a["sl"])
-        plan = p.get("plan") if isinstance(p.get("plan"), dict) else {}
-        steps = self._normalize_plan_steps(plan.get("steps"))
-        if not steps and p.get("autoBreakeven"):
-            # 旧客户端只发 autoBreakeven / autoBreakevenR，按单条「移保本」阶段处理
-            try:
-                be_r = float(p.get("autoBreakevenR") or 1)
-            except (TypeError, ValueError):
-                be_r = 1.0
-            if be_r > 0:
-                steps = [
-                    {
-                        "atR": be_r,
-                        "closePercent": None,
-                        "moveBreakeven": True,
-                        "done": False,
-                    }
-                ]
-        if a["action"] == mt5.TRADE_ACTION_DEAL and a["sl"] and steps:
-            # 市价单的 order ticket 不一定等于持仓 ticket（netting 下会被合并），
-            # _enrich_place_payload 已经按 comment 找到了真正成交的持仓
-            position_ticket = int(payload.get("ticket") or ticket or 0)
-            if position_ticket:
-                if ticket and position_ticket != ticket:
-                    self.store.audit(
-                        "position.template_plan.ticket_replaced",
-                        {"order": ticket, "position": position_ticket},
-                    )
-                entry = float(payload["price"] or a["price"])
-                risk = abs(entry - float(a["sl"]))
-                if risk > 0:
-                    self._auto_be[position_ticket] = {
-                        "entry": entry,
-                        "risk": risk,
-                        "side": a["side"],
-                        "steps": steps,
-                        "next": 0.0,
-                        "templateId": str(plan.get("templateId") or "")[:40] or None,
-                        "templateName": str(plan.get("templateName") or "")[:40] or None,
-                    }
-                    self._save_auto_be()
-                    self.store.audit(
-                        "position.template_plan.set",
-                        {
-                            "ticket": position_ticket,
-                            "order": ticket,
-                            "entry": entry,
-                            "steps": steps,
-                            "source": "market",
-                            "templateId": plan.get("templateId"),
-                            "templateName": plan.get("templateName"),
-                        },
-                    )
-        elif a["action"] == mt5.TRADE_ACTION_PENDING and ticket and steps:
-            self._remember_pending_plan(ticket, client_id, a, steps, plan)
-        self._emit("trade", {**payload, "state": state, "symbol": a["symbol"], "side": a["side"]})
-        return {**payload, "state": state}
 
-    def _record_execution(
-        self,
-        client_id: str,
-        ticket: int,
-        a: dict,
-        fill_price: float,
-        latency_ms: int,
-        state: str,
-        reason: str | None,
-        retcode: int = 0,
-    ) -> None:
-        """记录一次实际发出的下单请求，用于执行质量统计。"""
-        point = float(a.get("point") or 0)
-        requested = float(a.get("price") or 0)
-        fill = float(fill_price or 0)
-        slippage = None
-        if a.get("type") == "market" and requested > 0 and fill > 0 and point > 0:
-            diff = fill - requested if a["side"] == "buy" else requested - fill
-            slippage = round(diff / point, 1)
-        try:
-            self.store.record_execution(
-                {
-                    "client_id": client_id,
-                    "login": self._login(),
-                    "ticket": ticket or None,
-                    "symbol": a["symbol"],
-                    "side": a["side"],
-                    "type": a["type"],
-                    "volume": a["volume"],
-                    "requested_price": requested or None,
-                    "fill_price": fill or None,
-                    "spread_points": round(float(a.get("spreadPoints") or 0), 1),
-                    "slippage_points": slippage,
-                    "latency_ms": latency_ms,
-                    "retcode": retcode,
-                    "state": state,
-                    "reason": reason,
-                }
-            )
-        except Exception:  # noqa: BLE001 - 统计失败不能影响交易
-            pass
 
-    def _enrich_place_payload(self, payload: dict, client_id: str, a: dict) -> None:
-        """终端可能只回 retcode，成交价要过几百毫秒才查得到，短暂重试补齐。"""
-        ticket = int(payload["order"] or 0)
-        prefix = client_id[:20]
-        for attempt in range(4):
-            try:
-                if a["action"] == mt5.TRADE_ACTION_DEAL:
-                    found = mt5.positions_get(ticket=ticket) or ()
-                    pos = found[0] if found else None
-                    if pos is None:
-                        pos = next(
-                            (
-                                p
-                                for p in (mt5.positions_get() or ())
-                                if str(p.comment or "").startswith(prefix)
-                            ),
-                            None,
-                        )
-                    if pos is not None:
-                        payload["ticket"] = int(pos.ticket)
-                        payload["price"] = float(pos.price_open)
-                        payload["volume"] = float(pos.volume)
-                        return
-                else:
-                    found = mt5.orders_get(ticket=ticket) or ()
-                    order = found[0] if found else None
-                    if order is not None:
-                        payload["price"] = float(order.price_open)
-                        payload["volume"] = float(order.volume_current)
-                        return
-            except Exception:  # noqa: BLE001
-                return
-            if attempt < 3:
-                time.sleep(0.12)
 
-    def _filling_mode(self, info: Any) -> int:
-        flags = int(getattr(info, "filling_mode", 0) or 0)
-        if flags & 2:
-            return mt5.ORDER_FILLING_IOC
-        if flags & 1:
-            return mt5.ORDER_FILLING_FOK
-        return mt5.ORDER_FILLING_RETURN
 
-    def _modify_order(self, p: dict) -> dict:
-        self._guard_trade()
-        ticket = int(p.get("ticket") or 0)
-        found = mt5.orders_get(ticket=ticket)
-        if not found:
-            raise GatewayError("NO_ORDER", f"找不到挂单 {ticket}")
-        order = found[0]
-        info = self._ensure_symbol(order.symbol)
-        price = align_price(_num(p.get("price"), float(order.price_open)), info)
-        sl = align_price(_num(p.get("sl")), info) if p.get("sl") else float(order.sl)
-        tp = align_price(_num(p.get("tp")), info) if p.get("tp") else float(order.tp)
-        request = {
-            "action": mt5.TRADE_ACTION_MODIFY,
-            "order": ticket,
-            "symbol": order.symbol,
-            "price": price,
-            "sl": sl,
-            "tp": tp,
-            "magic": self.cfg.magic,
-            "type_time": mt5.ORDER_TIME_GTC,
-            "expiration": 0,
-        }
-        result = mt5.order_send(request)
-        out = self._result_or_raise(result, "order.modify")
-        self._poll_trade_state()
-        return out
 
-    def _cancel_order(self, p: dict) -> dict:
-        self._guard_trade()
-        ticket = int(p.get("ticket") or 0)
-        found = mt5.orders_get(ticket=ticket)
-        comment = str(getattr(found[0], "comment", "") or "") if found else ""
-        request = {"action": mt5.TRADE_ACTION_REMOVE, "order": ticket}
-        result = mt5.order_send(request)
-        out = self._result_or_raise(result, "order.cancel")
-        if comment and self.store.get_intent(comment, self._login()):
-            self.store.update_intent(comment, "cancelled", login=self._login())
-        if self._pending_plans.pop(ticket, None) is not None:
-            self._save_pending_plans()
-            self.store.audit(
-                "order.template_plan.dropped", {"ticket": ticket, "reason": "cancelled"}
-            )
-        self._poll_trade_state()
-        return out
 
-    def _modify_position(self, p: dict) -> dict:
-        self._guard_trade()
-        ticket = int(p.get("ticket") or 0)
-        found = mt5.positions_get(ticket=ticket)
-        if not found:
-            raise GatewayError("NO_POSITION", f"找不到持仓 {ticket}")
-        position = found[0]
-        info = self._ensure_symbol(position.symbol)
-        sl = align_price(_num(p.get("sl")), info) if p.get("sl") is not None else float(position.sl)
-        tp = align_price(_num(p.get("tp")), info) if p.get("tp") is not None else float(position.tp)
-        request = {
-            "action": mt5.TRADE_ACTION_SLTP,
-            "symbol": position.symbol,
-            "position": ticket,
-            "sl": sl,
-            "tp": tp,
-            "magic": self.cfg.magic,
-        }
-        result = mt5.order_send(request)
-        out = self._result_or_raise(result, "position.modify")
-        self._poll_trade_state()
-        # 原本没有止损、这次才补上的，按补止损时的价格记录初始风险
-        if (
-            sl > 0
-            and float(position.sl or 0) <= 0
-            and ticket not in self._risk_tracked
-        ):
-            side = "buy" if int(position.type) == 0 else "sell"
-            risk = self._risk_for(
-                position.symbol, side, float(position.volume), float(position.price_open), sl
-            )
-            if risk is not None:
-                self.store.record_position_risk(
-                    {
-                        "login": self._login(),
-                        "position_id": ticket,
-                        "symbol": position.symbol,
-                        "side": side,
-                        "volume": float(position.volume),
-                        "entry": float(position.price_open),
-                        "sl": sl,
-                        "risk": risk,
-                        "source": "position",
-                    }
-                )
-                self._risk_tracked[ticket] = sl
-        return out
 
-    def _breakeven(self, p: dict) -> dict:
-        """把止损移到开仓价（可加偏移点数），并避开券商最小止损距离。"""
-        self._guard_trade()
-        ticket = int(p.get("ticket") or 0)
-        found = mt5.positions_get(ticket=ticket)
-        if not found:
-            raise GatewayError("NO_POSITION", f"找不到持仓 {ticket}")
-        position = found[0]
-        info = self._ensure_symbol(position.symbol)
-        tick = mt5.symbol_info_tick(position.symbol)
-        if tick is None:
-            raise GatewayError("NO_QUOTE", "当前无报价，无法设置保本")
-        point = float(info.point)
-        buy = int(position.type) == 0
-        offset = max(0.0, _num(p.get("offsetPoints"))) * point
-        target = float(position.price_open) + offset if buy else float(position.price_open) - offset
-        stops = max(
-            int(getattr(info, "trade_stops_level", 0) or 0),
-            int(getattr(info, "trade_freeze_level", 0) or 0),
-        )
-        # 止损必须和现价拉开一点距离，券商 stops_level 为 0 时也至少 1 个点。
-        # 再加 5 个点缓冲：贴着实盘 stops 边界发单，报价一跳动就会 Invalid stops。
-        min_dist = (max(stops, 1) + 5) * point
-        current_price = float(tick.bid if buy else tick.ask)
-        target = min(target, current_price - min_dist) if buy else max(target, current_price + min_dist)
-        target = align_price(target, info)
-        current_sl = float(position.sl or 0)
-        if current_sl:
-            if buy and target <= current_sl + point / 2:
-                return {"ticket": ticket, "sl": current_sl, "changed": False}
-            if not buy and target >= current_sl - point / 2:
-                return {"ticket": ticket, "sl": current_sl, "changed": False}
-        request = {
-            "action": mt5.TRADE_ACTION_SLTP,
-            "symbol": position.symbol,
-            "position": ticket,
-            "sl": target,
-            "tp": float(position.tp or 0),
-            "magic": self.cfg.magic,
-        }
-        result = mt5.order_send(request)
-        out = self._result_or_raise(result, "position.breakeven")
-        self._poll_trade_state()
-        return {"ticket": ticket, "sl": target, "changed": True, **out}
 
-    def _set_trailing(self, p: dict) -> dict:
-        self._guard_trade()
-        ticket = int(p.get("ticket") or 0)
-        found = mt5.positions_get(ticket=ticket)
-        if not found:
-            raise GatewayError("NO_POSITION", f"找不到持仓 {ticket}")
-        position = found[0]
-        info = self._ensure_symbol(position.symbol)
-        distance = _num(p.get("distancePoints"))
-        if distance <= 0:
-            raise GatewayError("BAD_TRAILING", "移动止损距离必须大于 0 点")
-        stops = max(
-            int(getattr(info, "trade_stops_level", 0) or 0),
-            int(getattr(info, "trade_freeze_level", 0) or 0),
-        )
-        # 同保本：贴着 stops 边界会被报价跳动打成 Invalid stops
-        floor = float(max(stops, 1) + 2)
-        if distance < floor:
-            distance = floor
-        step = _num(p.get("stepPoints"), float(self.cfg.trailing_step_points))
-        record = {
-            "distancePoints": round(distance, 1),
-            "stepPoints": max(step, 0.0),
-            "activatedAt": int(time.time()),
-        }
-        self._trailing[ticket] = record
-        self._save_trailing()
-        self.store.audit("position.trailing.set", {"ticket": ticket, **record})
-        self._poll_trade_state()
-        return {"ticket": ticket, **record}
 
-    def _clear_trailing(self, p: dict) -> dict:
-        ticket = int(p.get("ticket") or 0)
-        existed = self._trailing.pop(ticket, None) is not None
-        if existed:
-            self._save_trailing()
-            self.store.audit("position.trailing.clear", {"ticket": ticket})
-            self._poll_trade_state()
-        return {"ticket": ticket, "cleared": existed}
 
-    def _save_trailing(self) -> None:
-        self.store.set_state(
-            "trailing", {str(k): v for k, v in self._trailing.items()}, self._login()
-        )
 
-    def _remember_pending_plan(
-        self, ticket: int, client_id: str, a: dict, steps: list[dict], plan: dict
-    ) -> None:
-        """挂单带上模板计划：成交后由 _adopt_pending_template_plans 接手。"""
-        if not a["sl"]:
-            # 没有止损就算不出 R，阶段无从触发；只审计，不影响下单
-            self.store.audit(
-                "order.template_plan.skipped",
-                {"ticket": ticket, "reason": "no-sl", "symbol": a["symbol"]},
-            )
-            return
-        self._pending_plans[ticket] = {
-            "clientId": client_id,
-            "symbol": a["symbol"],
-            "side": a["side"],
-            "sl": float(a["sl"]),
-            "steps": steps,
-            "placedAt": time.time(),
-            "goneAt": None,
-            "templateId": str(plan.get("templateId") or "")[:40] or None,
-            "templateName": str(plan.get("templateName") or "")[:40] or None,
-        }
-        self._save_pending_plans()
-        self.store.audit(
-            "order.template_plan.pending",
-            {
-                "ticket": ticket,
-                "symbol": a["symbol"],
-                "side": a["side"],
-                "sl": float(a["sl"]),
-                "steps": steps,
-                "templateId": plan.get("templateId"),
-                "templateName": plan.get("templateName"),
-            },
-        )
 
-    def _save_pending_plans(self) -> None:
-        # goneAt 是这一轮进程里的宽限计时，不落盘
-        self.store.set_state(
-            "pendingTemplatePlans",
-            {
-                str(k): {key: value for key, value in record.items() if key != "goneAt"}
-                for k, record in self._pending_plans.items()
-            },
-            self._login(),
-        )
 
-    @staticmethod
-    def _restore_pending_plans(raw: Any) -> dict[int, dict]:
-        """读回挂单计划；超过 TTL 的挂单早就不在了，直接丢弃。"""
-        plans: dict[int, dict] = {}
-        if not isinstance(raw, dict):
-            return plans
-        now = time.time()
-        for key, value in raw.items():
-            if not isinstance(value, dict):
-                continue
-            try:
-                ticket = int(key)
-                placed_at = float(value.get("placedAt") or 0)
-            except (TypeError, ValueError):
-                continue
-            if placed_at <= 0 or now - placed_at > PENDING_PLAN_TTL:
-                continue
-            record = dict(value)
-            record["goneAt"] = None
-            plans[ticket] = record
-        return plans
 
-    def _save_auto_be(self) -> None:
-        # next 是 time.monotonic() 的值，跨进程没有意义，不落盘
-        self.store.set_state(
-            "autoBreakeven",
-            {
-                str(k): {key: value for key, value in plan.items() if key != "next"}
-                for k, plan in self._auto_be.items()
-            },
-            self._login(),
-        )
 
-    @staticmethod
-    def _restore_auto_be(raw: Any) -> dict[int, dict]:
-        """读回持久化的计划；monotonic 的 next 在新进程里没有意义，一律清零。"""
-        plans: dict[int, dict] = {}
-        if not isinstance(raw, dict):
-            return plans
-        for key, value in raw.items():
-            if not isinstance(value, dict):
-                continue
-            try:
-                ticket = int(key)
-            except (TypeError, ValueError):
-                continue
-            plan = dict(value)
-            plan["next"] = 0.0
-            plans[ticket] = plan
-        return plans
 
-    @staticmethod
-    def _normalize_plan_steps(raw: Any) -> list[dict]:
-        """清洗前端传来的阶段：R 为正、平仓比例留空或 1–99、按 R 升序、最多 8 条。"""
-        out: list[dict] = []
-        if isinstance(raw, list):
-            for item in raw:
-                if not isinstance(item, dict):
-                    continue
-                try:
-                    at_r = float(item.get("atR"))
-                except (TypeError, ValueError):
-                    continue
-                if not (0 < at_r <= 100):
-                    continue
-                close = item.get("closePercent")
-                try:
-                    close = float(close) if close is not None else None
-                except (TypeError, ValueError):
-                    close = None
-                if close is not None and not (0 < close < 100):
-                    close = None
-                out.append(
-                    {
-                        "atR": round(at_r, 4),
-                        "closePercent": close,
-                        "moveBreakeven": bool(item.get("moveBreakeven")),
-                        "done": False,
-                    }
-                )
-        out.sort(key=lambda step: step["atR"])
-        return out[:8]
 
-    @staticmethod
-    def _plan_steps(plan: dict) -> list[dict]:
-        """读计划里的阶段；旧版本只存了 beR，这里补成一条「移保本」阶段。"""
-        steps = plan.get("steps")
-        if isinstance(steps, list):
-            return steps
-        try:
-            be_r = float(plan.get("beR") or 1) or 1.0
-        except (TypeError, ValueError):
-            be_r = 1.0
-        steps = [{"atR": be_r, "closePercent": None, "moveBreakeven": True, "done": False}]
-        plan["steps"] = steps
-        return steps
 
-    def _auto_partial_close(self, ticket: int, percent: Any) -> float | None:
-        """按当前剩余仓位的百分比平仓；仓位小到拆不开时返回 None（只做止损动作）。"""
-        try:
-            pct = float(percent)
-        except (TypeError, ValueError):
-            return None
-        if not (0 < pct < 100):
-            return None
-        found = mt5.positions_get(ticket=ticket)
-        if not found:
-            return None
-        position = found[0]
-        info = self._ensure_symbol(position.symbol)
-        tick = mt5.symbol_info_tick(position.symbol)
-        if tick is None:
-            raise GatewayError("NO_QUOTE", "当前无报价，无法分批平仓")
-        volume = float(position.volume)
-        step = float(getattr(info, "volume_step", 0) or 0.01)
-        min_vol = max(float(getattr(info, "volume_min", 0) or 0), step)
-        target = round_volume(volume * pct / 100.0, step)
-        if target < min_vol - 1e-9 or target > volume - min_vol + 1e-9:
-            return None
-        buy = int(position.type) == 0
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": position.symbol,
-            "volume": target,
-            "type": mt5.ORDER_TYPE_SELL if buy else mt5.ORDER_TYPE_BUY,
-            "position": ticket,
-            "price": float(tick.bid if buy else tick.ask),
-            "deviation": self.cfg.deviation_points,
-            "magic": self.cfg.magic,
-            "comment": "tpl-partial",
-            "type_filling": self._filling_mode(info),
-        }
-        self._result_or_raise(mt5.order_send(request), "position.template_step.partial")
-        return target
 
-    def _auto_move_breakeven(
-        self, ticket: int, plan: dict, position: dict, info: Any, tick: Any
-    ) -> float | None:
-        """把止损移到开仓价；已经在保本或更好时返回 None，成功返回新止损价。
 
-        position 是 `_position_payload` 的 dict（openPrice/sl/tp），不是 MT5 的
-        TradePosition 对象；早期版本按对象取属性，导致所有移保本阶段抛 AttributeError。
-        """
-        point = float(info.point)
-        buy = str(plan.get("side")) == "buy"
-        entry = float(plan.get("entry") or position.get("openPrice") or 0)
-        stops = max(
-            int(getattr(info, "trade_stops_level", 0) or 0),
-            int(getattr(info, "trade_freeze_level", 0) or 0),
-        )
-        min_dist = (max(stops, 1) + 5) * point
-        price = float(tick.bid if buy else tick.ask)
-        target = min(entry, price - min_dist) if buy else max(entry, price + min_dist)
-        target = align_price(target, info)
-        current_sl = float(position.get("sl") or 0)
-        if current_sl:
-            if buy and current_sl >= target - point / 2:
-                return None
-            if not buy and current_sl <= target + point / 2:
-                return None
-        request = {
-            "action": mt5.TRADE_ACTION_SLTP,
-            "symbol": position["symbol"],
-            "position": ticket,
-            "sl": target,
-            "tp": float(position.get("tp") or 0),
-            "magic": self.cfg.magic,
-        }
-        self._result_or_raise(mt5.order_send(request), "position.template_step.breakeven")
-        return target
 
-    def _template_pause_reason(self) -> str:
-        """只读或停机时暂停模板阶段：保护性动作也不发单，恢复可交易后继续。"""
-        if str(self._trade_mode or "").lower() == "readonly":
-            return "readonly"
-        if self._halted:
-            return "halted"
-        return ""
 
-    def _history_order(self, ticket: int) -> Any:
-        """挂单从 orders_get 消失后，从历史里拿它的最终状态与成交持仓号。"""
-        try:
-            found = mt5.history_orders_get(ticket=ticket)
-        except Exception:  # noqa: BLE001 - 查不到就按「已消失」处理
-            return None
-        return found[0] if found else None
-
-    def _match_pending_position(self, record: dict, order: Any) -> dict | None:
-        """按 comment 前缀找成交生成的持仓，再用历史里的 position_id 兜底。"""
-        prefix = str(record.get("clientId") or "")[:20]
-        if prefix:
-            for position in self._positions:
-                if str(position.get("comment") or "").startswith(prefix):
-                    return position
-        position_id = int(getattr(order, "position_id", 0) or 0) if order is not None else 0
-        if position_id:
-            for position in self._positions:
-                if int(position.get("ticket") or 0) == position_id:
-                    return position
-                if int(position.get("identifier") or 0) == position_id:
-                    return position
-        return None
-
-    def _register_pending_plan(self, ticket: int, record: dict, position: dict) -> None:
-        """把挂单计划登记到实际持仓；登记失败只审计，绝不影响交易轮询。"""
-        self._pending_plans.pop(ticket, None)
-        try:
-            entry = float(position.get("openPrice") or 0)
-            sl = float(position.get("sl") or record.get("sl") or 0)
-            side = str(record.get("side") or position.get("side") or "")
-            risk = abs(entry - sl) if entry > 0 and sl > 0 else 0.0
-            steps = self._normalize_plan_steps(record.get("steps"))
-            position_ticket = int(position.get("ticket") or 0)
-            if not steps or risk <= 0 or side not in ("buy", "sell") or not position_ticket:
-                self.store.audit(
-                    "order.template_plan.dropped",
-                    {
-                        "ticket": ticket,
-                        "position": position_ticket or None,
-                        "reason": "no-risk",
-                    },
-                )
-                return
-            existing = self._auto_be.get(position_ticket)
-            self._auto_be[position_ticket] = {
-                "entry": entry,
-                "risk": risk,
-                "side": side,
-                "steps": steps,
-                "next": 0.0,
-                "templateId": record.get("templateId"),
-                "templateName": record.get("templateName"),
-            }
-            self._save_auto_be()
-            payload = {
-                "ticket": position_ticket,
-                "order": ticket,
-                "entry": entry,
-                "sl": sl,
-                "steps": steps,
-                "source": "pending",
-                "templateId": record.get("templateId"),
-                "templateName": record.get("templateName"),
-            }
-            if existing is not None:
-                # netting 账户同一方向的持仓会被合并，后登记的模板生效
-                payload["replaced"] = True
-                self.store.audit("position.template_plan.netting", payload)
-            self.store.audit("position.template_plan.set", payload)
-        except Exception as exc:  # noqa: BLE001 - 登记失败不能中断轮询
-            self.store.audit(
-                "order.template_plan.dropped",
-                {"ticket": ticket, "reason": "error", "error": f"{type(exc).__name__}: {exc}"},
-            )
-
-    def _adopt_pending_template_plans(self) -> None:
-        """挂单成交后把阶段计划迁移到实际持仓；撤单 / 过期 / 已平仓则丢弃。"""
-        if not self._pending_plans or not self._connected:
-            return
-        now = time.time()
-        changed = False
-        orders = {int(order["ticket"]): order for order in self._orders}
-        for ticket, record in list(self._pending_plans.items()):
-            try:
-                placed_at = float(record.get("placedAt") or 0)
-            except (TypeError, ValueError):
-                placed_at = 0.0
-            if now - placed_at > PENDING_PLAN_TTL:
-                self._pending_plans.pop(ticket, None)
-                changed = True
-                self.store.audit(
-                    "order.template_plan.dropped", {"ticket": ticket, "reason": "ttl"}
-                )
-                continue
-            order = orders.get(ticket)
-            if order is not None:
-                record["goneAt"] = None
-                position = self._match_pending_position(record, None)
-                if position is None:
-                    continue
-            else:
-                # 成交与持仓快照之间有空档，先给几秒宽限再判定「消失了」
-                gone_at = record.get("goneAt")
-                if not gone_at:
-                    record["goneAt"] = now
-                    continue
-                if now - float(gone_at) < PENDING_PLAN_GRACE:
-                    continue
-                history = self._history_order(ticket)
-                state = ""
-                if history is not None:
-                    raw_state = getattr(history, "state", None)
-                    if isinstance(raw_state, int):
-                        state = ORDER_STATES.get(raw_state, "")
-                if state in ("cancelled", "expired", "rejected"):
-                    self._pending_plans.pop(ticket, None)
-                    changed = True
-                    self.store.audit(
-                        "order.template_plan.dropped",
-                        {"ticket": ticket, "reason": state},
-                    )
-                    continue
-                position = self._match_pending_position(record, history)
-                if position is None:
-                    self._pending_plans.pop(ticket, None)
-                    changed = True
-                    self.store.audit(
-                        "order.template_plan.dropped",
-                        {"ticket": ticket, "reason": "gone", "state": state or None},
-                    )
-                    continue
-            self._register_pending_plan(ticket, record, position)
-            changed = True
-        if changed:
-            self._save_pending_plans()
-
-    def _auto_breakeven(self) -> None:
-        """模板开仓的分批止盈 / 保本：每轮最多推进一步，失败 3 秒后重试。"""
-        if not self._connected:
-            return
-        self._adopt_pending_template_plans()
-        if not self._auto_be:
-            return
-        changed = False
-        # 暂停期间也要清掉已不存在的持仓，避免状态越积越多
-        for ticket in list(self._auto_be):
-            if not any(item["ticket"] == ticket for item in self._positions):
-                self._auto_be.pop(ticket, None)
-                changed = True
-        reason = self._template_pause_reason()
-        if reason:
-            if reason != self._auto_be_pause_reason:
-                self._auto_be_pause_reason = reason
-                self.store.audit(
-                    "position.template_plan.paused",
-                    {
-                        "reason": reason,
-                        "tradeMode": self._trade_mode,
-                        "halted": bool(self._halted),
-                        "plans": len(self._auto_be),
-                    },
-                )
-            if changed:
-                self._save_auto_be()
-            return
-        if self._auto_be_pause_reason:
-            self.store.audit(
-                "position.template_plan.resumed",
-                {"plans": len(self._auto_be)},
-            )
-            self._auto_be_pause_reason = ""
-            changed = True
-        for ticket, plan in list(self._auto_be.items()):
-            position = next((x for x in self._positions if x["ticket"] == ticket), None)
-            if position is None:
-                self._auto_be.pop(ticket, None)
-                changed = True
-                continue
-            if time.monotonic() < float(plan.get("next") or 0):
-                continue
-            info = mt5.symbol_info(position["symbol"])
-            tick = mt5.symbol_info_tick(position["symbol"])
-            if info is None or tick is None:
-                continue
-            buy = str(plan.get("side")) == "buy"
-            price = float(tick.bid if buy else tick.ask)
-            entry = float(plan.get("entry") or position["openPrice"])
-            risk = float(plan.get("risk") or 0)
-            if risk <= 0:
-                self._auto_be.pop(ticket, None)
-                changed = True
-                continue
-            steps = self._plan_steps(plan)
-            step = next((item for item in steps if not item.get("done")), None)
-            if step is None:
-                self._auto_be.pop(ticket, None)
-                changed = True
-                continue
-            at_r = float(step.get("atR") or 0)
-            trigger = entry + risk * at_r if buy else entry - risk * at_r
-            if (buy and price < trigger) or (not buy and price > trigger):
-                continue
-            try:
-                # 先移止损再分批：移保本是幂等的（已到保本就返回 None），
-                # 这样即使平仓失败重试，也不会把同一阶段平两次。
-                moved = (
-                    self._auto_move_breakeven(ticket, plan, position, info, tick)
-                    if step.get("moveBreakeven")
-                    else None
-                )
-                closed = self._auto_partial_close(ticket, step.get("closePercent"))
-            except Exception as exc:  # noqa: BLE001 - 单条计划失败不能中断整轮轮询
-                plan["next"] = time.monotonic() + 3.0
-                self.store.audit(
-                    "position.template_step.failed",
-                    {
-                        "ticket": ticket,
-                        "atR": at_r,
-                        "error": str(exc),
-                        "type": type(exc).__name__,
-                    },
-                )
-                continue
-            step["done"] = True
-            changed = True
-            self.store.audit(
-                "position.template_step",
-                {
-                    "ticket": ticket,
-                    "atR": at_r,
-                    "closedVolume": closed,
-                    "breakeven": moved,
-                },
-            )
-            if closed is not None:
-                self._emit(
-                    "templateStep",
-                    {
-                        "ticket": ticket,
-                        "symbol": position["symbol"],
-                        "atR": at_r,
-                        "volume": closed,
-                    },
-                )
-            if moved is not None:
-                self._emit(
-                    "autoBreakeven",
-                    {
-                        "ticket": ticket,
-                        "sl": moved,
-                        "symbol": position["symbol"],
-                        "r": at_r,
-                    },
-                )
-            self._poll_trade_state()
-            position = next((x for x in self._positions if x["ticket"] == ticket), None)
-            if position is None or all(item.get("done") for item in steps):
-                self._auto_be.pop(ticket, None)
-        if changed:
-            self._save_auto_be()
-            self._poll_trade_state()
-
-    def _trail_positions(self) -> None:
-        """移动止损：价格往盈利方向走时，把 SL 保持在一定距离外，只进不退。"""
-        if not self._trailing or not self._connected:
-            return
-        now = time.monotonic()
-        changed = False
-        removed = False
-        for ticket, record in list(self._trailing.items()):
-            if now < self._trail_next.get(ticket, 0):
-                continue
-            position = next((x for x in self._positions if x["ticket"] == ticket), None)
-            if position is None:
-                self._trailing.pop(ticket, None)
-                self._trail_next.pop(ticket, None)
-                removed = True
-                continue
-            info = mt5.symbol_info(position["symbol"])
-            tick = mt5.symbol_info_tick(position["symbol"])
-            if info is None or tick is None:
-                continue
-            point = float(info.point)
-            dist = float(record.get("distancePoints") or 0) * point
-            step = float(record.get("stepPoints") or 0) * point
-            buy = position["side"] == "buy"
-            current_sl = float(position["sl"] or 0)
-            if buy:
-                desired = float(tick.bid) - dist
-                better = current_sl <= 0 or desired > current_sl + step - 1e-9
-            else:
-                desired = float(tick.ask) + dist
-                better = current_sl <= 0 or desired < current_sl - step + 1e-9
-            if not better:
-                continue
-            desired = align_price(desired, info)
-            request = {
-                "action": mt5.TRADE_ACTION_SLTP,
-                "symbol": position["symbol"],
-                "position": ticket,
-                "sl": desired,
-                "tp": float(position["tp"] or 0),
-                "magic": self.cfg.magic,
-            }
-            try:
-                self._result_or_raise(mt5.order_send(request), "position.trailing")
-            except GatewayError:
-                self._trail_next[ticket] = now + 3.0
-                continue
-            self._trail_next[ticket] = now + 0.5
-            changed = True
-        if removed:
-            self._save_trailing()
-        if changed:
-            self._poll_trade_state()
-
-    def _close_position(self, p: dict) -> dict:
-        self._guard_trade()
-        ticket = int(p.get("ticket") or 0)
-        found = mt5.positions_get(ticket=ticket)
-        if not found:
-            raise GatewayError("NO_POSITION", f"找不到持仓 {ticket}")
-        position = found[0]
-        info = self._ensure_symbol(position.symbol)
-        tick = mt5.symbol_info_tick(position.symbol)
-        if tick is None:
-            raise GatewayError("NO_QUOTE", "当前无报价，无法平仓")
-        volume = round_volume(_num(p.get("volume"), float(position.volume)), float(info.volume_step))
-        if volume <= 0 or volume > float(position.volume):
-            raise GatewayError("BAD_VOLUME", f"平仓手数无效: {volume}")
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": position.symbol,
-            "volume": volume,
-            "type": mt5.ORDER_TYPE_SELL if position.type == 0 else mt5.ORDER_TYPE_BUY,
-            "position": ticket,
-            "price": float(tick.bid if position.type == 0 else tick.ask),
-            "deviation": self.cfg.deviation_points,
-            "magic": self.cfg.magic,
-            "comment": "close",
-            "type_filling": self._filling_mode(info),
-        }
-        result = mt5.order_send(request)
-        out = self._result_or_raise(
-            result,
-            "position.close",
-            lambda payload: self._fill_deal_price(payload, ticket),
-        )
-        # 券商侧平仓是异步完成的，等持仓真正消失再刷新缓存，避免前端读到旧持仓
-        for _ in range(10):
-            if not mt5.positions_get(ticket=ticket):
-                break
-            time.sleep(0.1)
-        partial = volume < float(position.volume) - 1e-9
-        comment = str(getattr(position, "comment", "") or "")
-        still_open = bool(mt5.positions_get(ticket=ticket))
-        if comment and not still_open and self.store.get_intent(comment, self._login()):
-            self.store.update_intent(comment, "closed", login=self._login())
-        if partial and still_open and bool(p.get("moveToBe")):
-            try:
-                out["breakeven"] = self._breakeven(
-                    {"ticket": ticket, "offsetPoints": p.get("beOffsetPoints")}
-                )
-            except GatewayError as exc:
-                out["breakeven"] = {"error": exc.message}
-        self._poll_trade_state()
-        self._poll_risk(force=True)
-        return out
-
-    def _fill_deal_price(self, payload: dict, position_ticket: int) -> None:
-        if payload.get("price"):
-            return
-        deals = mt5.history_deals_get(position=position_ticket)
-        if deals:
-            last = deals[-1]
-            payload["price"] = float(last.price)
-            if not payload.get("deal"):
-                payload["deal"] = int(last.ticket)
-
-    def _close_all(self, p: dict) -> dict:
-        self._guard_trade()
-        symbol = p.get("symbol")
-        targets = [x for x in self._positions if not symbol or x["symbol"] == symbol]
-        results = []
-        for pos in targets:
-            try:
-                results.append(self._close_position({"ticket": pos["ticket"]}))
-            except GatewayError as exc:
-                results.append({"ticket": pos["ticket"], "error": exc.message})
-        return {"results": results}
-
-    def _result_or_raise(
-        self, result: Any, kind: str, enrich: Callable[[dict], None] | None = None
-    ) -> dict:
-        if result is None:
-            raise GatewayError("SEND_FAILED", f"{kind} 失败: {mt5.last_error()}")
-        retcode = int(result.retcode)
-        payload = {
-            "retcode": retcode,
-            "order": int(result.order or 0),
-            "deal": int(result.deal or 0),
-            "volume": float(result.volume or 0),
-            "price": float(result.price or 0),
-            "comment": getattr(result, "comment", ""),
-        }
-        if enrich is not None and retcode in OK_RETCODES:
-            try:
-                enrich(payload)
-            except Exception:  # noqa: BLE001
-                pass
-        self.store.audit(f"{kind}.result", payload)
-        if retcode not in OK_RETCODES:
-            message = RETCODE_TEXT.get(retcode, result.comment or "请求被拒绝")
-            raise GatewayError(f"RET_{retcode}", message, payload)
-        return payload
 
     # ---------- reconciliation ----------
 

@@ -16,7 +16,7 @@ TALLY_SCORE_VERSION = 1
 MIN_TRADES = 20
 MIN_R_TRADES = 5
 
-BREAKEVEN = 0.005
+from metrics import WIN_EPSILON as BREAKEVEN
 
 # 顺序即展示顺序；权重固定
 COMPONENTS: list[dict[str, Any]] = [

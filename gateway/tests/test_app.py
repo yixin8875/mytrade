@@ -13,6 +13,7 @@ import types
 from pathlib import Path
 
 import pytest
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from mt5_worker import GatewayError
@@ -27,6 +28,9 @@ class FakeWorker:
         self.stopped = 0
         self.commands: list[tuple[str, dict]] = []
         self.results: dict[str, object] = {}
+        # 放进 stall 的方法永不返回，用来模拟卡住的 MT5 调用
+        self.stall: set[str] = set()
+        self.reconcile_requests: list[str] = []
 
     def health(self) -> dict:
         return self.health_value
@@ -37,9 +41,14 @@ class FakeWorker:
     def stop(self) -> None:
         self.stopped += 1
 
+    def request_reconcile(self, method: str) -> None:
+        self.reconcile_requests.append(method)
+
     def submit(self, method: str, params: dict):
         self.commands.append((method, params))
         future: concurrent.futures.Future = concurrent.futures.Future()
+        if method in self.stall:
+            return future
         value = self.results.get(method)
         if isinstance(value, BaseException):
             future.set_exception(value)
@@ -176,6 +185,26 @@ def test_截图不存在时404(client):
     assert client.get("/shots/888/404.jpg").status_code == 404
 
 
+def test_截图拒绝外部来源(gateway):
+    module, _ = gateway
+    write_shot(module.BASE_DIR, "12.jpg", b"image")
+
+    with TestClient(module.app) as test_client:
+        by_origin = test_client.get(
+            "/shots/12.jpg", headers={"origin": "https://evil.example"}
+        )
+        by_referer = test_client.get(
+            "/shots/12.jpg", headers={"referer": "https://evil.example/x"}
+        )
+        from_app = test_client.get(
+            "/shots/12.jpg", headers={"referer": "http://localhost:5173/journal"}
+        )
+
+    assert by_origin.status_code == 403
+    assert by_referer.status_code == 403
+    assert from_app.status_code == 200
+
+
 # ---------- WebSocket RPC ----------
 
 
@@ -184,6 +213,23 @@ def open_ws(client):
     ws = manager.__enter__()
     hello = ws.receive_json()
     return manager, ws, hello
+
+
+def test_非白名单来源的WebSocket被拒绝(client):
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            "/ws", headers={"origin": "https://evil.example"}
+        ) as ws:
+            ws.receive_json()
+
+
+def test_开发页来源可以连接(client):
+    with client.websocket_connect(
+        "/ws", headers={"origin": "http://localhost:5173"}
+    ) as ws:
+        hello = ws.receive_json()
+
+    assert hello["event"] == "gateway"
 
 
 def test_连接后先推送网关状态(client, gateway):
@@ -253,6 +299,45 @@ def test_未知异常返回INTERNAL(client, gateway):
         manager.__exit__(None, None, None)
 
     assert reply == {"id": 3, "error": {"code": "INTERNAL", "message": "boom"}}
+
+
+def test_只读命令超时返回TIMEOUT(client, gateway, monkeypatch):
+    import mt5_worker
+
+    _, worker = gateway
+    worker.stall.add("ping")
+    monkeypatch.setitem(mt5_worker.COMMAND_TIMEOUTS, "ping", 0.05)
+    manager, ws, _ = open_ws(client)
+
+    try:
+        ws.send_text(json.dumps({"id": 11, "method": "ping"}))
+        reply = ws.receive_json()
+    finally:
+        manager.__exit__(None, None, None)
+
+    assert reply["id"] == 11
+    assert reply["error"]["code"] == "TIMEOUT"
+    assert worker.reconcile_requests == []
+
+
+def test_下单命令超时返回RESULT_UNKNOWN并请求对账(client, gateway, monkeypatch):
+    import mt5_worker
+
+    _, worker = gateway
+    worker.stall.add("order.place")
+    monkeypatch.setitem(mt5_worker.COMMAND_TIMEOUTS, "order.place", 0.05)
+    manager, ws, _ = open_ws(client)
+
+    try:
+        ws.send_text(json.dumps({"id": 12, "method": "order.place", "params": {}}))
+        reply = ws.receive_json()
+    finally:
+        manager.__exit__(None, None, None)
+
+    assert reply["id"] == 12
+    assert reply["error"]["code"] == "RESULT_UNKNOWN"
+    assert "自动对账" in reply["error"]["message"]
+    assert worker.reconcile_requests == ["order.place"]
 
 
 def test_无效JSON返回BAD_JSON(client):

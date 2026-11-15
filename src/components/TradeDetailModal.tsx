@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
-import { Camera, ChartCandlestick, X } from 'lucide-react';
+import { Camera, ChartCandlestick, Play, X } from 'lucide-react';
 import { TradeChart } from './TradeChart';
 import { isShotMeta, shotY, type ShotMeta } from '../chart/tv/shotMeta';
 import { fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
+import { shotUrl } from '../lib/shots';
+import { ReferenceCapacityDialog, useTradeReplay } from '../replay/useTradeReplay';
 import type { JournalRecord } from '../gateway/types';
-
-const SHOT_BASE = 'http://127.0.0.1:8765/shots';
 
 const CLOSED_BY: Record<string, string> = {
   sl: '止损',
@@ -15,11 +15,6 @@ const CLOSED_BY: Record<string, string> = {
   stop_out: '强平',
   manual: '手动',
 };
-
-/** 截图按账户分目录；旧版平铺文件由网关路由自动回退 */
-function shotUrl(record: JournalRecord, ext = 'jpg'): string {
-  return `${SHOT_BASE}/${record.login || 0}/${record.position_id}.${ext}`;
-}
 
 type Tab = 'chart' | 'shot';
 
@@ -35,6 +30,7 @@ export function TradeDetailModal({
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [meta, setMeta] = useState<ShotMeta | null>(null);
+  const replay = useTradeReplay();
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -102,6 +98,17 @@ export function TradeDetailModal({
           {closedBy && <span className="text-[11px] text-console-faint">平仓：{closedBy}</span>}
           <span className="flex-1" />
 
+          <button
+            onClick={() => {
+              if (replay.start(record) === 'opened') onClose();
+            }}
+            title="创建或打开这笔交易的回放会话"
+            className="console-btn console-btn-primary flex items-center gap-1.5"
+          >
+            <Play size={13} strokeWidth={1.6} />
+            在回放中重演
+          </button>
+
           <div className="flex items-center gap-1">
             <button
               onClick={() => setTab('chart')}
@@ -156,6 +163,14 @@ export function TradeDetailModal({
             </div>
           )}
         </div>
+
+        <ReferenceCapacityDialog
+          pending={replay.pending}
+          onConfirm={() => {
+            if (replay.confirm() === 'opened') onClose();
+          }}
+          onCancel={replay.cancel}
+        />
       </div>
     </div>
   );

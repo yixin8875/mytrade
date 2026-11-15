@@ -68,6 +68,36 @@ def test_update_rejects_invalid_patches(isolated_config, patch):
         isolated_config.update(patch)
 
 
+def test_update_applies_discipline_fields(isolated_config):
+    result = isolated_config.update(
+        {
+            "discipline_mode": "confirm",
+            "discipline_playbook": "  pb-1  ",
+            "discipline_require_reason": True,
+        }
+    )
+
+    assert isolated_config.discipline_mode == "confirm"
+    assert isolated_config.discipline_playbook == "pb-1"
+    assert isolated_config.discipline_require_reason is True
+    assert result["discipline_mode"] == "confirm"
+    assert result["discipline_require_reason"] is True
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"discipline_mode": "strict"},
+        {"discipline_mode": 1},
+        {"discipline_playbook": 123},
+        {"discipline_require_reason": "yes"},
+    ],
+)
+def test_update_rejects_invalid_discipline_fields(isolated_config, patch):
+    with pytest.raises(ValueError):
+        isolated_config.update(patch)
+
+
 @pytest.fixture()
 def memory_config(monkeypatch):
     """账户相关方法会读写 config.json，这里换成内存字典并保留其他字段。"""

@@ -22,6 +22,7 @@ import type {
   ReplayDataSource,
   ReplayNote,
   ReplayOrder,
+  ReplayReference,
   ReplaySession,
   ReplaySettings,
 } from './types';
@@ -40,6 +41,10 @@ export interface NewSessionInput {
   startTs: number;
   endTs: number;
   settings: ReplaySettings;
+  /** 从实盘交易创建的会话带来源与参照 */
+  origin?: 'manual' | 'journal';
+  reference?: ReplayReference;
+  referenceVisible?: boolean;
 }
 
 export interface OrderInput {
@@ -53,6 +58,8 @@ export interface OrderInput {
   /** 启用下单模板时随订单保存，成交后由引擎按 R 执行 */
   steps?: TemplateStep[];
   templateName?: string;
+  /** 「重演这笔」预填后提交的订单 */
+  referenceRole?: 'retry';
 }
 
 export interface ReplayLoading {
@@ -83,11 +90,15 @@ interface ReplayStore {
   setSpeed: (speed: Speed) => void;
   setFollow: (follow: boolean) => void;
   step: (count?: number) => void;
+  /** 前进到 ts 所在的那根 M1 之前（只向前，用于回到开仓前一根） */
+  seekTo: (ts: number) => boolean;
   restart: () => void;
   finish: () => void;
   archive: (id: string) => void;
   remove: (id: string) => void;
   rename: (id: string, name: string) => void;
+  /** 参照交易层显示 / 隐藏 */
+  setReferenceVisible: (id: string, visible: boolean) => void;
   duplicateSession: (id: string) => string | null;
   submitOrder: (input: OrderInput) => string | null;
   closePosition: (positionId: string, volume?: number) => void;
@@ -338,6 +349,9 @@ export const useReplay = create<ReplayStore>((set, get) => ({
       positions: [],
       trades: [],
       notes: [],
+      origin: input.origin ?? 'manual',
+      reference: input.reference,
+      referenceVisible: input.referenceVisible,
     };
     set((state) => ({
       sessions: [session, ...state.sessions],
@@ -590,6 +604,39 @@ export const useReplay = create<ReplayStore>((set, get) => ({
     schedulePersist();
   },
 
+  seekTo: (ts) => {
+    const state = get();
+    const session = sessionById(state.sessions, state.activeId);
+    if (!session) return false;
+    if (
+      session.status === 'preparing' ||
+      session.status === 'finished' ||
+      session.status === 'archived'
+    ) {
+      return false;
+    }
+    if (!hasReplayBars(session.id)) return false;
+    const bars = replayBars(session.id);
+    const end = endIndex(session);
+    // 找到 ts 所在的那根 M1：跳完之后它还是「下一根待回放」，
+    // 也就是画面上停在开仓前一根。
+    let target = -1;
+    for (let index = Math.max(session.cursorIndex, session.startIndex); index < end; index += 1) {
+      const bar = bars[index];
+      if (!bar) break;
+      if (bar.time >= ts) {
+        target = index;
+        break;
+      }
+    }
+    if (target < 0) return false;
+    const count = target - session.cursorIndex;
+    if (count <= 0) return false;
+    if (get().playing) get().pause();
+    get().step(count);
+    return true;
+  },
+
   restart: () => {
     const session = sessionById(get().sessions, get().activeId);
     if (!session) return;
@@ -668,6 +715,17 @@ export const useReplay = create<ReplayStore>((set, get) => ({
     const session = sessionById(get().sessions, id);
     if (!session) return;
     session.name = name.trim().slice(0, 40) || session.name;
+    session.updatedAt = Date.now();
+    set((state) => ({
+      sessions: state.sessions.map((item) => (item.id === id ? { ...item } : item)),
+    }));
+    persistNow();
+  },
+
+  setReferenceVisible: (id, visible) => {
+    const session = sessionById(get().sessions, id);
+    if (!session) return;
+    session.referenceVisible = visible;
     session.updatedAt = Date.now();
     set((state) => ({
       sessions: state.sessions.map((item) => (item.id === id ? { ...item } : item)),
@@ -776,6 +834,7 @@ export const useReplay = create<ReplayStore>((set, get) => ({
       atNextOpen: true,
       steps: input.steps?.map((step) => ({ ...step })),
       templateName: input.templateName,
+      referenceRole: input.referenceRole,
     };
     session.orders.push(order);
     session.updatedAt = Date.now();

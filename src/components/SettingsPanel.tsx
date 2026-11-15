@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   Bell,
   Braces,
+  Bug,
   ChartCandlestick,
   Check,
   Database,
@@ -11,6 +12,7 @@ import {
   FolderOpen,
   Info,
   KeyRound,
+  ListChecks,
   Palette,
   RefreshCw,
   Save,
@@ -22,6 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import { gateway } from '../gateway/client';
+import { downloadDiagnostics } from '../lib/diagnostics';
 import { THEMES, useApp, type SettingsSection, type Theme } from '../store/useApp';
 import { fmtNum, templateStepsSummary } from '../lib/template';
 import { AccountManager } from './AccountManager';
@@ -37,8 +40,10 @@ import type {
   AiStatus,
   BackupInfo,
   DataPaths,
+  DisciplineMode,
   ExportResult,
   GatewayConfig,
+  Playbook,
   RiskLimits,
   TradeMode,
 } from '../gateway/types';
@@ -62,6 +67,7 @@ const NAV = [
   { id: 'pine', label: 'Pine 脚本', hint: '实验：本地执行', icon: Braces },
   { id: 'template', label: '交易模板', hint: '风险、止盈与分批', icon: Target },
   { id: 'risk', label: '交易与风控', hint: '手数与风险上限', icon: ShieldCheck },
+  { id: 'discipline', label: '开仓纪律', hint: '下单前的清单门禁', icon: ListChecks },
   { id: 'accounts', label: 'MT5 账户', hint: '自动登录与切换', icon: Users },
   { id: 'alerts', label: '告警', hint: '声音与通知', icon: Bell },
   { id: 'data', label: '数据与备份', hint: '导出、备份与恢复', icon: Database },
@@ -280,6 +286,7 @@ export function SettingsPanel() {
           {section === 'pine' && <PineSection />}
           {section === 'template' && <TemplateSection />}
           {section === 'risk' && <RiskSection />}
+          {section === 'discipline' && <DisciplineSection />}
           {section === 'accounts' && <AccountManager />}
           {section === 'alerts' && <AlertsSection />}
           {section === 'data' && <DataSection />}
@@ -328,6 +335,18 @@ function DataSection() {
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const desktop = isDesktopApp();
+
+  const exportDiagnostics = async () => {
+    setBusy('diagnostics');
+    try {
+      await downloadDiagnostics(gateway);
+      notify('success', '诊断包已导出');
+    } catch (error) {
+      notify('error', error instanceof Error ? error.message : '导出诊断失败');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const refreshBackups = () =>
     gateway
@@ -490,6 +509,14 @@ function DataSection() {
             <ArchiveRestore size={14} strokeWidth={1.5} />
             {busy === 'backup' ? '备份中…' : '创建备份'}
           </button>
+          <button
+            onClick={() => void exportDiagnostics()}
+            disabled={busy !== null || restoring}
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-console-line px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Bug size={14} strokeWidth={1.5} />
+            {busy === 'diagnostics' ? '导出中…' : '导出诊断'}
+          </button>
           <span className="text-[11px] text-console-muted">
             {backups.length > 0 ? `已有 ${backups.length} 个备份` : '还没有备份'}
           </span>
@@ -504,7 +531,14 @@ function DataSection() {
           {backups.map((item) => (
             <div key={item.name} className="flex items-center gap-2 py-2.5">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[11.5px] text-console-ink">{item.name}</div>
+                <div className="truncate font-mono text-[11.5px] text-console-ink">
+                  {item.name}
+                  {item.auto && (
+                    <span className="ml-1.5 rounded bg-console-accent-soft px-1.5 py-0.5 font-sans text-[10px] text-console-accent">
+                      自动
+                    </span>
+                  )}
+                </div>
                 <div className="mt-0.5 text-[11px] text-console-muted">
                   {fmtWhen(item.createdAt)} · {fmtBytes(item.bytes)}
                 </div>
@@ -1019,6 +1053,192 @@ const SCOPE_OPTIONS: { value: RiskScope; label: string }[] = [
   { value: 'account', label: '当前账户' },
   { value: 'global', label: '全局默认' },
 ];
+
+const DISCIPLINE_MODES: { value: DisciplineMode; label: string; hint: string }[] = [
+  { value: 'off', label: '关闭', hint: '不弹清单，维持现有下单流程' },
+  { value: 'confirm', label: '二次确认', hint: '清单未完成时需复核后才能发送' },
+  { value: 'block', label: '强制拦截', hint: '未评估直接拒绝；违反需理由' },
+];
+
+/** 开仓纪律：把策略清单变成下单前的一次检查 */
+function DisciplineSection() {
+  const health = useApp((s) => s.health);
+  const notify = useApp((s) => s.notify);
+  const config = health?.config;
+  const [books, setBooks] = useState<Playbook[]>([]);
+  const [booksLoading, setBooksLoading] = useState(true);
+  const [mode, setMode] = useState<DisciplineMode>('off');
+  const [playbook, setPlaybook] = useState('');
+  const [requireReason, setRequireReason] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    gateway
+      .call<{ playbooks: Playbook[] }>('strategy.list', {})
+      .then((res) => {
+        if (alive) setBooks(res.playbooks ?? []);
+      })
+      .catch(() => {
+        if (alive) setBooks([]);
+      })
+      .finally(() => {
+        if (alive) setBooksLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // 只跟随服务端的三个字段，避免 health 轮询把正在编辑的值冲掉
+  useEffect(() => {
+    if (!config) return;
+    setMode(config.discipline_mode ?? 'off');
+    setPlaybook(config.discipline_playbook ?? '');
+    setRequireReason(!!config.discipline_require_reason);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    config?.discipline_mode,
+    config?.discipline_playbook,
+    config?.discipline_require_reason,
+  ]);
+
+  if (!config) {
+    return (
+      <Card title="开仓纪律门禁" description="连接网关后可以在这里配置下单前的清单。">
+        <div className="text-[12px] text-console-muted">等待网关连接…</div>
+      </Card>
+    );
+  }
+
+  const activeBook = books.find((book) => book.id === playbook);
+  const dirty =
+    mode !== (config.discipline_mode ?? 'off') ||
+    playbook !== (config.discipline_playbook ?? '') ||
+    requireReason !== !!config.discipline_require_reason;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const next = await gateway.call<GatewayConfig>('system.setConfig', {
+        discipline_mode: mode,
+        discipline_playbook: playbook,
+        discipline_require_reason: requireReason,
+      });
+      const latest = useApp.getState().health;
+      if (latest) useApp.getState().setHealth({ ...latest, config: next });
+      notify('success', '开仓纪律门禁已更新，立即生效');
+    } catch (error) {
+      notify('error', (error as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card
+      title="开仓纪律门禁"
+      description="只拦新开仓；平仓、改单、保本与移动止损永远不受影响，回放里的模拟下单也不经过这里。"
+      footer={
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[11px] text-console-muted">
+            {dirty ? '有未保存的修改' : '当前配置已生效'}
+          </div>
+          <button
+            onClick={() => void save()}
+            disabled={!dirty || saving}
+            className={clsx(
+              'h-8 rounded-lg px-3 text-[12px] font-medium transition-colors',
+              dirty && !saving
+                ? 'bg-console-ink text-console-canvas hover:opacity-90'
+                : 'cursor-not-allowed bg-console-hover text-console-faint',
+            )}
+          >
+            {saving ? '保存中…' : '保存'}
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-5">
+        <div>
+          <div className="text-[12px] text-console-ink">模式</div>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            {DISCIPLINE_MODES.map((item) => (
+              <button
+                key={item.value}
+                onClick={() => setMode(item.value)}
+                className={clsx(
+                  'rounded-lg border px-3 py-2.5 text-left transition-colors',
+                  mode === item.value
+                    ? 'border-console-accent/50 bg-console-selected'
+                    : 'border-console-line bg-console-card hover:bg-console-hover',
+                )}
+              >
+                <span
+                  className={clsx(
+                    'block text-[12px] font-medium',
+                    mode === item.value ? 'text-console-ink' : 'text-console-ink-2',
+                  )}
+                >
+                  {item.label}
+                </span>
+                <span className="mt-1 block text-[10px] leading-4 text-console-muted">
+                  {item.hint}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Row
+          label="默认清单"
+          hint="下单确认弹窗里可以临时改选；未指定时按「无清单」处理。"
+        >
+          <select
+            value={playbook}
+            onChange={(event) => setPlaybook(event.target.value)}
+            disabled={booksLoading}
+            aria-label="默认开仓清单"
+            className="h-8 w-[220px] rounded-lg border border-console-line bg-console-card px-2 text-[12px] text-console-ink outline-none focus:border-console-accent disabled:opacity-50"
+          >
+            <option value="">不指定</option>
+            {books.map((book) => (
+              <option key={book.id} value={book.id}>
+                {book.name}
+              </option>
+            ))}
+          </select>
+        </Row>
+
+        {activeBook && activeBook.rules.length > 0 && (
+          <div className="rounded-lg border border-console-line bg-console-canvas px-3 py-2.5">
+            <div className="text-[11px] text-console-muted">
+              清单规则 · {activeBook.rules.length} 条
+            </div>
+            <ul className="mt-1 space-y-0.5 text-[11px] leading-5 text-console-ink-2">
+              {activeBook.rules.map((rule) => (
+                <li key={rule}>· {rule}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {!booksLoading && books.length === 0 && (
+          <div className="text-[11px] leading-5 text-console-muted">
+            还没有策略清单：先到「策略」页创建规则，再回来选择。
+          </div>
+        )}
+
+        <Row
+          label="强行下单时必须填写理由"
+          hint="开启后，存在违反或未评估项时，勾选复核还不够，还要写下这次破例的理由。"
+        >
+          <Toggle checked={requireReason} onChange={setRequireReason} />
+        </Row>
+      </div>
+    </Card>
+  );
+}
 
 function RiskSection() {
   const health = useApp((s) => s.health);

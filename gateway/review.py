@@ -17,7 +17,7 @@ DAY_FMT = "%Y-%m-%d"
 MONTH_FMT = "%Y-%m"
 MAX_RULES = 20
 MAX_RULE_LEN = 200
-BREAKEVEN = 0.005
+from metrics import WIN_EPSILON as BREAKEVEN
 
 
 class ReviewError(Exception):

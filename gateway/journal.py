@@ -10,6 +10,7 @@ from typing import Any
 
 import MetaTrader5 as mt5
 
+from metrics import is_loss, is_win
 from store import Store
 
 
@@ -396,7 +397,11 @@ class TradeJournal:
 
     def stats(self, days: int = 30, login: int = 0) -> dict:
         since = int(time.time()) - max(1, days) * 86400
-        rows = self.store.journal_list(limit=5000, since=since, login=login)
+        # 多取一条用来判断是否截断；journal_list 按平仓时间倒序，保留最新的 5000 笔
+        rows = self.store.journal_list(limit=5001, since=since, login=login)
+        truncated = len(rows) > 5000
+        if truncated:
+            rows = rows[:5000]
         rows.sort(key=lambda r: int(r["close_time"]))
         if not rows:
             return self._empty_stats(days)
@@ -405,8 +410,8 @@ class TradeJournal:
         risks, risk_sources = self._risk_detail(rows, login)
 
         profits = [float(r["profit"]) for r in rows]
-        wins = [p for p in profits if p > 0]
-        losses = [p for p in profits if p < 0]
+        wins = [p for p in profits if is_win(p)]
+        losses = [p for p in profits if is_loss(p)]
         gross_profit = sum(wins)
         gross_loss = sum(losses)
         net = sum(profits)
@@ -432,6 +437,7 @@ class TradeJournal:
 
         summary = {
             "trades": len(rows),
+            "truncated": truncated,
             "wins": len(wins),
             "losses": len(losses),
             "winRate": round(len(wins) / len(rows) * 100, 1),
@@ -477,6 +483,7 @@ class TradeJournal:
             "days": days,
             "summary": {
                 "trades": 0,
+                "truncated": False,
                 "wins": 0,
                 "losses": 0,
                 "winRate": None,
@@ -699,7 +706,7 @@ class TradeJournal:
             )
             item["trades"] += 1
             item["pnl"] += profit
-            if profit > 0:
+            if is_win(profit):
                 item["wins"] += 1
             if risks:
                 r = _r_multiple(profit, risks.get(int(row["position_id"])))

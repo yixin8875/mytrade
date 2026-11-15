@@ -140,6 +140,23 @@ describe('GatewayClient.call', () => {
     socket.receive({ id: lastRequest(socket).id, result: 'late' });
   });
 
+  it('长命令使用按方法名配置的超时', async () => {
+    const { client } = connected();
+    const onError = vi.fn();
+    const promise = client.call('ai.review').catch((reason: unknown) => {
+      onError(reason);
+      return null;
+    });
+
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(onError).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(87000);
+    await promise;
+
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'TIMEOUT' }));
+  });
+
   it('连接断开时在途请求全部拒绝', async () => {
     const { client, socket } = connected();
     const first = client.call('a');

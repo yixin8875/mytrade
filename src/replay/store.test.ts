@@ -449,6 +449,50 @@ describe('下单校验的细节', () => {
   });
 });
 
+describe('实盘参照与跳转', () => {
+  it('seekTo 推进到目标时间之前并暂停播放', () => {
+    const bars = Array.from({ length: 8 }, (_, index) =>
+      makeBar(START + index * 60, 2000, 2001, 1999, 2000),
+    );
+    setupBars(bars, 1);
+    state().play();
+    expect(state().playing).toBe(true);
+
+    expect(state().seekTo(START + 180)).toBe(true);
+
+    expect(activeSession().cursorIndex).toBe(3);
+    expect(activeSession().cursorTs).toBe(START + 120);
+    expect(state().playing).toBe(false);
+  });
+
+  it('seekTo 不倒退，目标在区间外返回 false', () => {
+    const bars = Array.from({ length: 6 }, (_, index) =>
+      makeBar(START + index * 60, 2000, 2001, 1999, 2000),
+    );
+    setupBars(bars, 3);
+
+    expect(state().seekTo(START)).toBe(false);
+    expect(activeSession().cursorIndex).toBe(3);
+    expect(state().seekTo(START + 3600)).toBe(false);
+    expect(activeSession().cursorIndex).toBe(3);
+  });
+
+  it('重演订单带 referenceRole 与实盘标签', () => {
+    setup();
+    expect(state().submitOrder(input({ tag: '突破', referenceRole: 'retry' }))).toBeNull();
+    expect(activeSession().orders[0].referenceRole).toBe('retry');
+    expect(activeSession().orders[0].tag).toBe('突破');
+  });
+
+  it('参照层开关写入本地存储', () => {
+    const session = setup();
+    state().setReferenceVisible(session.id, false);
+    expect(activeSession().referenceVisible).toBe(false);
+    const saved = JSON.parse(window.localStorage.getItem('mytrade.replay.sessions') ?? '[]');
+    expect(saved[0].referenceVisible).toBe(false);
+  });
+});
+
 describe('成交后的交易路径', () => {
   it('市价成交的同一根 K 线就能触发止盈', () => {
     setupBars([

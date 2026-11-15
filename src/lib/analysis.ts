@@ -1,6 +1,7 @@
 /** 深度筛选与交叉分析：筛选、分组汇总、二维矩阵，全部在本地按交易序列计算。 */
 
 import type { Side, TrendTrade } from '../gateway/types';
+import { isLoss, isWin } from './metrics';
 
 export interface FilterCtx {
   /** MT5 服务器相对 UTC 的秒数（journal 里存的是服务器时间） */
@@ -160,8 +161,8 @@ export function summarize(trades: TrendTrade[]): Stats {
   const rValues: number[] = [];
   for (const trade of trades) {
     net += trade.profit;
-    if (trade.profit > 0.005) wins += 1;
-    else if (trade.profit < -0.005) losses += 1;
+    if (isWin(trade.profit)) wins += 1;
+    else if (isLoss(trade.profit)) losses += 1;
     if (trade.r != null) rValues.push(trade.r);
   }
   const count = trades.length;

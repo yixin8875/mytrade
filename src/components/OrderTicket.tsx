@@ -14,7 +14,9 @@ import {
 } from '../lib/template';
 import { TemplateEditor } from './TemplateEditor';
 import type {
+  DisciplineGate,
   OrderType,
+  Playbook,
   Quote,
   Side,
   SymbolInfo,
@@ -73,6 +75,16 @@ export function OrderTicket() {
   const [sizing, setSizing] = useState<TradeSizing | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** 开仓纪律门禁：清单状态与二次确认 */
+  const [gate, setGate] = useState<DisciplineGate | null>(null);
+  const [gatePlaybooks, setGatePlaybooks] = useState<Playbook[]>([]);
+  const [gateLoading, setGateLoading] = useState(false);
+  const [gateError, setGateError] = useState<string | null>(null);
+  const [gateConfirmed, setGateConfirmed] = useState(false);
+  const [gateReason, setGateReason] = useState('');
+  const [gateClientId, setGateClientId] = useState<string | null>(null);
+  /** 连续切换清单时只接受最后一次请求的结果 */
+  const gateRequestRef = useRef(0);
   /** 下拉与票内编辑弹层互斥；点外部或 Esc 关闭 */
   const [templateMenu, setTemplateMenu] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -86,6 +98,9 @@ export function OrderTicket() {
   const step = info?.volumeStep ?? 0.01;
   const ready = conn === 'open' && !!health?.connected;
   const mode = health?.tradeMode ?? 'readonly';
+  const disciplineMode = health?.config.discipline_mode ?? 'off';
+  const disciplineEnabled = disciplineMode !== 'off';
+  const disciplineRequireReason = health?.config.discipline_require_reason ?? false;
   const currency = health?.account?.currency ?? '';
   const paused = mode === 'readonly' || !!riskStatus?.halted;
   const stepsText = templateStepsSummary(template);
@@ -276,6 +291,78 @@ export function OrderTicket() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [confirm]);
 
+  /** 打开/切换开仓清单；每次生成新的 clientOrderId，避免沿用旧快照 */
+  const openDisciplineGate = async (playbookId?: string) => {
+    if (!disciplineEnabled) return;
+    const request = gateRequestRef.current + 1;
+    gateRequestRef.current = request;
+    setGateLoading(true);
+    setGateError(null);
+    setGateConfirmed(false);
+    setGateReason('');
+    setGate(null);
+    const clientOrderId = crypto.randomUUID();
+    setGateClientId(clientOrderId);
+    try {
+      let books = gatePlaybooks;
+      if (!books.length) {
+        const res = await gateway.call<{ playbooks: Playbook[] }>('strategy.list', {});
+        books = res.playbooks ?? [];
+        if (gateRequestRef.current !== request) return;
+        setGatePlaybooks(books);
+      }
+      const fallback = health?.config.discipline_playbook || books[0]?.id || '';
+      const chosen = playbookId === undefined ? fallback : playbookId;
+      const res = await gateway.call<{ gate: DisciplineGate }>('discipline.start', {
+        clientOrderId,
+        playbookId: chosen || undefined,
+      });
+      if (gateRequestRef.current !== request) return;
+      setGate(res.gate);
+    } catch (error) {
+      if (gateRequestRef.current !== request) return;
+      setGateError((error as Error).message);
+    } finally {
+      if (gateRequestRef.current === request) setGateLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!confirm) {
+      // 关闭弹窗：丢弃在途请求，下次打开重新生成 clientOrderId
+      gateRequestRef.current += 1;
+      setGate(null);
+      setGateError(null);
+      setGateLoading(false);
+      setGateConfirmed(false);
+      setGateReason('');
+      setGateClientId(null);
+      return;
+    }
+    if (!disciplineEnabled) return;
+    void openDisciplineGate();
+    // 只在弹窗打开时初始化；切换清单由用户操作显式触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirm]);
+
+  const checkRule = async (rule: string, followed: boolean | null) => {
+    if (!gate || gateLoading) return;
+    setGateLoading(true);
+    try {
+      const res = await gateway.call<{ gate: DisciplineGate }>('discipline.check', {
+        clientOrderId: gate.clientId,
+        playbookId: gate.playbookId ?? undefined,
+        rule,
+        followed,
+      });
+      setGate(res.gate);
+    } catch (error) {
+      notify('error', (error as Error).message);
+    } finally {
+      setGateLoading(false);
+    }
+  };
+
   const activate = () => {
     if (!info) return;
     patchDraft({
@@ -367,10 +454,11 @@ export function OrderTicket() {
 
   const send = async () => {
     if (!info) return;
+    const clientOrderId = gateClientId ?? crypto.randomUUID();
     setBusy(true);
     try {
       await gateway.call('order.place', {
-        clientOrderId: crypto.randomUUID(),
+        clientOrderId,
         symbol,
         side: draft.side,
         type: draft.type,
@@ -379,6 +467,14 @@ export function OrderTicket() {
         sl: draft.sl ?? undefined,
         tp: draft.tp ?? undefined,
         tag: orderTag.trim() || undefined,
+        discipline: disciplineEnabled
+          ? {
+              clientOrderId: gate?.clientId ?? clientOrderId,
+              playbookId: gate?.playbookId ?? undefined,
+              confirmed: gateConfirmed,
+              reason: gateReason.trim() || undefined,
+            }
+          : undefined,
         plan:
           templateArmed && template.steps.length
             ? {
@@ -395,6 +491,11 @@ export function OrderTicket() {
       setConfirm(false);
       setTemplateArmed(false);
       patchDraft({ active: false });
+      gateRequestRef.current += 1;
+      setGate(null);
+      setGateClientId(null);
+      setGateConfirmed(false);
+      setGateReason('');
     } catch (error) {
       notify('error', (error as Error).message);
     } finally {
@@ -420,6 +521,49 @@ export function OrderTicket() {
   });
   const tpManual = templateArmed && isTpManual(tpTarget, draft.tp, tick);
   const planTitle = `${template.name}：${summaryText}。启用后带走风险比例、止盈与阶段计划`;
+
+  // 门禁状态：全部规则都有评估结果才算完成；「不适用」视为已评估
+  const gateRules = gate?.rules ?? [];
+  const gateMissing = gate?.missing ?? [];
+  const gateViolated = gate?.violated ?? [];
+  const gateHasRules = !!gate?.playbookId && gateRules.length > 0;
+  const gateShowConfirm =
+    disciplineEnabled &&
+    gateHasRules &&
+    (disciplineMode === 'confirm'
+      ? gateMissing.length > 0 || gateViolated.length > 0
+      : gateMissing.length === 0 && gateViolated.length > 0);
+  const gateShowReason =
+    gateShowConfirm && (disciplineMode === 'block' || disciplineRequireReason);
+  let gateProblem: string | null = null;
+  if (disciplineEnabled) {
+    if (gateLoading) {
+      gateProblem = '正在读取开仓清单…';
+    } else if (gateError) {
+      gateProblem = gateError;
+    } else if (!gate) {
+      gateProblem = '开仓清单不可用，请稍后重试';
+    } else if (!gateHasRules) {
+      // confirm 允许跳过并写审计；block 必须先在设置里配置清单
+      if (disciplineMode === 'block') gateProblem = '先在设置里配置开仓清单';
+    } else if (disciplineMode === 'block') {
+      if (gateMissing.length) {
+        gateProblem = `还有 ${gateMissing.length} 条规则未评估`;
+      } else if (gateViolated.length) {
+        if (!gateConfirmed) gateProblem = '存在违反的规则，请先勾选复核';
+        else if (!gateReason.trim()) gateProblem = '请填写强行下单的理由';
+      }
+    } else if (gateMissing.length || gateViolated.length) {
+      if (!gateConfirmed) {
+        gateProblem =
+          gateMissing.length > 0
+            ? `还有 ${gateMissing.length} 条规则未评估，请先勾选「我已复核」`
+            : '存在违反的规则，请先勾选「我已复核」';
+      } else if (disciplineRequireReason && !gateReason.trim()) {
+        gateProblem = '请填写强行下单的理由';
+      }
+    }
+  }
 
   return (
     <section className="shrink-0 border-b border-tv-border">
@@ -911,7 +1055,7 @@ export function OrderTicket() {
           data-confirm="order"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6"
         >
-          <div className="w-[340px] rounded-xl border border-tv-border bg-tv-panel p-5 shadow-[0_16px_48px_rgba(20,30,45,0.18)]">
+          <div className="max-h-[88vh] w-[400px] max-w-[92vw] overflow-y-auto rounded-xl border border-tv-border bg-tv-panel p-5 shadow-[0_16px_48px_rgba(20,30,45,0.18)]">
             <div className="flex items-baseline justify-between">
               <span className="text-[14px] font-semibold text-tv-text">确认下单</span>
               <span className="num font-mono text-[11px] text-tv-muted">{symbol}</span>
@@ -957,6 +1101,106 @@ export function OrderTicket() {
                 />
               )}
             </dl>
+
+            {disciplineEnabled && (
+              <div className="mt-4 rounded-lg border border-tv-border bg-tv-raised px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-medium text-tv-text">开仓清单</span>
+                  <select
+                    value={gate?.playbookId ?? ''}
+                    onChange={(event) => void openDisciplineGate(event.target.value)}
+                    disabled={gateLoading}
+                    aria-label="切换开仓清单"
+                    className="h-6 max-w-[180px] rounded border border-tv-border bg-tv-panel px-1 text-[11px] text-tv-text outline-none disabled:opacity-50"
+                  >
+                    <option value="">不关联清单</option>
+                    {gatePlaybooks.map((book) => (
+                      <option key={book.id} value={book.id}>
+                        {book.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {gateLoading && !gate ? (
+                  <div className="mt-2 text-[10px] text-tv-muted">读取清单…</div>
+                ) : gateError ? (
+                  <div className="mt-2 text-[10px] leading-4 text-tv-warn">{gateError}</div>
+                ) : gateRules.length === 0 ? (
+                  <div className="mt-2 text-[10px] text-tv-muted">
+                    {gate?.playbookId ? '当前清单没有规则' : '未关联清单'}
+                  </div>
+                ) : (
+                  <>
+                    <div className="mt-2 space-y-1">
+                      {gateRules.map((item) => (
+                        <div key={item.rule} className="flex items-center gap-1.5">
+                          <span
+                            className="min-w-0 flex-1 truncate text-[11px] text-tv-text"
+                            title={item.rule}
+                          >
+                            {item.rule}
+                          </span>
+                          <div className="flex shrink-0 gap-0.5">
+                            <RuleButton
+                              active={item.evaluated && item.followed === true}
+                              tone="up"
+                              onClick={() => void checkRule(item.rule, true)}
+                            >
+                              遵守
+                            </RuleButton>
+                            <RuleButton
+                              active={item.evaluated && item.followed === false}
+                              tone="down"
+                              onClick={() => void checkRule(item.rule, false)}
+                            >
+                              违反
+                            </RuleButton>
+                            <RuleButton
+                              active={item.evaluated && item.followed === null}
+                              tone="na"
+                              onClick={() => void checkRule(item.rule, null)}
+                            >
+                              不适用
+                            </RuleButton>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-1.5 text-[10px] text-tv-muted">
+                      已评估 {gateRules.length - gateMissing.length}/{gateRules.length} · 违反{' '}
+                      {gateViolated.length}
+                    </div>
+                  </>
+                )}
+
+                {gateShowConfirm && (
+                  <label className="mt-2 flex items-start gap-1.5 text-[11px] leading-4 text-tv-text">
+                    <input
+                      type="checkbox"
+                      checked={gateConfirmed}
+                      onChange={(event) => setGateConfirmed(event.target.checked)}
+                      className="mt-0.5 accent-current"
+                    />
+                    我已复核清单，仍然下单
+                  </label>
+                )}
+                {gateShowReason && (
+                  <input
+                    type="text"
+                    value={gateReason}
+                    maxLength={500}
+                    placeholder="强行下单理由（写入审计）"
+                    onChange={(event) => setGateReason(event.target.value)}
+                    className={clsx(inputClass, 'mt-2 h-7 text-[11px]')}
+                  />
+                )}
+                {gateProblem && (
+                  <div className="mt-1.5 text-[10px] leading-4 text-tv-warn">{gateProblem}</div>
+                )}
+              </div>
+            )}
+
             <div className="mt-5 flex gap-2">
               <button
                 onClick={() => setConfirm(false)}
@@ -966,14 +1210,14 @@ export function OrderTicket() {
               </button>
               <button
                 onClick={send}
-                disabled={busy}
+                disabled={busy || !!gateProblem}
                 className={clsx(
                   'h-9 flex-1 rounded-lg text-[12px] font-medium text-white transition-colors',
                   draft.side === 'buy' ? 'bg-tv-up' : 'bg-tv-down',
-                  busy && 'opacity-50',
+                  (busy || !!gateProblem) && 'cursor-not-allowed opacity-50',
                 )}
               >
-                {busy ? '发送中…' : '确认发送'}
+                {busy ? '发送中…' : gateProblem ? '清单未完成' : '确认发送'}
               </button>
             </div>
           </div>
@@ -1015,6 +1259,38 @@ function ConfirmRow({
       <dt className="text-tv-muted">{label}</dt>
       <dd className={clsx('num font-mono', accent ?? 'text-tv-text')}>{value}</dd>
     </div>
+  );
+}
+
+/** 清单规则的三态按钮：选中色与交易方向色一致，未评估时不亮 */
+function RuleButton({
+  active,
+  tone,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  tone: 'up' | 'down' | 'na';
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  const activeClass =
+    tone === 'up'
+      ? 'border-tv-up/50 bg-tv-up/10 text-tv-up'
+      : tone === 'down'
+        ? 'border-tv-down/50 bg-tv-down/10 text-tv-down'
+        : 'border-tv-border bg-tv-panel text-tv-muted';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={clsx(
+        'h-5 rounded border px-1 text-[10px] leading-none transition-colors',
+        active ? activeClass : 'border-transparent text-tv-faint hover:bg-tv-hover',
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

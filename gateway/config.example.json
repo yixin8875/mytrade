@@ -24,6 +24,10 @@
   "max_trades_per_day": 8,
   "max_consecutive_losses": 3,
   "cooldown_minutes": 30,
+  "discipline_mode": "off",
+  "discipline_playbook": "",
+  "discipline_require_reason": false,
   "trailing_step_points": 5,
-  "alert_channels": []
+  "alert_channels": [],
+  "allowed_origins": []
 }

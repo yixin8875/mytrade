@@ -16,6 +16,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
+from metrics import is_loss, is_win
 from review import Review
 from score import Score
 from store import Store
@@ -223,9 +224,9 @@ class AI:
         for row in rows:
             profit = float(row.get("profit") or 0)
             net += profit
-            if profit > 0.005:
+            if is_win(profit):
                 wins += 1
-            elif profit < -0.005:
+            elif is_loss(profit):
                 losses += 1
             r_value = row.get("r")
             if r_value is None:
@@ -260,7 +261,7 @@ class AI:
         out = []
         for symbol, items in groups.items():
             profit = sum(float(row.get("profit") or 0) for row in items)
-            wins = sum(1 for row in items if float(row.get("profit") or 0) > 0.005)
+            wins = sum(1 for row in items if is_win(float(row.get("profit") or 0)))
             out.append(
                 {
                     "symbol": symbol,

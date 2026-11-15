@@ -1,6 +1,7 @@
 /** 绩效趋势与散点的纯函数：滚动均值、散点坐标、样本门槛。 */
 
 import type { TrendTrade } from '../gateway/types';
+import { isWin } from './metrics';
 
 /** 20 笔滚动窗口 */
 export const ROLLING_WINDOW = 20;
@@ -34,7 +35,7 @@ export function rollingAverage(values: number[], window: number): RollPoint[] {
 
 /** 每笔的胜负：盈利 0.005 以内算平 */
 export function winFlags(trades: TrendTrade[]): number[] {
-  return trades.map((trade) => (trade.profit > 0.005 ? 1 : 0));
+  return trades.map((trade) => (isWin(trade.profit) ? 1 : 0));
 }
 
 export interface ScatterPoint {
@@ -55,7 +56,7 @@ export function scatterPoints(trades: TrendTrade[]): ScatterPoint[] {
       positionId: trade.positionId,
       minutes: trade.durationSec / 60,
       r: trade.r,
-      win: trade.profit > 0.005,
+      win: isWin(trade.profit),
     });
   }
   return out;

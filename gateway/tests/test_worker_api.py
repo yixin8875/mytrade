@@ -1,5 +1,6 @@
 """worker 的非交易面：RPC 分派、健康状态、交易模式守卫与账户管理。"""
 
+import time
 import types
 from pathlib import Path
 
@@ -1016,3 +1017,51 @@ def test_终端关闭异常不影响换账户(worker, monkeypatch):
     worker._reset_for_switch()
 
     assert worker._connected is False
+
+
+# ---------- 崩溃排查 ----------
+
+
+def test_健康状态带数据库自检结果(worker):
+    assert worker.health()["database"] == {
+        "ok": None,
+        "messages": [],
+        "checkedAt": 0,
+    }
+
+    worker._db_integrity = {"ok": True, "messages": ["ok"], "checkedAt": 1}
+    assert worker.health()["database"]["ok"] is True
+
+
+def test_诊断包包含健康数据库与空日志(worker):
+    data = worker._dispatch("diagnostics.get", {})
+
+    assert data["kind"] == "tally-diagnostics"
+    assert data["health"]["connected"] is True
+    assert data["database"]["ok"] is None
+    assert data["log"] == []
+    assert data["paths"]["base"] == str(worker.store.base_dir)
+
+
+def test_自动备份只在过期时创建(worker, monkeypatch):
+    created = []
+    monkeypatch.setattr(
+        mt5_worker.exporter,
+        "list_backups",
+        lambda base: [
+            {"name": "tally-auto-x.zip", "createdAt": int(time.time()), "auto": True}
+        ],
+    )
+    worker._create_backup = lambda settings=None, auto=False: created.append(auto) or {
+        "name": "tally-auto-x.zip",
+        "bytes": 1,
+    }
+
+    worker._auto_backup_once()
+    assert created == []
+
+    monkeypatch.setattr(mt5_worker.exporter, "list_backups", lambda base: [])
+    worker._auto_backup_once()
+
+    assert created == [True]
+    assert any(kind == "data.backup.auto" for kind, _ in worker.store.audits)

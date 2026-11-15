@@ -1,10 +1,16 @@
 """导出与备份：CSV 编码/列、R 折算、zip 内容。"""
 
 import json
+import os
 import time
 import zipfile
 
-from exporter import create_backup, export_journal, list_backups
+from exporter import (
+    create_backup,
+    export_journal,
+    list_backups,
+    prune_auto_backups,
+)
 from store import Store
 
 
@@ -64,3 +70,36 @@ def test_backup_zip_contains_database_and_manifest(tmp_path):
         settings = json.loads(archive.read("settings.json"))
         assert settings["ui"]["theme"] == "dark"
     assert list_backups(tmp_path)[0]["name"] == out["name"]
+
+
+def test_auto_backup_name_flag_and_listing(tmp_path):
+    store = Store(tmp_path)
+    out = create_backup(store, object(), auto=True)
+
+    assert out["auto"] is True
+    assert out["name"].startswith("tally-auto-")
+    listed = list_backups(tmp_path)
+    assert listed[0]["name"] == out["name"]
+    assert listed[0]["auto"] is True
+
+
+def test_prune_auto_backups_keeps_latest_and_spares_manual(tmp_path):
+    folder = tmp_path / "backups"
+    folder.mkdir()
+    names = []
+    for day in range(9):
+        path = folder / f"tally-auto-2026010{day}-000000.zip"
+        path.write_bytes(b"x")
+        stamp = 1_700_000_000 + day
+        os.utime(path, (stamp, stamp))
+        names.append(path.name)
+    manual = folder / "tally-backup-20260101-000000.zip"
+    manual.write_bytes(b"x")
+
+    removed = prune_auto_backups(tmp_path, keep=7)
+
+    assert sorted(removed) == sorted(names[:2])
+    assert manual.exists()
+    remaining = {path.name for path in folder.glob("tally-auto-*.zip")}
+    assert remaining == set(names[2:])
+    assert any(item["auto"] for item in list_backups(tmp_path))

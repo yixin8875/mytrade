@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { PriceLineLayer, type PriceLineSpec } from '../chart/tv/priceLines';
+import { ReferenceLayer } from '../chart/tv/referenceLayer';
 import { ChartChips, type ChartBand } from '../components/ChartChips';
 import { fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
 import { useApp, type Theme } from '../store/useApp';
 import type { OrderType, Side, SymbolInfo } from '../gateway/types';
 import { aggregateBars, ReplayDatafeed } from './datafeed';
+import { holdingRange, referenceVisible } from './reference';
 import { replayBars, sourceFor } from './source';
 import { useReplay } from './store';
 import { calcProfit, roundPrice } from './engine';
@@ -210,6 +212,7 @@ export function ReplayChart({
   const widgetRef = useRef<IChartingLibraryWidget | null>(null);
   const datafeedRef = useRef<ReplayDatafeed | null>(null);
   const layerRef = useRef<PriceLineLayer | null>(null);
+  const referenceLayerRef = useRef<ReferenceLayer | null>(null);
   const followRef = useRef(follow);
   followRef.current = follow;
   /** 十字线价格：库的 mouse 事件只给像素坐标，点击图内取价要靠它 */
@@ -421,6 +424,7 @@ export function ReplayChart({
         });
         layer.start();
         layerRef.current = layer;
+        referenceLayerRef.current = new ReferenceLayer(active);
 
         active.onIntervalChanged().subscribe(null, (interval) => {
           if (interval === timeframeRef.current) return;
@@ -505,6 +509,8 @@ export function ReplayChart({
       unsubscribe();
       layerRef.current?.dispose();
       layerRef.current = null;
+      referenceLayerRef.current?.dispose();
+      referenceLayerRef.current = null;
       datafeedRef.current?.resetCache();
       datafeedRef.current = null;
       setChart(null);
@@ -676,6 +682,36 @@ export function ReplayChart({
     }
     void layer.sync(specs);
   }, [chart, session, positions, orders, draft]);
+
+  // 实盘参照层：只画到游标为止，关闭时整组移除
+  useEffect(() => {
+    const layer = referenceLayerRef.current;
+    if (!chart || !layer || !session) return;
+    const reference = session.reference;
+    if (!reference || !referenceVisible(session)) {
+      void layer.sync(null);
+      return;
+    }
+    const bars = replayBars(session.id);
+    const bar = bars[session.cursorIndex - 1] ?? null;
+    const cursorTime = bar?.time ?? session.startTs;
+    const range = holdingRange(bars, reference.openTs, cursorTime, reference.entry);
+    void layer.sync({
+      openTime: reference.openTs,
+      closeTime: reference.closeTs,
+      cursorTime,
+      side: reference.side,
+      entry: reference.entry,
+      exit: reference.exit,
+      sl: reference.sl,
+      tp: reference.tp,
+      profit: reference.profit,
+      volume: reference.volume,
+      digits: session.symbolInfo.digits,
+      holdHigh: range?.high ?? reference.entry,
+      holdLow: range?.low ?? reference.entry,
+    });
+  }, [chart, session]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-console-card">

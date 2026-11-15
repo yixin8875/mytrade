@@ -83,6 +83,7 @@ export type SettingsSection =
   | 'pine'
   | 'template'
   | 'risk'
+  | 'discipline'
   | 'accounts'
   | 'alerts'
   | 'data'

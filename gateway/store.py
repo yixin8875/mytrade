@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any
 
 
+_KEEP = object()
+
+
 def _positive_or_none(value: Any) -> float | None:
     """止损/止盈价只存正数，0 或坏值当没设置。"""
     try:
@@ -239,6 +242,39 @@ class Store:
             )
             self._db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_checks_book ON playbook_checks(login, playbook_id)"
+            )
+            # 开仓纪律门禁：一次开仓尝试一行，client_id 与 order.place 的 clientOrderId 同键。
+            # rules 存开单时的规则快照，清单后来被编辑/归档也不影响历史显示。
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pre_trade_gate (
+                    login INTEGER NOT NULL,
+                    client_id TEXT NOT NULL,
+                    playbook_id TEXT,
+                    mode TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    rules TEXT NOT NULL DEFAULT '[]',
+                    reason TEXT,
+                    position_id INTEGER,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (login, client_id)
+                )
+                """
+            )
+            # followed：1 遵守 / 0 违反 / NULL 不适用；行不存在 = 未评估
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pre_trade_checks (
+                    login INTEGER NOT NULL,
+                    client_id TEXT NOT NULL,
+                    playbook_id TEXT NOT NULL,
+                    rule TEXT NOT NULL,
+                    followed INTEGER,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (login, client_id, rule)
+                )
+                """
             )
             # 例行清单与错过机会：同样独立于 journal，不影响成交统计。
             self._db.execute(
@@ -1437,6 +1473,165 @@ class Store:
             )
         return out
 
+    # ---------- 开仓纪律门禁 ----------
+
+    @staticmethod
+    def _pre_trade_gate_row(row: Any) -> dict[str, Any]:
+        item = dict(row)
+        item["rules"] = [str(rule) for rule in _json_list(item.get("rules"))]
+        return item
+
+    def pre_trade_gate_get(self, login: int, client_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM pre_trade_gate WHERE login=? AND client_id=?",
+                (int(login), str(client_id)),
+            ).fetchone()
+        return None if row is None else self._pre_trade_gate_row(row)
+
+    def pre_trade_gate_start(
+        self,
+        login: int,
+        client_id: str,
+        playbook_id: str | None,
+        mode: str,
+        rules: list[str],
+    ) -> dict[str, Any]:
+        """建 pending 行并快照规则；同 client_id 重复打开返回已有行（幂等）。"""
+        now = int(time.time())
+        with self._lock:
+            self._db.execute(
+                """
+                INSERT INTO pre_trade_gate
+                    (login, client_id, playbook_id, mode, state, rules, reason,
+                     position_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'pending', ?, NULL, NULL, ?, ?)
+                ON CONFLICT(login, client_id) DO NOTHING
+                """,
+                (
+                    int(login),
+                    str(client_id),
+                    playbook_id,
+                    mode,
+                    json.dumps(rules, ensure_ascii=False),
+                    now,
+                    now,
+                ),
+            )
+            self._db.commit()
+        gate = self.pre_trade_gate_get(login, client_id)
+        if gate is None:
+            raise RuntimeError("pre_trade_gate 写入失败")
+        return gate
+
+    def pre_trade_gate_update(
+        self,
+        login: int,
+        client_id: str,
+        state: str,
+        *,
+        reason: Any = _KEEP,
+        position_id: Any = _KEEP,
+    ) -> dict[str, Any] | None:
+        fields = ["state=?", "updated_at=?"]
+        values: list[Any] = [state, int(time.time())]
+        if reason is not _KEEP:
+            fields.append("reason=?")
+            values.append(reason)
+        if position_id is not _KEEP:
+            fields.append("position_id=?")
+            values.append(position_id)
+        values.extend([int(login), str(client_id)])
+        with self._lock:
+            self._db.execute(
+                f"UPDATE pre_trade_gate SET {', '.join(fields)} WHERE login=? AND client_id=?",
+                tuple(values),
+            )
+            self._db.commit()
+        return self.pre_trade_gate_get(login, client_id)
+
+    def pre_trade_gate_link(
+        self, login: int, client_id: str, position_id: int
+    ) -> dict[str, Any] | None:
+        """成交后回填持仓号，供复盘抽屉按交易反查开仓时的清单。"""
+        return self.pre_trade_gate_update(
+            login, client_id, self._gate_state(login, client_id), position_id=int(position_id)
+        )
+
+    def _gate_state(self, login: int, client_id: str) -> str:
+        gate = self.pre_trade_gate_get(login, client_id)
+        return str(gate["state"]) if gate else "pending"
+
+    def pre_trade_gate_reset(self, login: int, client_id: str) -> dict[str, Any] | None:
+        """清空勾选，回到 pending；保留规则快照与播放的 client_id。"""
+        with self._lock:
+            self._db.execute(
+                "DELETE FROM pre_trade_checks WHERE login=? AND client_id=?",
+                (int(login), str(client_id)),
+            )
+            self._db.execute(
+                """
+                UPDATE pre_trade_gate
+                SET state='pending', reason=NULL, updated_at=?
+                WHERE login=? AND client_id=?
+                """,
+                (int(time.time()), int(login), str(client_id)),
+            )
+            self._db.commit()
+        return self.pre_trade_gate_get(login, client_id)
+
+    def pre_trade_check_set(
+        self,
+        login: int,
+        client_id: str,
+        playbook_id: str,
+        rule: str,
+        followed: bool | None,
+    ) -> None:
+        with self._lock:
+            self._db.execute(
+                """
+                INSERT INTO pre_trade_checks
+                    (login, client_id, playbook_id, rule, followed, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(login, client_id, rule) DO UPDATE SET
+                    playbook_id=excluded.playbook_id,
+                    followed=excluded.followed,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    int(login),
+                    str(client_id),
+                    playbook_id,
+                    rule,
+                    None if followed is None else (1 if followed else 0),
+                    int(time.time()),
+                ),
+            )
+            self._db.commit()
+
+    def pre_trade_checks_get(
+        self, login: int, client_id: str
+    ) -> dict[str, bool | None]:
+        """返回已评估的规则；值为 None 表示「不适用」，键不存在表示未评估。"""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT rule, followed FROM pre_trade_checks WHERE login=? AND client_id=?",
+                (int(login), str(client_id)),
+            ).fetchall()
+        return {
+            str(row["rule"]): (None if row["followed"] is None else bool(row["followed"]))
+            for row in rows
+        }
+
+    def pre_trade_checks_clear(self, login: int, client_id: str) -> None:
+        with self._lock:
+            self._db.execute(
+                "DELETE FROM pre_trade_checks WHERE login=? AND client_id=?",
+                (int(login), str(client_id)),
+            )
+            self._db.commit()
+
     # ---------- audit ----------
 
     def audit(self, kind: str, payload: Any) -> None:
@@ -1462,6 +1657,13 @@ class Store:
             except json.JSONDecodeError:
                 continue
         return out
+
+    def integrity_check(self) -> dict:
+        """启动自检：SQLite 文件结构是否完整（只读，不修复）。"""
+        with self._lock:
+            rows = self._db.execute("PRAGMA integrity_check").fetchall()
+        messages = [str(row[0]) for row in rows]
+        return {"ok": messages == ["ok"], "messages": messages[:10]}
 
     def audit_query(
         self,

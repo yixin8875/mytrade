@@ -4,26 +4,42 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from config import BASE_DIR, Config
 from lifecycle import parent_pid, watch_parent
-from mt5_worker import GatewayError, Mt5Worker
+from mt5_worker import MUTATING_METHODS, GatewayError, Mt5Worker, command_timeout
+from security import origin_allowed, request_allowed, resolve_allowed_origins
 from store import Store
 
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        # 落盘日志供诊断包读取；2MB × 4 个文件足够定位最近的崩溃
+        RotatingFileHandler(
+            LOG_DIR / "gateway.log",
+            maxBytes=2_000_000,
+            backupCount=3,
+            encoding="utf-8",
+        ),
+    ],
 )
 log = logging.getLogger("mytrade.gateway")
 
 cfg = Config.load()
+# 只接受 Tally 自己的页面连接；白名单见 security.py（默认 + config.allowed_origins）
+ALLOWED_ORIGINS = resolve_allowed_origins(getattr(cfg, "allowed_origins", None))
 store = Store(BASE_DIR)
 clients: dict[WebSocket, asyncio.Lock] = {}
 
@@ -52,10 +68,17 @@ async def send(ws: WebSocket, payload: dict) -> None:
         await ws.send_json(payload)
 
 
+def _retrieve_exception(fut: asyncio.Future) -> None:
+    """超时后工作线程仍会完成任务；提前取走异常，避免 asyncio 打“异常未读取”日志。"""
+    if not fut.cancelled():
+        fut.exception()
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     worker.start(asyncio.get_running_loop())
     log.info("MT5 worker started; ws://%s:%s/ws", cfg.host, cfg.port)
+    log.info("allowed origins: %s", ", ".join(ALLOWED_ORIGINS))
     yield
     worker.stop()
     log.info("MT5 worker stopped")
@@ -64,15 +87,26 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Tally Gateway", version="0.7.2", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=list(ALLOWED_ORIGINS),
+    allow_methods=["GET"],
+    allow_headers=[],
+    allow_credentials=False,
 )
 
 
 @app.get("/health")
 async def health() -> dict:
     return worker.health()
+
+
+def _require_own_page(request: Request) -> None:
+    """截图只给 Tally 自己的页面读：别的网站知道文件名也拿不到。"""
+    if not request_allowed(
+        request.headers.get("origin"),
+        request.headers.get("referer"),
+        ALLOWED_ORIGINS,
+    ):
+        raise HTTPException(status_code=403, detail="forbidden")
 
 
 def _shot_file(name: str, login: str | None = None) -> FileResponse:
@@ -93,19 +127,27 @@ def _shot_file(name: str, login: str | None = None) -> FileResponse:
 
 
 @app.get("/shots/{name}")
-async def shot(name: str) -> FileResponse:
+async def shot(name: str, request: Request) -> FileResponse:
     """交易日志里的图表截图/坐标元数据，只允许 <positionId>.jpg 或 .json。"""
+    _require_own_page(request)
     return _shot_file(name)
 
 
 @app.get("/shots/{login}/{name}")
-async def account_shot(login: str, name: str) -> FileResponse:
+async def account_shot(login: str, name: str, request: Request) -> FileResponse:
     """多账户截图：data/shots/<login>/<positionId>.jpg|.json。"""
+    _require_own_page(request)
     return _shot_file(name, login)
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
+    origin = ws.headers.get("origin")
+    if not origin_allowed(origin, ALLOWED_ORIGINS):
+        # 浏览器一定会带 Origin；不是 Tally 的页面就直接拒绝握手
+        log.warning("rejected websocket from origin %r", origin)
+        await ws.close(code=1008)
+        return
     await ws.accept()
     clients[ws] = asyncio.Lock()
     log.info("client connected (%d total)", len(clients))
@@ -129,10 +171,46 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 )
                 continue
 
+            timeout = command_timeout(method)
             try:
                 future = worker.submit(method, params)
-                result = await asyncio.wrap_future(future)
+                pending = asyncio.wrap_future(future)
+                pending.add_done_callback(_retrieve_exception)
+                result = await asyncio.wait_for(asyncio.shield(pending), timeout)
                 await send(ws, {"id": req_id, "result": result})
+            except asyncio.TimeoutError:
+                if method in MUTATING_METHODS:
+                    # 下单类命令可能已经在券商侧生效：不能报失败，只能报结果未知
+                    worker.request_reconcile(method)
+                    log.warning("command %s timed out after %.1fs; result unknown", method, timeout)
+                    await send(
+                        ws,
+                        {
+                            "id": req_id,
+                            "error": {
+                                "code": "RESULT_UNKNOWN",
+                                "message": (
+                                    f"{method} 超过 {timeout:.0f} 秒未返回，结果未知；"
+                                    "网关恢复后会自动对账，请稍后核对持仓与挂单。"
+                                ),
+                                "detail": {"method": method, "timeout": timeout},
+                            },
+                        },
+                    )
+                else:
+                    log.warning("command %s timed out after %.1fs", method, timeout)
+                    await send(
+                        ws,
+                        {
+                            "id": req_id,
+                            "error": {
+                                "code": "TIMEOUT",
+                                "message": f"命令超时：{method}（{timeout:.0f} 秒）",
+                                "detail": {"method": method, "timeout": timeout},
+                            },
+                        },
+                    )
+                continue
             except GatewayError as exc:
                 await send(
                     ws,

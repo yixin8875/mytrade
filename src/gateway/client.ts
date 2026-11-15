@@ -1,5 +1,34 @@
 import type { ConnState } from './types';
 
+const DEFAULT_TIMEOUT_MS = 8000;
+
+/**
+ * 长命令的前端超时，始终比服务端 mt5_worker.COMMAND_TIMEOUTS 多留几秒：
+ * 服务端先超时，前端才能收到 TIMEOUT / RESULT_UNKNOWN 而不是笼统的“请求超时”。
+ */
+const METHOD_TIMEOUTS: Record<string, number> = {
+  'history.get': 22000,
+  'ai.payload': 22000,
+  'ai.review': 95000,
+  'data.export': 60000,
+  'data.backup.create': 60000,
+  'data.backup.list': 22000,
+  'journal.stats': 22000,
+  'journal.sync': 24000,
+  'review.trades': 22000,
+  'missed.simulate': 32000,
+  'order.place': 15000,
+  'order.modify': 15000,
+  'order.cancel': 15000,
+  'position.modify': 15000,
+  'position.breakeven': 15000,
+  'position.close': 15000,
+  'position.closeAll': 22000,
+  'account.switch': 32000,
+  'system.reconcile': 32000,
+  'diagnostics.get': 24000,
+};
+
 export class GatewayRequestError extends Error {
   code: string;
   detail?: unknown;
@@ -74,7 +103,11 @@ export class GatewayClient {
     return () => this.stateHandlers.delete(handler);
   }
 
-  call<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = 8000): Promise<T> {
+  call<T>(
+    method: string,
+    params: Record<string, unknown> = {},
+    timeoutMs = METHOD_TIMEOUTS[method] ?? DEFAULT_TIMEOUT_MS,
+  ): Promise<T> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new GatewayRequestError('OFFLINE', '网关未连接'));
     }

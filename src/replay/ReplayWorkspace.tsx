@@ -28,6 +28,8 @@ import {
 import { goReplayList, goReplayReport } from './route';
 import { hasReplayBars } from './source';
 import { ReplayChart, type ReplayDraft } from './ReplayChart';
+import { ReferencePanel } from './ReferencePanel';
+import { referenceVisible, retryTiming } from './reference';
 import { Tape } from './Tape';
 import { fmtDate, fmtShort } from './time';
 import type { ReplaySession } from './types';
@@ -77,6 +79,8 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   const restart = useReplay((s) => s.restart);
   const toggle = useReplay((s) => s.toggle);
   const step = useReplay((s) => s.step);
+  const seekTo = useReplay((s) => s.seekTo);
+  const setReferenceVisible = useReplay((s) => s.setReferenceVisible);
   const setSpeed = useReplay((s) => s.setSpeed);
   const setFollow = useReplay((s) => s.setFollow);
   const finish = useReplay((s) => s.finish);
@@ -96,7 +100,11 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   const [draftActive, setDraftActive] = useState(false);
   /** 复盘默认按模板下单：选了模板就直接生效，不用再点一次「启用」 */
   const [templateArmed, setTemplateArmed] = useState(true);
-  const [tab, setTab] = useState<'positions' | 'orders' | 'notes' | 'stats'>('positions');
+  const [tab, setTab] = useState<'positions' | 'orders' | 'notes' | 'stats' | 'reference'>(
+    'positions',
+  );
+  /** 重演时沿用的实盘标签；null 表示当前不是重演单 */
+  const [retryTag, setRetryTag] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -232,15 +240,49 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
       price: Number(price),
       sl: sl.trim() ? Number(sl) : null,
       tp: tp.trim() ? Number(tp) : null,
-      tag: useApp.getState().orderTag,
+      tag: retryTag ?? useApp.getState().orderTag,
       steps: templateArmed ? template.steps : undefined,
       templateName: templateArmed ? template.name : undefined,
+      referenceRole: retryTag != null ? 'retry' : undefined,
     });
     setTicketError(error);
     if (!error) {
       setDraftActive(false);
+      setRetryTag(null);
       // 模板保持启用：复盘常连续下单，每笔都按同一模板执行
     }
+  };
+
+  const toggleReference = () => {
+    if (!session.reference) return;
+    setReferenceVisible(session.id, !referenceVisible(session));
+  };
+
+  /** 重演：先把游标推回开仓前一根，再按实盘方向/手数/止损止盈预填 */
+  const retryReference = () => {
+    const reference = session.reference;
+    if (!reference) return;
+    const cursorTime = bar?.time ?? session.startTs;
+    const timing = retryTiming(reference, cursorTime);
+    if (timing.needsSeek) {
+      const moved = seekTo(reference.openTs);
+      useApp
+        .getState()
+        .notify('info', moved ? '已跳到开仓前一根 M1' : '已经到过开仓时间，按当前行情重演');
+    } else if (timing.lateMinutes > 0) {
+      useApp.getState().notify('info', `已晚于原始入场时间 ${timing.lateMinutes} 分钟`);
+    }
+    setSide(reference.side);
+    setType('market');
+    setVolume(String(reference.volume));
+    setSl(reference.sl != null ? String(reference.sl) : '');
+    setTp(reference.tp != null ? String(reference.tp) : '');
+    setSlTouched(true);
+    setTpTouched(true);
+    setRetryTag(reference.tag ?? '');
+    setTicketError(null);
+    // 阻止初始化 effect 把票面重新按模板算一遍
+    ticketInited.current = session.id;
   };
 
   const entry = type === 'market' ? (side === 'buy' ? ask : bid) : Number(price) || 0;
@@ -352,6 +394,13 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
 
   const latestNote = session.notes[session.notes.length - 1];
   const equity = account?.equity ?? session.equity;
+  const tabDefs: { value: typeof tab; label: string; count: number | null }[] = [
+    { value: 'positions', label: '持仓', count: session.positions.length },
+    { value: 'orders', label: '挂单', count: session.orders.length },
+    { value: 'notes', label: '笔记', count: session.notes.length },
+    { value: 'stats', label: '统计', count: null },
+  ];
+  if (session.reference) tabDefs.push({ value: 'reference', label: '参照', count: null });
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-console-canvas">
@@ -496,6 +545,12 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
             </span>
           </div>
 
+          {session.reference && session.dataSource === 'demo' && (
+            <div className="shrink-0 border-b border-console-warn/30 bg-console-warn-soft px-4 py-1.5 text-[10px] text-console-warn">
+              演示数据 · 不能作为真实行情对照
+            </div>
+          )}
+
           <div className="relative min-h-0 flex-1 bg-console-card">
             {barsReady && (
               <ReplayChart
@@ -595,19 +650,12 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
           </div>
 
           <div className="flex h-10 shrink-0 items-stretch gap-0.5 border-b border-console-line px-3">
-            {(
-              [
-                ['positions', '持仓', session.positions.length],
-                ['orders', '挂单', session.orders.length],
-                ['notes', '笔记', session.notes.length],
-                ['stats', '统计', null],
-              ] as const
-            ).map(([value, label, count]) => (
+            {tabDefs.map(({ value, label, count }) => (
               <button
                 key={value}
                 onClick={() => setTab(value)}
                 className={clsx(
-                  'relative inline-flex items-center gap-1.5 px-2.5 text-[12px] transition-colors',
+                  'relative inline-flex items-center gap-1.5 px-2 text-[12px] transition-colors',
                   tab === value
                     ? 'font-medium text-console-ink'
                     : 'text-console-muted hover:text-console-ink',
@@ -618,7 +666,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                   <span className="num font-mono text-[10px] text-console-muted">{count}</span>
                 )}
                 {tab === value && (
-                  <span className="absolute inset-x-2.5 -bottom-px h-0.5 bg-console-ink" />
+                  <span className="absolute inset-x-2 -bottom-px h-0.5 bg-console-ink" />
                 )}
               </button>
             ))}
@@ -902,6 +950,14 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
               </div>
             )}
 
+            {tab === 'reference' && session.reference && (
+              <ReferencePanel
+                session={session}
+                onRetry={retryReference}
+                onToggleVisible={toggleReference}
+              />
+            )}
+
             {tab === 'stats' && stats && (
               <div className="grid grid-cols-2 gap-px bg-console-line">
                 {[
@@ -985,6 +1041,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                     setSide(item.value);
                     setSlTouched(false);
                     setTpTouched(false);
+                    setRetryTag(null);
                     ticketInited.current = null;
                   }}
                   className={clsx(
@@ -1009,6 +1066,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                     setType(item.value);
                     setSlTouched(false);
                     setTpTouched(false);
+                    setRetryTag(null);
                     if (item.value !== 'market' && info) {
                       setPrice(String(roundPrice(entry, info)));
                     }
@@ -1134,6 +1192,18 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                 潜在盈利 {rewardAmount == null ? '—' : fmtMoney(rewardAmount)}
               </span>
             </div>
+            {retryTag != null && (
+              <div className="mt-2 flex items-center gap-2 rounded-[6px] bg-console-accent-soft px-2 py-1 text-[10px] text-console-accent">
+                <span>重演参照 #{session.reference?.positionId ?? '—'}</span>
+                {retryTag && <span className="min-w-0 truncate">标签 {retryTag}</span>}
+                <button
+                  onClick={() => setRetryTag(null)}
+                  className="ml-auto shrink-0 hover:underline"
+                >
+                  取消重演
+                </button>
+              </div>
+            )}
             <button
               onClick={submit}
               disabled={finished || preparing || !bar}

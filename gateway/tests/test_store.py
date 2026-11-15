@@ -22,6 +22,15 @@ def _intent(ticket: int, sl: float | None, created_at: int) -> dict:
     }
 
 
+def test_integrity_check_reports_ok(tmp_path):
+    store = Store(tmp_path)
+
+    result = store.integrity_check()
+
+    assert result["ok"] is True
+    assert result["messages"] == ["ok"]
+
+
 def test_intent_sl_map_keeps_earliest_stop(tmp_path):
     store = Store(tmp_path)
     store.save_intent(_intent(5, 1.0700, 100))
@@ -82,6 +91,57 @@ def test_journal_risk_is_written_only_when_missing(tmp_path):
     row = store.journal_get(9, 1) or {}
     assert row["risk"] == 25.0
     assert row["risk_source"] == "intent"
+
+
+def test_pre_trade_gate_snapshots_rules_and_is_idempotent(tmp_path):
+    store = Store(tmp_path)
+    first = store.pre_trade_gate_start(1, "cid", "pb", "confirm", ["A", "B"])
+
+    assert first["state"] == "pending"
+    assert first["rules"] == ["A", "B"]
+    assert first["position_id"] is None
+
+    second = store.pre_trade_gate_start(1, "cid", "other", "block", ["C"])
+
+    assert second["playbook_id"] == "pb"
+    assert second["mode"] == "confirm"
+    assert second["rules"] == ["A", "B"]
+    assert store.pre_trade_gate_get(2, "cid") is None
+
+
+def test_pre_trade_checks_preserve_not_applicable(tmp_path):
+    store = Store(tmp_path)
+    store.pre_trade_gate_start(1, "cid", "pb", "confirm", ["A", "B", "C"])
+    store.pre_trade_check_set(1, "cid", "pb", "A", True)
+    store.pre_trade_check_set(1, "cid", "pb", "B", None)
+    store.pre_trade_check_set(1, "cid", "pb", "C", False)
+
+    checks = store.pre_trade_checks_get(1, "cid")
+
+    assert checks == {"A": True, "B": None, "C": False}
+    assert "D" not in checks
+
+
+def test_pre_trade_gate_state_reason_position_and_reset(tmp_path):
+    store = Store(tmp_path)
+    store.pre_trade_gate_start(1, "cid", "pb", "confirm", ["A", "B"])
+    store.pre_trade_check_set(1, "cid", "pb", "A", True)
+
+    updated = store.pre_trade_gate_update(1, "cid", "overridden", reason="急单")
+    assert updated["state"] == "overridden"
+    assert updated["reason"] == "急单"
+
+    linked = store.pre_trade_gate_link(1, "cid", 88)
+    assert linked["position_id"] == 88
+    assert linked["state"] == "overridden"
+
+    reset = store.pre_trade_gate_reset(1, "cid")
+
+    assert reset["state"] == "pending"
+    assert reset["reason"] is None
+    assert reset["position_id"] == 88
+    assert reset["rules"] == ["A", "B"]
+    assert store.pre_trade_checks_get(1, "cid") == {}
 
 
 def test_execution_entry_map_uses_first_record_per_ticket(tmp_path):

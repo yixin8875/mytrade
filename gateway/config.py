@@ -62,6 +62,17 @@ class Config:
     #  {"type": "telegram", "token": "...", "chatId": "..."},
     #  {"type": "discord", "url": "..."}, {"type": "wecom", "url": "..."}]
     alert_channels: list[dict] = field(default_factory=list)
+    # 在默认白名单（Vite 开发页 + Tauri 桌面壳）之外，额外允许的页面来源。
+    # 一般不用改；需要从别的地址打开界面时再加，如 "http://192.168.1.10:5173"。
+    allowed_origins: list[str] = field(default_factory=list)
+
+    # 开仓纪律门禁：只作用于 order.place，不拦平仓/改单/保本等保护性操作
+    # off = 关闭；confirm = 未完成清单时二次确认；block = 未完成则拒绝下单
+    discipline_mode: str = "off"
+    # 默认清单（playbook id）；票面可临时改选
+    discipline_playbook: str = ""
+    # 强行跳过清单时是否必须填写理由
+    discipline_require_reason: bool = False
 
     @classmethod
     def load(cls) -> "Config":
@@ -222,9 +233,12 @@ class Config:
         return profile
 
     def update(self, patch: dict) -> dict:
-        """校验并保存设置页可改的风控字段，保留 config.json 里的其他字段。"""
-        clean: dict[str, float | int] = {}
+        """校验并保存设置页可改的风控与纪律字段，保留 config.json 里的其他字段。"""
+        clean: dict[str, object] = {}
         for key, value in patch.items():
+            if key in ("discipline_mode", "discipline_playbook", "discipline_require_reason"):
+                clean[key] = self._clean_discipline(key, value)
+                continue
             spec = self.EDITABLE_FIELDS.get(key)
             if spec is None:
                 raise ValueError(f"字段 {key} 不允许在设置页修改")
@@ -247,6 +261,22 @@ class Config:
         for key, value in clean.items():
             setattr(self, key, value)
         return self.public()
+
+    @staticmethod
+    def _clean_discipline(key: str, value: object) -> object:
+        """纪律门禁字段：mode 三档、playbook id 限长、require_reason 必须是布尔。"""
+        if key == "discipline_mode":
+            mode = str(value or "").strip().lower()
+            if mode not in ("off", "confirm", "block"):
+                raise ValueError("discipline_mode 只能是 off / confirm / block")
+            return mode
+        if key == "discipline_playbook":
+            if not isinstance(value, str):
+                raise ValueError("discipline_playbook 必须是字符串")
+            return value.strip()[:40]
+        if not isinstance(value, bool):
+            raise ValueError("discipline_require_reason 必须是布尔值")
+        return value
 
     def account_risk(self, account_id: str) -> dict:
         """账户自己的风控覆盖；没有配置时返回空 dict（全部继承全局）。"""

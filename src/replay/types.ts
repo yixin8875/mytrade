@@ -43,6 +43,33 @@ export interface ReplayOrder {
   /** 下单时启用的模板阶段；成交后由引擎在到达 R 时执行 */
   steps?: TemplateStep[];
   templateName?: string;
+  /** 由「重演这笔」预填后提交的订单；用于和实盘交易对照 */
+  referenceRole?: 'retry';
+}
+
+/** 从一笔实盘已平仓交易带进回放的只读参照 */
+export interface ReplayReference {
+  kind: 'journal';
+  login: number;
+  positionId: number;
+  symbol: string;
+  openTs: number;
+  closeTs: number;
+  side: Side;
+  volume: number;
+  entry: number;
+  exit: number;
+  sl: number | null;
+  tp: number | null;
+  profit: number;
+  r: number | null;
+  mfe: number | null;
+  mae: number | null;
+  tag: string | null;
+  closedBy: string | null;
+  hasShot: boolean;
+  /** 去重键：login:positionId */
+  key: string;
 }
 
 export interface ReplayPosition {
@@ -136,6 +163,13 @@ export interface ReplaySession {
   positions: ReplayPosition[];
   trades: ReplayTrade[];
   notes: ReplayNote[];
+
+  /** 1 = 从实盘交易创建；缺省为普通会话 */
+  origin?: 'manual' | 'journal';
+  /** 从实盘交易创建时的只读参照 */
+  reference?: ReplayReference;
+  /** 参照层是否显示；缺省时按数据源判断（demo 默认隐藏） */
+  referenceVisible?: boolean;
 
   error?: string;
   finishedAt?: number;

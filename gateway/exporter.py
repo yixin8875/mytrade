@@ -259,11 +259,13 @@ def _snapshot_database(base: Path, target: Path) -> None:
         src.close()
 
 
-def create_backup(store: Store, cfg: Any, settings: dict | None = None) -> dict:
+def create_backup(
+    store: Store, cfg: Any, settings: dict | None = None, auto: bool = False
+) -> dict:
     base = store.base_dir
     folder = _folder(base, "backups")
     stamp = _stamp()
-    name = f"tally-backup-{stamp}.zip"
+    name = f"{'tally-auto' if auto else 'tally-backup'}-{stamp}.zip"
     path = folder / name
     snapshot = folder / f".{stamp}.db"
     created = int(time.time())
@@ -312,6 +314,7 @@ def create_backup(store: Store, cfg: Any, settings: dict | None = None) -> dict:
         "createdAt": created,
         "auditDays": len(audits),
         "screenshots": len(shots),
+        "auto": auto,
     }
 
 
@@ -320,7 +323,8 @@ def list_backups(base: Path) -> list[dict]:
     if not folder.is_dir():
         return []
     out = []
-    for path in folder.glob("tally-backup-*.zip"):
+    paths = list(folder.glob("tally-backup-*.zip")) + list(folder.glob("tally-auto-*.zip"))
+    for path in paths:
         stat = path.stat()
         out.append(
             {
@@ -328,7 +332,26 @@ def list_backups(base: Path) -> list[dict]:
                 "path": str(path),
                 "bytes": stat.st_size,
                 "createdAt": int(stat.st_mtime),
+                "auto": path.name.startswith("tally-auto-"),
             }
         )
     out.sort(key=lambda item: item["createdAt"], reverse=True)
     return out[:50]
+
+
+def prune_auto_backups(base: Path, keep: int = 7) -> list[str]:
+    """只清理自动备份；手动创建的备份永远不删。"""
+    folder = base / "backups"
+    if not folder.is_dir() or keep < 1:
+        return []
+    paths = sorted(
+        folder.glob("tally-auto-*.zip"), key=lambda path: path.stat().st_mtime, reverse=True
+    )
+    removed: list[str] = []
+    for path in paths[keep:]:
+        try:
+            path.unlink()
+            removed.append(path.name)
+        except OSError:
+            continue
+    return removed
