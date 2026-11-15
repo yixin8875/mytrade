@@ -58,6 +58,8 @@ export interface AccountOption {
   configured?: boolean;
   /** 账户级风控覆盖；未出现的字段跟随全局默认 */
   risk?: Partial<RiskLimits>;
+  /** 账户级门禁覆盖；未出现的字段跟随全局默认 */
+  discipline?: Partial<AccountDiscipline>;
 }
 
 export interface Account {
@@ -163,6 +165,13 @@ export interface GatewayConfig extends RiskLimits {
 }
 
 export type DisciplineMode = 'off' | 'confirm' | 'block';
+
+/** 账户级门禁覆盖：只写要覆盖的键，其余跟随全局 */
+export interface AccountDiscipline {
+  mode: DisciplineMode;
+  playbook: string;
+  require_reason: boolean;
+}
 export type DisciplineGateState =
   | 'pending'
   | 'passed'
@@ -186,6 +195,20 @@ export interface DisciplineGate {
   positionId: number | null;
   createdAt: number;
   updatedAt: number;
+  rules: DisciplineRule[];
+  missing: string[];
+  violated: string[];
+}
+
+/** 复盘抽屉里的「开仓时清单」：rules 是开单时的快照，之后改清单不影响 */
+export interface PreTradeGateView {
+  clientId: string;
+  playbookId: string | null;
+  playbookName: string | null;
+  mode: DisciplineMode;
+  state: DisciplineGateState;
+  reason: string | null;
+  createdAt: number;
   rules: DisciplineRule[];
   missing: string[];
   violated: string[];
@@ -783,6 +806,8 @@ export interface TradeNoteDetail {
   note: string;
   reviewedAt: number | null;
   rules: RuleCheck[];
+  /** 开仓时的清单快照；门禁关闭或历史交易为 null */
+  preTrade: PreTradeGateView | null;
   playbooks: Playbook[];
   trade: {
     positionId: number;
@@ -836,6 +861,21 @@ export interface AdherenceBook {
   broken: AdherenceBucket;
   unassessed: number;
   ruleStats: RuleStat[];
+  /** 开仓前门禁的完成情况（P1） */
+  preTrade?: AdherencePreTrade;
+}
+
+/** 开仓前清单：跳过（无规则）与未完成（取消）不计入完成率分母 */
+export interface AdherencePreTrade {
+  total: number;
+  passed: number;
+  overridden: number;
+  skipped: number;
+  pending: number;
+  /** passed / (passed + overridden) */
+  completionRate: number | null;
+  /** overridden / (passed + overridden) */
+  overrideRate: number | null;
 }
 
 export interface AdherenceResult {

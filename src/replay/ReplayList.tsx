@@ -62,6 +62,14 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
   const [cache, setCache] = useState<{ symbol: string; bars: number; bytes: number }[]>([]);
   const [menuId, setMenuId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [source, setSource] = useState<'all' | 'journal' | 'manual'>('all');
+  const visibleSessions = useMemo(
+    () =>
+      sessions.filter(
+        (session) => source === 'all' || (session.origin ?? 'manual') === source,
+      ),
+    [sessions, source],
+  );
 
   useEffect(() => {
     let alive = true;
@@ -234,7 +242,35 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
           </section>
         )}
 
-        <section className="mt-4 overflow-hidden rounded-[12px] border border-console-line bg-console-card">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1 rounded-[8px] border border-console-line bg-console-card p-0.5">
+            {(
+              [
+                { value: 'all', label: '全部' },
+                { value: 'journal', label: '来自实盘' },
+                { value: 'manual', label: '手动新建' },
+              ] as const
+            ).map((item) => (
+              <button
+                key={item.value}
+                onClick={() => setSource(item.value)}
+                className={clsx(
+                  'h-6 rounded-[6px] px-2.5 text-[11px] transition-colors',
+                  source === item.value
+                    ? 'bg-console-selected text-console-ink'
+                    : 'text-console-muted hover:text-console-ink',
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-console-muted">
+            共 {visibleSessions.length} 个会话
+          </span>
+        </div>
+
+        <section className="mt-2 overflow-hidden rounded-[12px] border border-console-line bg-console-card">
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-[12px]">
               <thead>
@@ -252,7 +288,21 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {sessions.map((session) => {
+                {visibleSessions.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={10}
+                      className="border-b border-console-line px-4 py-8 text-center text-[11px] text-console-faint"
+                    >
+                      {source === 'journal'
+                        ? '还没有从实盘交易创建的会话。到交易日志点「回放」即可。'
+                        : source === 'manual'
+                          ? '没有手动新建的会话。'
+                          : '还没有复盘会话。'}
+                    </td>
+                  </tr>
+                )}
+                {visibleSessions.map((session) => {
                   const pnl = pnlOf(session);
                   const finished = session.status === 'finished' || session.status === 'archived';
                   return (
@@ -264,6 +314,11 @@ export function ReplayList({ onCreate }: { onCreate: () => void }) {
                         >
                           {session.name}
                         </button>
+                        {session.origin === 'journal' && (
+                          <span className="ml-1.5 inline-flex items-center rounded-[4px] border border-console-line-2 px-1 py-px text-[9px] text-console-muted">
+                            来自实盘
+                          </span>
+                        )}
                       </td>
                       <td className="whitespace-nowrap border-b border-console-line px-4 py-3 font-mono text-[11px] text-console-ink-2">
                         {session.symbol} · {session.settings.timeframe}m

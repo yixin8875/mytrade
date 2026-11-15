@@ -47,6 +47,20 @@ export interface ReplayOrder {
   referenceRole?: 'retry';
 }
 
+/**
+ * 实盘交易的一笔成交（来自 executions.get）。
+ * 一笔持仓可能有多次部分平仓，汇总的 JournalRecord 看不出节奏，P1 用这些点补标记。
+ */
+export interface ReplayFill {
+  ticket: number;
+  /** 0 = 开仓成交，1 = 平仓成交（对应 MT5 deal.entry） */
+  entry: 'in' | 'out';
+  volume: number;
+  price: number;
+  time: number;
+  profit: number;
+}
+
 /** 从一笔实盘已平仓交易带进回放的只读参照 */
 export interface ReplayReference {
   kind: 'journal';
@@ -70,6 +84,8 @@ export interface ReplayReference {
   hasShot: boolean;
   /** 去重键：login:positionId */
   key: string;
+  /** 逐笔成交；拿不到执行记录时缺省，参照层退回汇总口径 */
+  fills?: ReplayFill[];
 }
 
 export interface ReplayPosition {
@@ -93,6 +109,8 @@ export interface ReplayPosition {
   /** 这一笔要执行的模板阶段（下单时快照） */
   steps?: TemplateStep[];
   templateName?: string;
+  /** 来自「重演这笔」，供报告页和实盘对照 */
+  referenceRole?: 'retry';
 }
 
 export interface ReplayTrade {
@@ -113,6 +131,8 @@ export interface ReplayTrade {
   mae: number;
   /** 这一笔成交时绑定的模板，复盘报告按它汇总 */
   templateName?: string;
+  /** 来自「重演这笔」；报告页据此找第一笔重演交易做对照 */
+  referenceRole?: 'retry';
 }
 
 export interface ReplayNote {

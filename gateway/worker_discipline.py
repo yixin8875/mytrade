@@ -21,8 +21,29 @@ class WorkerDiscipline:
     # ---------- 接口 ----------
 
     def _discipline_mode(self) -> str:
-        mode = str(getattr(self.cfg, "discipline_mode", "off") or "off").strip().lower()
-        return mode if mode in ("off", "confirm", "block") else "off"
+        return str(self._discipline_settings()["mode"])
+
+    def _discipline_settings(self) -> dict:
+        """当前账户生效的门禁设置：账户级覆盖优先于全局（P1）。
+
+        老测试用 SimpleNamespace 构造 cfg 时没有 discipline_settings，
+        仍按三个全局字段读取，保持兼容。
+        """
+        getter = getattr(self.cfg, "discipline_settings", None)
+        if callable(getter):
+            settings = getter(getattr(self, "_account_id", None))
+        else:
+            settings = {
+                "mode": getattr(self.cfg, "discipline_mode", "off"),
+                "playbook": getattr(self.cfg, "discipline_playbook", ""),
+                "require_reason": getattr(self.cfg, "discipline_require_reason", False),
+            }
+        mode = str(settings.get("mode") or "off").strip().lower()
+        return {
+            "mode": mode if mode in ("off", "confirm", "block") else "off",
+            "playbook": str(settings.get("playbook") or ""),
+            "require_reason": bool(settings.get("require_reason")),
+        }
 
     def _discipline_payload(self, login: int, gate: dict) -> dict:
         checks = self.store.pre_trade_checks_get(login, gate["client_id"])
@@ -59,7 +80,7 @@ class WorkerDiscipline:
             return {"gate": self._discipline_payload(login, gate)}
 
         playbook_id = _clean(p.get("playbookId"), 40) or _clean(
-            getattr(self.cfg, "discipline_playbook", ""), 40
+            self._discipline_settings()["playbook"], 40
         )
         book = None
         if playbook_id:
@@ -145,14 +166,13 @@ class WorkerDiscipline:
             return
         info = payload if isinstance(payload, dict) else {}
         try:
+            settings = self._discipline_settings()
             playbook_id = _clean(info.get("playbookId"), 40) or _clean(
-                getattr(self.cfg, "discipline_playbook", ""), 40
+                settings["playbook"], 40
             )
             confirmed = bool(info.get("confirmed"))
             reason = _clean(info.get("reason"), MAX_REASON_LEN)
-            require_reason = bool(
-                getattr(self.cfg, "discipline_require_reason", False)
-            )
+            require_reason = settings["require_reason"]
 
             gate = self.store.pre_trade_gate_get(login, client_id)
             if gate is not None and gate.get("state") in ("passed", "overridden"):

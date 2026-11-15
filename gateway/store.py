@@ -1489,6 +1489,36 @@ class Store:
             ).fetchone()
         return None if row is None else self._pre_trade_gate_row(row)
 
+    def pre_trade_gate_for_position(
+        self, login: int, position_id: int
+    ) -> dict[str, Any] | None:
+        """按持仓反查开仓时的清单快照；一个持仓只应命中一行，取最近一次。"""
+        with self._lock:
+            row = self._db.execute(
+                """
+                SELECT * FROM pre_trade_gate
+                WHERE login=? AND position_id=?
+                ORDER BY created_at DESC, rowid DESC LIMIT 1
+                """,
+                (int(login), int(position_id)),
+            ).fetchone()
+        return None if row is None else self._pre_trade_gate_row(row)
+
+    def pre_trade_gates_between(
+        self, login: int, since: int, until: int
+    ) -> list[dict[str, Any]]:
+        """统计窗口内的开仓尝试（按 created_at，Unix 秒）。"""
+        with self._lock:
+            rows = self._db.execute(
+                """
+                SELECT * FROM pre_trade_gate
+                WHERE login=? AND created_at>=? AND created_at<?
+                ORDER BY created_at, rowid
+                """,
+                (int(login), int(since), int(until)),
+            ).fetchall()
+        return [self._pre_trade_gate_row(row) for row in rows]
+
     def pre_trade_gate_start(
         self,
         login: int,

@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { gateway } from '../gateway/client';
 import type { JournalRecord } from '../gateway/types';
 import { activeTemplate, useApp } from '../store/useApp';
 import {
@@ -16,6 +17,50 @@ export type TradeReplayStart = 'opened' | 'pending' | 'failed';
 interface PendingEviction {
   record: JournalRecord;
   oldest: ReplaySession;
+}
+
+/** executions.get 返回的 MT5 deal 中我们需要的字段 */
+interface DealRow {
+  ticket: number;
+  positionId: number;
+  volume: number;
+  price: number;
+  profit: number;
+  time: number;
+  /** 0 = 开仓成交，1 = 平仓成交 */
+  entry: number;
+}
+
+/** 执行记录最多往前找 120 天；更早的交易只保留汇总口径 */
+const FILLS_MAX_AGE_DAYS = 120;
+
+/** 拉这笔持仓的逐笔成交，回填到参照层；失败不影响回放本身 */
+async function loadFills(record: JournalRecord, sessionId: string): Promise<void> {
+  const ageDays = Math.ceil((Date.now() / 1000 - record.close_time) / 86400) + 1;
+  const days = Math.min(FILLS_MAX_AGE_DAYS, Math.max(1, ageDays));
+  try {
+    const deals = await gateway.call<DealRow[]>('executions.get', { days, limit: 2000 });
+    const fills = deals
+      .filter(
+        (deal) =>
+          Number(deal.positionId) === record.position_id &&
+          (deal.entry === 0 || deal.entry === 1),
+      )
+      .map((deal) => ({
+        ticket: deal.ticket,
+        entry: deal.entry === 0 ? ('in' as const) : ('out' as const),
+        volume: deal.volume,
+        price: deal.price,
+        time: deal.time,
+        profit: deal.profit,
+      }))
+      .sort((a, b) => a.time - b.time);
+    if (fills.length > 0) {
+      useReplay.getState().setReferenceFills(sessionId, fills);
+    }
+  } catch {
+    /* 拿不到执行记录时保持 JournalRecord 的汇总口径 */
+  }
 }
 
 /**
@@ -58,6 +103,7 @@ export function useTradeReplay() {
       );
       const id = useReplay.getState().createSession(input);
       setPending(null);
+      void loadFills(record, id);
       goReplaySession(id);
       return 'opened';
     },

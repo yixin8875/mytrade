@@ -20,6 +20,7 @@ import {
 import { dropReplaySource, hasReplayBars, replayBars, setReplayBars, sourceFor } from './source';
 import type {
   ReplayDataSource,
+  ReplayFill,
   ReplayNote,
   ReplayOrder,
   ReplayReference,
@@ -99,6 +100,8 @@ interface ReplayStore {
   rename: (id: string, name: string) => void;
   /** 参照交易层显示 / 隐藏 */
   setReferenceVisible: (id: string, visible: boolean) => void;
+  /** 补齐实盘逐笔成交（异步拉执行记录后回填） */
+  setReferenceFills: (id: string, fills: ReplayFill[]) => void;
   duplicateSession: (id: string) => string | null;
   submitOrder: (input: OrderInput) => string | null;
   closePosition: (positionId: string, volume?: number) => void;
@@ -726,6 +729,17 @@ export const useReplay = create<ReplayStore>((set, get) => ({
     const session = sessionById(get().sessions, id);
     if (!session) return;
     session.referenceVisible = visible;
+    session.updatedAt = Date.now();
+    set((state) => ({
+      sessions: state.sessions.map((item) => (item.id === id ? { ...item } : item)),
+    }));
+    persistNow();
+  },
+
+  setReferenceFills: (id, fills) => {
+    const session = sessionById(get().sessions, id);
+    if (!session?.reference) return;
+    session.reference = { ...session.reference, fills };
     session.updatedAt = Date.now();
     set((state) => ({
       sessions: state.sessions.map((item) => (item.id === id ? { ...item } : item)),

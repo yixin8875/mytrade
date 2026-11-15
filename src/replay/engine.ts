@@ -126,6 +126,7 @@ function openPosition(
     templateStep: 0,
     steps: order.steps?.map((step) => ({ ...step })),
     templateName: order.templateName,
+    referenceRole: order.referenceRole,
   });
   session.orders = session.orders.filter((item) => item.id !== order.id);
 }
@@ -171,6 +172,7 @@ function closePosition(
     mfe: position.mfe,
     mae: position.mae,
     templateName: position.templateName,
+    referenceRole: position.referenceRole,
   });
 
   if (closeVolume >= position.volume - 1e-9) {

@@ -11,6 +11,7 @@ import {
 import { gateway } from '../gateway/client';
 import { AiReviewPanel } from '../components/AiReviewPanel';
 import { TradeReviewDrawer } from '../components/TradeReviewDrawer';
+import { ReferenceCapacityDialog, useTradeReplay } from '../replay/useTradeReplay';
 import { fmtSigned, signedClass } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
 import { downloadReviewCard, downloadReviewCardPdf } from '../lib/reviewCard';
@@ -75,6 +76,7 @@ export function DiaryView() {
   const timer = useRef<number | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [reviewing, setReviewing] = useState<number | null>(null);
+  const replay = useTradeReplay();
 
   const flushNote = useCallback(() => {
     if (timer.current != null) {
@@ -499,12 +501,21 @@ export function DiaryView() {
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        <button
-                          onClick={() => setReviewing(record.position_id)}
-                          className="console-chip"
-                        >
-                          复盘
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => setReviewing(record.position_id)}
+                            className="console-chip"
+                          >
+                            复盘
+                          </button>
+                          <button
+                            onClick={() => replay.start(record)}
+                            className="console-chip"
+                            title="从当时行情回放这笔交易"
+                          >
+                            回放
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -608,6 +619,12 @@ export function DiaryView() {
           }
           void loadCalendar(month);
         }}
+      />
+
+      <ReferenceCapacityDialog
+        pending={replay.pending}
+        onConfirm={() => replay.confirm()}
+        onCancel={replay.cancel}
       />
     </div>
   );

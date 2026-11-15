@@ -5,7 +5,23 @@ import { gateway } from '../gateway/client';
 import { fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import { fmtR, fmtReviewTime } from '../lib/review';
 import { useApp } from '../store/useApp';
-import type { RuleCheck, TradeNoteDetail } from '../gateway/types';
+import type { DisciplineGateState, RuleCheck, TradeNoteDetail } from '../gateway/types';
+
+const PRE_TRADE_LABEL: Record<DisciplineGateState, string> = {
+  passed: '下单时已完成',
+  overridden: '复核后强行下单',
+  skipped: '无规则 · 已跳过',
+  pending: '未完成',
+  blocked: '已拦截',
+};
+
+const PRE_TRADE_TONE: Record<DisciplineGateState, string> = {
+  passed: 'text-console-gain',
+  overridden: 'text-console-warn',
+  skipped: 'text-console-muted',
+  pending: 'text-console-muted',
+  blocked: 'text-console-loss',
+};
 
 /**
  * 单笔复盘抽屉：策略、规则勾选、评分、错误标签与笔记。
@@ -218,6 +234,70 @@ export function TradeReviewDrawer({
                 </p>
               )}
             </section>
+
+            {detail.preTrade && (
+              <section className="border-t border-console-line pt-5">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="console-label">开仓时清单</span>
+                  <span className={clsx('text-[11px]', PRE_TRADE_TONE[detail.preTrade.state])}>
+                    {PRE_TRADE_LABEL[detail.preTrade.state]}
+                  </span>
+                </div>
+                <div className="text-[11px] text-console-muted">
+                  {detail.preTrade.playbookName ?? '未关联清单'} ·{' '}
+                  {detail.preTrade.mode === 'block' ? '强制拦截' : '二次确认'}
+                </div>
+                {detail.preTrade.rules.length > 0 ? (
+                  <div className="mt-2 space-y-1.5">
+                    {detail.preTrade.rules.map((item) => (
+                      <div key={item.rule} className="flex items-center gap-2 text-[12px]">
+                        {item.followed === true ? (
+                          <Check size={13} strokeWidth={2} className="shrink-0 text-console-gain" />
+                        ) : item.followed === false ? (
+                          <X size={13} strokeWidth={2} className="shrink-0 text-console-loss" />
+                        ) : (
+                          <Minus
+                            size={13}
+                            strokeWidth={2}
+                            className={clsx(
+                              'shrink-0',
+                              item.evaluated ? 'text-console-muted' : 'text-console-faint',
+                            )}
+                          />
+                        )}
+                        <span
+                          className={clsx(
+                            'min-w-0 flex-1 truncate',
+                            item.followed === false ? 'text-console-loss' : 'text-console-ink-2',
+                          )}
+                        >
+                          {item.rule}
+                        </span>
+                        <span className="shrink-0 text-[10px] text-console-faint">
+                          {item.followed === true
+                            ? '遵守'
+                            : item.followed === false
+                              ? '违反'
+                              : item.evaluated
+                                ? '不适用'
+                                : '未评估'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-[11px] text-console-faint">当时没有可用的清单规则。</p>
+                )}
+                {detail.preTrade.reason && (
+                  <p className="mt-2 text-[11px] text-console-warn">
+                    破例理由：{detail.preTrade.reason}
+                  </p>
+                )}
+                <p className="mt-2 text-[10px] leading-4 text-console-faint">
+                  这是下单时的只读快照，之后修改或归档清单不会改变这里。
+                </p>
+              </section>
+            )}
 
             {rules.length > 0 && (
               <section>

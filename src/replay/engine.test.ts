@@ -119,6 +119,17 @@ describe('盈亏与保证金', () => {
 });
 
 describe('市价单', () => {
+  it('重演订单的 referenceRole 跟到持仓与成交', () => {
+    const session = makeSession();
+    session.orders.push(makeOrder({ type: 'market', volume: 1, referenceRole: 'retry' }));
+
+    stepSession(session, makeBar(T0, 2000, 2002, 1999, 2001));
+
+    expect(session.positions[0].referenceRole).toBe('retry');
+    closePositionNow(session, session.positions[0].id, 1, makeBar(T0 + 60, 2001, 2002, 2000, 2001));
+    expect(session.trades[0].referenceRole).toBe('retry');
+  });
+
   it('多头在下一根开盘按 ask 成交，并扣除开仓佣金', () => {
     const session = makeSession();
     session.orders.push(makeOrder({ side: 'buy', type: 'market', volume: 1 }));

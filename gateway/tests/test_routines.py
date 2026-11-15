@@ -112,10 +112,12 @@ def test_heatmap_counts_due_and_skips_archived(store: Store):
     archived = next(item for item in after["cells"] if item["date"] == key)
     # 归档当天仍然算应做，次日起不再计入
     assert archived["due"] == 1
-    tomorrow = (today + timedelta(days=1)).strftime("%Y-%m-%d")
-    future = next(item for item in after["cells"] if item["date"] == tomorrow)
-    assert future["due"] == 0
-    assert future["future"] is True
+    # 热力图只画到本周日：周日运行时本周没有“明天”，跳过未来日断言
+    if today.isoweekday() < 7:
+        tomorrow = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        future = next(item for item in after["cells"] if item["date"] == tomorrow)
+        assert future["due"] == 0
+        assert future["future"] is True
 
 
 def test_save_validates_phase_and_trims_weekdays(store: Store):

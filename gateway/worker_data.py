@@ -14,6 +14,15 @@ class WorkerData:
         since = int(time.time()) - days * 86400 if days > 0 else 0
         return self.store.journal_list(limit=limit, since=since, login=login)
 
+    def _journal_get(self, p: dict) -> dict:
+        """按持仓号取完整交易记录，供散点等入口打开回放。"""
+        position_id = int(p.get("positionId") or 0)
+        login = self._login()
+        row = self.store.journal_get(position_id, login)
+        if row is None:
+            raise GatewayError("NOT_FOUND", f"日志里没有这笔交易 {position_id}")
+        return row
+
     def _journal_tag(self, p: dict) -> dict:
         position_id = int(p.get("positionId") or 0)
         login = self._login()

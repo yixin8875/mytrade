@@ -176,6 +176,7 @@ def test_account_profiles_falls_back_to_single_terminal():
             "server": "",
             "terminal_path": "C:/MT5/terminal64.exe",
             "risk": {},
+            "discipline": {},
         }
     ]
 
@@ -258,6 +259,92 @@ def test_set_active_account_rejects_unknown(memory_config):
     with pytest.raises(ValueError) as exc:
         cfg.set_active_account("nope")
     assert str(exc.value) == "未知账户: nope"
+
+
+def test_account_discipline_is_cleaned_on_load():
+    cfg = Config()
+    profiles = cfg._normalize_accounts(
+        [
+            {
+                "login": 1,
+                "discipline": {"mode": " BLOCK ", "playbook": " pb ", "require_reason": True},
+            },
+            {"login": 2, "discipline": {"mode": "strict", "playbook": 1, "require_reason": "yes"}},
+            {"login": 3},
+        ]
+    )
+
+    assert profiles[0]["discipline"] == {
+        "mode": "block",
+        "playbook": "pb",
+        "require_reason": True,
+    }
+    assert profiles[1]["discipline"] == {}
+    assert profiles[2]["discipline"] == {}
+
+
+def test_discipline_settings_merge_account_override():
+    cfg = Config(
+        accounts=[
+            {"id": "a", "label": "A", "login": 1, "discipline": {"mode": "block"}},
+            {"id": "b", "label": "B", "login": 2},
+        ],
+        discipline_mode="confirm",
+        discipline_playbook="pb",
+        discipline_require_reason=True,
+    )
+
+    assert cfg.discipline_settings("a") == {
+        "mode": "block",
+        "playbook": "pb",
+        "require_reason": True,
+    }
+    assert cfg.discipline_settings("b") == {
+        "mode": "confirm",
+        "playbook": "pb",
+        "require_reason": True,
+    }
+    # 默认跟随当前账户
+    assert cfg.discipline_settings() == cfg.discipline_settings(cfg.active_profile()["id"])
+
+
+def test_set_account_discipline_persists_and_removes(memory_config):
+    cfg, disk = memory_config
+    cfg.accounts = [
+        {"id": "a", "label": "A", "login": 1, "risk": {"max_lot": 1}},
+        {"id": "b", "label": "B", "login": 2, "discipline": {"mode": "off"}},
+    ]
+
+    result = cfg.set_account_discipline("a", {"mode": "block", "playbook": "pb"})
+
+    assert disk["accounts"][0]["discipline"] == {"mode": "block", "playbook": "pb"}
+    assert disk["accounts"][0]["risk"] == {"max_lot": 1.0}
+    assert disk["accounts"][1]["discipline"] == {"mode": "off"}
+    assert result["accounts"][0]["discipline"] == {"mode": "block", "playbook": "pb"}
+
+    # 值为 None 时删掉覆盖；保存风控覆盖不会顺手丢掉纪律覆盖
+    cfg.set_account_discipline("a", {"mode": None})
+    assert cfg.account_discipline("a") == {"playbook": "pb"}
+    cfg.set_account_risk("a", {"max_lot": 2})
+    assert cfg.account_discipline("a") == {"playbook": "pb"}
+    assert cfg.account_risk("a") == {"max_lot": 2.0}
+
+
+def test_set_account_discipline_rejects_unknown_account_and_fields(memory_config):
+    cfg, _ = memory_config
+    cfg.accounts = [{"id": "a", "label": "A", "login": 1}]
+
+    with pytest.raises(ValueError) as exc:
+        cfg.set_account_discipline("missing", {"mode": "off"})
+    assert str(exc.value) == "未知账户: missing"
+
+    with pytest.raises(ValueError) as exc:
+        cfg.set_account_discipline("a", {"max_lot": 1})
+    assert str(exc.value) == "字段 max_lot 不支持按账户设置"
+
+    for patch in ({"mode": "strict"}, {"playbook": 1}, {"require_reason": "yes"}):
+        with pytest.raises(ValueError):
+            cfg.set_account_discipline("a", patch)
 
 
 def test_account_risk_and_risk_limits_merge_overrides():

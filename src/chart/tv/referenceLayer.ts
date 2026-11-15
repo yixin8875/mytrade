@@ -3,6 +3,7 @@ import type {
   IChartWidgetApi,
 } from '../../../public/charting_library/charting_library';
 import type { Side } from '../../gateway/types';
+import type { ReplayFill } from '../../replay/types';
 
 /**
  * 把一笔实盘交易作为只读参照画在回放图上：
@@ -32,6 +33,8 @@ export interface ReferenceLayerSpec {
   /** 持仓区间到游标为止的高低价 */
   holdHigh: number;
   holdLow: number;
+  /** 实盘逐笔成交（分批平仓 / 加仓）；没有执行记录时为空 */
+  fills?: ReplayFill[];
 }
 
 type ShapePoint = { time: number; price: number };
@@ -157,6 +160,23 @@ function buildShapes(spec: ReferenceLayerSpec): ShapeSpec[] {
     if (spec.tp != null && spec.tp > 0) {
       shapes.push(holdingLine('ref:tp', spec.openTime, endTime, spec.tp, UP, '实盘止盈'));
     }
+  }
+
+  // 逐笔成交：只看游标已经走过的部分，避免提前泄露分批出场节奏
+  for (const fill of spec.fills ?? []) {
+    if (fill.time < spec.openTime || fill.time > spec.cursorTime) continue;
+    const to = Math.max(fill.time + 1, Math.min(fill.time + 120, spec.cursorTime));
+    const label = fill.entry === 'in' ? '实盘加仓' : '实盘减仓';
+    shapes.push(
+      holdingLine(
+        `ref:fill:${fill.ticket}`,
+        fill.time,
+        to,
+        fill.price,
+        RULE,
+        `${label} ${fill.volume.toFixed(2)}`,
+      ),
+    );
   }
 
   if (spec.cursorTime >= spec.closeTime) {

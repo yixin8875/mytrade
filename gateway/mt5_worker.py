@@ -398,6 +398,7 @@ class Mt5Worker(
             },
             "system.setConfig": self._set_config,
             "system.setAccountRisk": self._set_account_risk,
+            "system.setAccountDiscipline": self._set_account_discipline,
             "system.setAllowLive": self._set_allow_live,
             "system.setTradeMode": self._set_trade_mode,
             "system.halt": self._halt,
@@ -449,6 +450,7 @@ class Mt5Worker(
             "position.close": self._close_position,
             "position.closeAll": self._close_all,
             "journal.list": self._journal_list,
+            "journal.get": self._journal_get,
             "journal.stats": lambda p: self._journal.stats(
                 int(p.get("days") or 30), self._login()
             ),

@@ -143,6 +143,65 @@ def test_note_and_templates_round_trip(store: Store):
         review.note_save({"date": "2026/11/03", "note": "bad"}, 1)
 
 
+def test_trade_note_returns_pre_trade_snapshot(store: Store):
+    add_trade(store, 5, epoch(2026, 11, 3, 12), 10.0, risk=5.0)
+    review = Review(store)
+    book = review.strategy_save({"name": "突破", "rules": ["A", "B"]}, 1)["playbook"]
+
+    store.pre_trade_gate_start(1, "cid", book["id"], "block", ["A", "B"])
+    store.pre_trade_check_set(1, "cid", book["id"], "A", True)
+    store.pre_trade_check_set(1, "cid", book["id"], "B", False)
+    store.pre_trade_gate_update(
+        1, "cid", "overridden", reason="急单", position_id=5
+    )
+
+    pre = review.trade_note({"positionId": 5}, 1)["preTrade"]
+
+    assert pre["playbookName"] == "突破"
+    assert pre["mode"] == "block"
+    assert pre["state"] == "overridden"
+    assert pre["reason"] == "急单"
+    assert pre["rules"] == [
+        {"rule": "A", "followed": True, "evaluated": True},
+        {"rule": "B", "followed": False, "evaluated": True},
+    ]
+    assert pre["missing"] == []
+    assert pre["violated"] == ["B"]
+
+
+def test_trade_note_without_gate_has_no_pre_trade(store: Store):
+    add_trade(store, 6, epoch(2026, 11, 3, 12), 10.0)
+
+    assert Review(store).trade_note({"positionId": 6}, 1)["preTrade"] is None
+
+
+def test_adherence_counts_pre_trade_completion(store: Store):
+    review = Review(store)
+    book = review.strategy_save({"name": "突破", "rules": ["A"]}, 1)["playbook"]
+
+    for client, state in (
+        ("g1", "passed"),
+        ("g2", "overridden"),
+        ("g3", "skipped"),
+        ("g4", "pending"),
+    ):
+        store.pre_trade_gate_start(1, client, book["id"], "confirm", ["A"])
+        if state != "pending":
+            store.pre_trade_gate_update(1, client, state)
+
+    pre = review.adherence({"days": 90}, 1, 0)["books"][0]["preTrade"]
+
+    assert pre == {
+        "total": 4,
+        "passed": 1,
+        "overridden": 1,
+        "skipped": 1,
+        "pending": 1,
+        "completionRate": 0.5,
+        "overrideRate": 0.5,
+    }
+
+
 def test_adherence_classifies_followed_broken_and_unassessed(store: Store):
     now = epoch(2026, 11, 3, 12)
     for position_id in (1, 2, 3):

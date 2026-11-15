@@ -43,6 +43,7 @@ import type {
   DisciplineMode,
   ExportResult,
   GatewayConfig,
+  GatewayHealth,
   Playbook,
   RiskLimits,
   TradeMode,
@@ -1070,7 +1071,11 @@ function DisciplineSection() {
   const [mode, setMode] = useState<DisciplineMode>('off');
   const [playbook, setPlaybook] = useState('');
   const [requireReason, setRequireReason] = useState(false);
+  const [overrideMode, setOverrideMode] = useState<DisciplineMode | ''>('');
   const [saving, setSaving] = useState(false);
+  const activeId = health?.activeAccountId ?? '';
+  const activeAccount = health?.accounts?.find((item) => item.id === activeId);
+  const accountOverride = activeAccount?.discipline?.mode ?? '';
 
   useEffect(() => {
     let alive = true;
@@ -1103,6 +1108,11 @@ function DisciplineSection() {
     config?.discipline_require_reason,
   ]);
 
+  // 账户覆盖只跟随当前账户，避免切换账户后把旧账户的值保存到新账户
+  useEffect(() => {
+    setOverrideMode((accountOverride || '') as DisciplineMode | '');
+  }, [activeId, accountOverride]);
+
   if (!config) {
     return (
       <Card title="开仓纪律门禁" description="连接网关后可以在这里配置下单前的清单。">
@@ -1111,22 +1121,46 @@ function DisciplineSection() {
     );
   }
 
-  const activeBook = books.find((book) => book.id === playbook);
-  const dirty =
+  const globalDirty =
     mode !== (config.discipline_mode ?? 'off') ||
     playbook !== (config.discipline_playbook ?? '') ||
     requireReason !== !!config.discipline_require_reason;
+  const overrideDirty = overrideMode !== accountOverride;
+  const dirty = globalDirty || overrideDirty;
+  const activeBook = books.find((book) => book.id === playbook);
 
   const save = async () => {
     setSaving(true);
     try {
-      const next = await gateway.call<GatewayConfig>('system.setConfig', {
-        discipline_mode: mode,
-        discipline_playbook: playbook,
-        discipline_require_reason: requireReason,
-      });
+      let next: GatewayConfig = config;
+      if (globalDirty) {
+        next = await gateway.call<GatewayConfig>('system.setConfig', {
+          discipline_mode: mode,
+          discipline_playbook: playbook,
+          discipline_require_reason: requireReason,
+        });
+      }
+      let accounts: NonNullable<GatewayHealth['accounts']> | undefined;
+      if (overrideDirty && activeId) {
+        const res = await gateway.call<{
+          config: GatewayConfig;
+          accounts?: NonNullable<GatewayHealth['accounts']>;
+        }>('system.setAccountDiscipline', {
+          id: activeId,
+          // null 表示删掉账户覆盖、恢复跟随全局
+          discipline: { mode: overrideMode || null },
+        });
+        next = res.config;
+        accounts = res.accounts;
+      }
       const latest = useApp.getState().health;
-      if (latest) useApp.getState().setHealth({ ...latest, config: next });
+      if (latest) {
+        useApp.getState().setHealth({
+          ...latest,
+          config: next,
+          ...(accounts ? { accounts } : {}),
+        });
+      }
       notify('success', '开仓纪律门禁已更新，立即生效');
     } catch (error) {
       notify('error', (error as Error).message);
@@ -1189,6 +1223,32 @@ function DisciplineSection() {
             ))}
           </div>
         </div>
+
+        {activeAccount && (
+          <Row
+            label={`账户覆盖 · ${activeAccount.label}`}
+            hint="只影响当前账户；其他账户继续跟随全局。切换账户后按各自的设置生效。"
+          >
+            <select
+              value={overrideMode}
+              onChange={(event) =>
+                setOverrideMode(event.target.value as DisciplineMode | '')
+              }
+              aria-label="当前账户的门禁模式"
+              className="h-8 w-[220px] rounded-lg border border-console-line bg-console-card px-2 text-[12px] text-console-ink outline-none focus:border-console-accent"
+            >
+              <option value="">
+                跟随全局（
+                {DISCIPLINE_MODES.find((item) => item.value === mode)?.label ?? '关闭'}）
+              </option>
+              {DISCIPLINE_MODES.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </Row>
+        )}
 
         <Row
           label="默认清单"

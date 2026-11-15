@@ -420,6 +420,38 @@ class Review:
             raise ReviewError("NOT_FOUND", "交易不存在")
         return row
 
+    def _pre_trade_view(self, position_id: int, login: int) -> dict[str, Any] | None:
+        """开仓时的清单快照；没有关联记录（历史交易或门禁关闭）时返回 None。"""
+        gate = self.store.pre_trade_gate_for_position(login, position_id)
+        if gate is None:
+            return None
+        checks = self.store.pre_trade_checks_get(login, str(gate["client_id"]))
+        rules = [
+            {
+                "rule": rule,
+                "followed": checks.get(rule),
+                "evaluated": rule in checks,
+            }
+            for rule in gate.get("rules") or []
+        ]
+        book = (
+            self.store.playbook_get(str(gate["playbook_id"]), login)
+            if gate.get("playbook_id")
+            else None
+        )
+        return {
+            "clientId": gate["client_id"],
+            "playbookId": gate.get("playbook_id"),
+            "playbookName": book["name"] if book else None,
+            "mode": gate.get("mode"),
+            "state": gate.get("state"),
+            "reason": gate.get("reason"),
+            "createdAt": gate.get("created_at"),
+            "rules": rules,
+            "missing": [item["rule"] for item in rules if not item["evaluated"]],
+            "violated": [item["rule"] for item in rules if item["followed"] is False],
+        }
+
     def trade_note(self, params: dict[str, Any], login: int) -> dict[str, Any]:
         position_id = _int_or_none(params.get("positionId"))
         if position_id is None:
@@ -451,6 +483,7 @@ class Review:
             "note": note.get("note") or "",
             "reviewedAt": note.get("reviewed_at"),
             "rules": rules,
+            "preTrade": self._pre_trade_view(position_id, login),
             "playbooks": self.store.playbooks_list(login),
             "trade": {
                 "positionId": position_id,
@@ -518,6 +551,24 @@ class Review:
             return "followed"
         return "unassessed"
 
+    @staticmethod
+    def _pre_trade_stats(gates: list[dict[str, Any]], playbook_id: str) -> dict[str, Any]:
+        """开仓前门禁的完成情况；跳过（无规则）与未完成（取消）不计入分母。"""
+        mine = [gate for gate in gates if str(gate.get("playbook_id") or "") == playbook_id]
+        states = [str(gate.get("state") or "") for gate in mine]
+        passed = states.count("passed")
+        overridden = states.count("overridden")
+        decided = passed + overridden
+        return {
+            "total": len(mine),
+            "passed": passed,
+            "overridden": overridden,
+            "skipped": states.count("skipped"),
+            "pending": states.count("pending"),
+            "completionRate": (passed / decided) if decided else None,
+            "overrideRate": (overridden / decided) if decided else None,
+        }
+
     def adherence(
         self, params: dict[str, Any], login: int, server_offset: int
     ) -> dict[str, Any]:
@@ -528,6 +579,7 @@ class Review:
         rows = self.store.journal_between(since_raw, now_raw + 86400, login)
         notes = self.store.trade_notes_all(login, since_raw)
         checks = self.store.playbook_checks_all(login, since_raw)
+        gates = self.store.pre_trade_gates_between(login, since_raw, now_raw + 86400)
         books = self.store.playbooks_list(login, include_archived=True)
         playbook_filter = _clean_text(params.get("playbookId"), 40)
 
@@ -601,6 +653,7 @@ class Review:
                     "broken": self._summary(broken_rows),
                     "unassessed": len(linked) - assessed_trades,
                     "ruleStats": rule_stats,
+                    "preTrade": self._pre_trade_stats(gates, book["id"]),
                 }
             )
         result.sort(key=lambda item: item["total"], reverse=True)

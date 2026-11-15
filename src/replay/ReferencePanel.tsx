@@ -194,6 +194,53 @@ export function ReferencePanel({
         </div>
       </div>
 
+      {(reference.fills?.length ?? 0) > 0 && (
+        <div className="border-b border-console-line px-5 py-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium">逐笔成交</span>
+            <span className="text-[10px] text-console-muted">{reference.fills!.length} 笔</span>
+          </div>
+          <table className="mt-2 w-full text-[10px]">
+            <thead>
+              <tr className="text-left text-console-faint">
+                <th className="pb-1 font-normal">时间</th>
+                <th className="pb-1 font-normal">方向</th>
+                <th className="pb-1 text-right font-normal">手数</th>
+                <th className="pb-1 text-right font-normal">价格</th>
+                <th className="pb-1 text-right font-normal">盈亏</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reference.fills!.map((fill) => (
+                <tr key={fill.ticket} className="border-t border-console-line/60">
+                  <td className="py-1 font-mono text-console-muted">{fmtDateTime(fill.time)}</td>
+                  <td className="py-1 text-console-ink-2">
+                    {fill.entry === 'in' ? '开仓' : '平仓'}
+                  </td>
+                  <td className="py-1 text-right font-mono text-console-ink-2">
+                    {fmtVolume(fill.volume)}
+                  </td>
+                  <td className="py-1 text-right font-mono text-console-ink-2">
+                    {fmtPrice(fill.price, digits)}
+                  </td>
+                  <td
+                    className={clsx(
+                      'py-1 text-right font-mono',
+                      fill.entry === 'in' ? 'text-console-faint' : signedClass(fill.profit),
+                    )}
+                  >
+                    {fill.entry === 'in' ? '—' : fmtSigned(fill.profit)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-1.5 text-[10px] leading-4 text-console-faint">
+            来自网关执行记录；图表上的灰色标记只在游标走过之后出现。
+          </p>
+        </div>
+      )}
+
       <div className="border-b border-console-line px-5 py-3">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[11px] font-medium">当时的判断</span>

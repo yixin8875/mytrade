@@ -253,6 +253,25 @@ def test_已放行的同一个client_id重试不再拦(tmp_path):
     assert event_kinds(store).count("discipline.pass") == 1
 
 
+def test_账户覆盖优先于全局(tmp_path):
+    worker, store = make_worker(tmp_path, mode="block")
+    worker.cfg.discipline_settings = lambda account_id=None: {
+        "mode": "confirm",
+        "playbook": "",
+        "require_reason": False,
+    }
+    book = make_book(store)
+    gate = start(worker, playbook_id=book["id"])
+    mark(worker, gate, {"只在关键位进场": True})
+
+    # 全局是 block：未评估会被拒绝；账户覆盖成 confirm 后勾选复核即可放行
+    worker._discipline_gate(1, "cid", {"confirmed": True})
+
+    saved = store.pre_trade_gate_get(1, "cid")
+    assert saved["state"] == "overridden"
+    assert saved["mode"] == "confirm"
+
+
 # ---------- 清单接口 ----------
 
 

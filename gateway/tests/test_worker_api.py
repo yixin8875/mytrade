@@ -336,6 +336,21 @@ def test_已连接时映射终端信息(worker):
     assert data["account"]["login"] == 111
 
 
+def test_按持仓号取日志记录(worker):
+    worker.store.journal_get = lambda position_id, login: {
+        "position_id": position_id,
+        "login": login,
+        "symbol": "XAUUSD",
+    }
+
+    assert worker._journal_get({"positionId": 5})["position_id"] == 5
+
+    worker.store.journal_get = lambda position_id, login: None
+    with pytest.raises(GatewayError) as exc:
+        worker._journal_get({"positionId": 9})
+    assert exc.value.code == "NOT_FOUND"
+
+
 def test_账户列表连接状态与密码标记(worker):
     rows = worker._accounts_payload()
 
@@ -456,6 +471,7 @@ def test_分派到交易与数据处理器(worker):
 
 def test_分派到日志与设置处理器(worker):
     worker._journal_list = lambda p: [p]
+    worker._journal_get = lambda p: {"get": p}
     worker._journal_tag = lambda p: {"tag": p}
     worker._journal_shot = lambda p: {"shot": p}
     worker._data_export = lambda p: {"export": p}
@@ -469,6 +485,7 @@ def test_分派到日志与设置处理器(worker):
 
     cases = {
         "journal.list": [{"v": 1}],
+        "journal.get": {"get": {"v": 1}},
         "journal.tag": {"tag": {"v": 1}},
         "journal.screenshot.save": {"shot": {"v": 1}},
         "data.export": {"export": {"v": 1}},

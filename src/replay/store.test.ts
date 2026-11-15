@@ -491,6 +491,45 @@ describe('实盘参照与跳转', () => {
     const saved = JSON.parse(window.localStorage.getItem('mytrade.replay.sessions') ?? '[]');
     expect(saved[0].referenceVisible).toBe(false);
   });
+
+  it('逐笔成交回填到参照并持久化', () => {
+    const base = setup();
+    const session: ReplaySession = {
+      ...base,
+      reference: {
+        kind: 'journal',
+        login: 1,
+        positionId: 42,
+        symbol: 'XAUUSD',
+        openTs: START,
+        closeTs: START + 600,
+        side: 'buy',
+        volume: 1,
+        entry: 2000,
+        exit: 2001,
+        sl: null,
+        tp: null,
+        profit: 100,
+        r: 1,
+        mfe: 120,
+        mae: -10,
+        tag: null,
+        closedBy: 'manual',
+        hasShot: false,
+        key: '1:42',
+      },
+    };
+    useReplay.setState({ sessions: [session], activeId: session.id });
+
+    state().setReferenceFills(session.id, [
+      { ticket: 11, entry: 'in', volume: 1, price: 2000, time: START, profit: 0 },
+      { ticket: 12, entry: 'out', volume: 0.5, price: 2001, time: START + 300, profit: 50 },
+    ]);
+
+    expect(activeSession().reference?.fills).toHaveLength(2);
+    const saved = JSON.parse(window.localStorage.getItem('mytrade.replay.sessions') ?? '[]');
+    expect(saved[0].reference.fills[1].ticket).toBe(12);
+  });
 });
 
 describe('成交后的交易路径', () => {

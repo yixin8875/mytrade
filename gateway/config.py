@@ -106,6 +106,23 @@ class Config:
                 clean[key] = parsed
         return clean
 
+    @classmethod
+    def _clean_account_discipline(cls, value: object) -> dict:
+        """账户级纪律覆盖：只保留已知键，非法值静默丢弃（与 _clean_risk 一致）。"""
+        if not isinstance(value, dict):
+            return {}
+        clean: dict[str, object] = {}
+        mode = str(value.get("mode") or "").strip().lower()
+        if mode in ("off", "confirm", "block"):
+            clean["mode"] = mode
+        playbook = value.get("playbook")
+        if isinstance(playbook, str):
+            clean["playbook"] = playbook.strip()[:40]
+        require_reason = value.get("require_reason")
+        if isinstance(require_reason, bool):
+            clean["require_reason"] = require_reason
+        return clean
+
     @staticmethod
     def _read_raw() -> dict:
         path = BASE_DIR / "config.json"
@@ -160,6 +177,7 @@ class Config:
                         or ""
                     ),
                     "risk": self._clean_risk(item.get("risk")),
+                    "discipline": self._clean_account_discipline(item.get("discipline")),
                 }
             )
         return profiles
@@ -181,6 +199,7 @@ class Config:
                     "server": "",
                     "terminal_path": self.terminal_path,
                     "risk": {},
+                    "discipline": {},
                 }
             )
         return profiles
@@ -211,6 +230,8 @@ class Config:
             }
             if profile.get("risk"):
                 entry["risk"] = dict(profile["risk"])
+            if profile.get("discipline"):
+                entry["discipline"] = dict(profile["discipline"])
             serialized.append(entry)
         raw["accounts"] = serialized
         raw["active_account"] = active
@@ -328,6 +349,72 @@ class Config:
             risk = current if profile["id"] == account_id else profile.get("risk") or {}
             if risk:
                 entry["risk"] = dict(risk)
+            discipline = profile.get("discipline") or {}
+            if discipline:
+                entry["discipline"] = dict(discipline)
+            accounts.append(entry)
+
+        raw = self._read_raw()
+        raw["accounts"] = accounts
+        raw.setdefault("active_account", self.active_profile()["id"])
+        self._write_raw(raw)
+        self.accounts = accounts
+        return self.public()
+
+    def account_discipline(self, account_id: str) -> dict:
+        """账户自己的纪律覆盖；没有配置时返回空 dict（全部继承全局）。"""
+        profile = next(
+            (item for item in self.account_profiles() if item["id"] == account_id), None
+        )
+        return dict(profile.get("discipline") or {}) if profile else {}
+
+    def discipline_settings(self, account_id: str | None = None) -> dict:
+        """当前账户真正生效的门禁设置：全局默认被账户覆盖改写。"""
+        settings: dict[str, object] = {
+            "mode": self.discipline_mode,
+            "playbook": self.discipline_playbook,
+            "require_reason": bool(self.discipline_require_reason),
+        }
+        settings.update(self.account_discipline(account_id or self.active_profile()["id"]))
+        return settings
+
+    _DISCIPLINE_OVERRIDE_KEYS = {
+        "mode": "discipline_mode",
+        "playbook": "discipline_playbook",
+        "require_reason": "discipline_require_reason",
+    }
+
+    def set_account_discipline(self, account_id: str, patch: dict) -> dict:
+        """保存账户级门禁覆盖；值为 None 表示删掉该覆盖、恢复跟随全局。"""
+        profiles = self.account_profiles()
+        if not any(item["id"] == account_id for item in profiles):
+            raise ValueError(f"未知账户: {account_id}")
+
+        current = self.account_discipline(account_id)
+        for key, value in patch.items():
+            field = self._DISCIPLINE_OVERRIDE_KEYS.get(key)
+            if field is None:
+                raise ValueError(f"字段 {key} 不支持按账户设置")
+            if value is None:
+                current.pop(key, None)
+                continue
+            current[key] = self._clean_discipline(field, value)
+
+        accounts = []
+        for profile in profiles:
+            entry = {
+                "id": profile["id"],
+                "label": profile["label"],
+                "login": profile["login"],
+                "server": profile["server"],
+                "terminal_path": profile["terminal_path"],
+            }
+            risk = profile.get("risk") or {}
+            if risk:
+                entry["risk"] = dict(risk)
+            discipline = current if profile["id"] == account_id else profile.get("discipline") or {}
+            if discipline:
+                entry["discipline"] = dict(discipline)
             accounts.append(entry)
 
         raw = self._read_raw()
@@ -358,6 +445,7 @@ class Config:
                 "server": profile["server"],
                 "terminal_path": profile["terminal_path"],
                 "risk": profile.get("risk") or {},
+                "discipline": profile.get("discipline") or {},
             }
             for profile in self.account_profiles()
         ]

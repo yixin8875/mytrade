@@ -144,6 +144,24 @@ def test_pre_trade_gate_state_reason_position_and_reset(tmp_path):
     assert store.pre_trade_checks_get(1, "cid") == {}
 
 
+def test_pre_trade_gate_lookup_by_position_and_window(tmp_path):
+    store = Store(tmp_path)
+    store.pre_trade_gate_start(1, "a", "pb", "confirm", ["A"])
+    store.pre_trade_gate_link(1, "a", 77)
+    store.pre_trade_gate_start(1, "b", "pb2", "block", ["B"])
+    store.pre_trade_gate_link(1, "b", 77)
+
+    latest = store.pre_trade_gate_for_position(1, 77)
+    assert latest["client_id"] == "b"
+    assert latest["playbook_id"] == "pb2"
+    assert store.pre_trade_gate_for_position(1, 78) is None
+    assert store.pre_trade_gate_for_position(2, 77) is None
+
+    gates = store.pre_trade_gates_between(1, 0, 2**31)
+    assert [gate["client_id"] for gate in gates] == ["a", "b"]
+    assert store.pre_trade_gates_between(1, 2**31, 2**32) == []
+
+
 def test_execution_entry_map_uses_first_record_per_ticket(tmp_path):
     store = Store(tmp_path)
     base = {

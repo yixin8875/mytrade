@@ -16,19 +16,21 @@ class WorkerAccount:
             if is_active and self._account:
                 login = int(self._account.get("login") or login)
                 server = str(self._account.get("server") or server)
-            out.append(
-                {
-                    "id": profile["id"],
-                    "label": profile["label"],
-                    "login": login,
-                    "server": server,
-                    "terminalPath": profile["terminal_path"],
-                    "active": is_active,
-                    "connected": connected,
-                    "hasPassword": self._account_mgr.has_password(profile["id"]),
-                    "configured": bool(self.cfg.configured_accounts()),
-                }
-            )
+            item = {
+                "id": profile["id"],
+                "label": profile["label"],
+                "login": login,
+                "server": server,
+                "terminalPath": profile["terminal_path"],
+                "active": is_active,
+                "connected": connected,
+                "hasPassword": self._account_mgr.has_password(profile["id"]),
+                "configured": bool(self.cfg.configured_accounts()),
+            }
+            discipline = profile.get("discipline") or {}
+            if discipline:
+                item["discipline"] = dict(discipline)
+            out.append(item)
         return out
 
     def _try_connect(self, force_login: bool = False) -> None:
@@ -395,6 +397,32 @@ class WorkerAccount:
             "config": updated,
             "limits": self._limits,
             "accountRisk": self.cfg.account_risk(self._account_id),
+        }
+
+    def _set_account_discipline(self, p: dict) -> dict:
+        """设置页保存账户级门禁覆盖；discipline 里值为 null 表示恢复跟随全局。"""
+        account_id = str(p.get("id") or self._account_id).strip()
+        patch = p.get("discipline")
+        if not isinstance(patch, dict) or not patch:
+            raise GatewayError(
+                "BAD_CONFIG", "discipline 必须是非空对象，值为 null 表示恢复全局"
+            )
+        try:
+            updated = self.cfg.set_account_discipline(account_id, patch)
+        except ValueError as exc:
+            raise GatewayError("BAD_CONFIG", str(exc)) from exc
+        except OSError as exc:
+            raise GatewayError("CONFIG_SAVE", f"保存配置失败：{exc}") from exc
+
+        self.store.audit(
+            "config.account_discipline", {"id": account_id, "changes": patch}
+        )
+        self._emit("gateway", self.health())
+        return {
+            "config": updated,
+            "accounts": self._accounts_payload(),
+            "accountDiscipline": self.cfg.account_discipline(self._account_id),
+            "disciplineSettings": self.cfg.discipline_settings(self._account_id),
         }
 
     def _set_allow_live(self, p: dict) -> dict:

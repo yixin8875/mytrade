@@ -15,7 +15,8 @@ import {
   winFlags,
 } from '../lib/trends';
 import { useApp } from '../store/useApp';
-import type { TrendSeries, TrendTrade } from '../gateway/types';
+import { ReferenceCapacityDialog, useTradeReplay } from '../replay/useTradeReplay';
+import type { JournalRecord, TrendSeries, TrendTrade } from '../gateway/types';
 
 const RANGES = [90, 180, 365];
 
@@ -273,6 +274,22 @@ function ScatterCard({
   const H = 320;
   const PAD_X = 40;
   const PAD_Y = 18;
+  const notify = useApp((s) => s.notify);
+  const replay = useTradeReplay();
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const selected = trades.find((trade) => trade.positionId === selectedId) ?? null;
+
+  const openReplay = async () => {
+    if (!selected) return;
+    try {
+      const record = await gateway.call<JournalRecord>('journal.get', {
+        positionId: selected.positionId,
+      });
+      replay.start(record);
+    } catch (err) {
+      notify('error', (err as Error).message);
+    }
+  };
 
   const geometry = useMemo(() => {
     if (points.length === 0) return null;
@@ -376,14 +393,29 @@ function ScatterCard({
                   />
                 ))}
                 {points.map((point) => (
-                  <circle
+                  <g
                     key={point.positionId}
-                    cx={geometry.x(point.minutes)}
-                    cy={geometry.y(point.r)}
-                    r={3}
-                    fill={point.win ? 'var(--color-console-gain)' : 'var(--color-console-loss)'}
-                    opacity={0.75}
-                  />
+                    onClick={() =>
+                      setSelectedId((current) =>
+                        current === point.positionId ? null : point.positionId,
+                      )
+                    }
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <circle
+                      cx={geometry.x(point.minutes)}
+                      cy={geometry.y(point.r)}
+                      r={10}
+                      fill="transparent"
+                    />
+                    <circle
+                      cx={geometry.x(point.minutes)}
+                      cy={geometry.y(point.r)}
+                      r={selectedId === point.positionId ? 5 : 3}
+                      fill={point.win ? 'var(--color-console-gain)' : 'var(--color-console-loss)'}
+                      opacity={selectedId === point.positionId ? 1 : 0.75}
+                    />
+                  </g>
                 ))}
               </>
             )}
@@ -402,8 +434,37 @@ function ScatterCard({
               <span>{fmtR(geometry?.minR ?? 0)}</span>
             </div>
           </div>
+          {selected ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-console-line bg-console-canvas px-3 py-2">
+              <div className="text-[11px] text-console-muted">
+                <span className="font-medium text-console-ink">
+                  {selected.symbol} · {selected.side === 'buy' ? '多' : '空'}
+                </span>{' '}
+                · 持仓 {formatMinutes(selected.durationSec)} · R {fmtR(selected.r)} ·{' '}
+                <span className={signedClass(selected.profit)}>{fmtSigned(selected.profit)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setSelectedId(null)} className="console-chip">
+                  收起
+                </button>
+                <button onClick={() => void openReplay()} className="console-chip">
+                  在回放中打开
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-2 text-[10px] text-console-faint">
+              点一个散点查看这笔交易，并可直接打开当时的回放。
+            </p>
+          )}
         </div>
       )}
+
+      <ReferenceCapacityDialog
+        pending={replay.pending}
+        onConfirm={() => replay.confirm()}
+        onCancel={replay.cancel}
+      />
     </section>
   );
 }

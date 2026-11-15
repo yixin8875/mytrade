@@ -710,6 +710,7 @@ export function ReplayChart({
       digits: session.symbolInfo.digits,
       holdHigh: range?.high ?? reference.entry,
       holdLow: range?.low ?? reference.entry,
+      fills: reference.fills,
     });
   }, [chart, session]);
 

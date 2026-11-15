@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { ArrowLeft, Download, RotateCcw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
+import { useApp } from '../store/useApp';
 import { calculateStats } from './engine';
 import { goReplayList, goReplaySession } from './route';
 import { useReplay, useReplaySession } from './store';
@@ -190,6 +191,122 @@ function RHistogram({ stats }: { stats: ReplayStats }) {
   );
 }
 
+const JOURNAL_CLOSED_BY: Record<string, string> = {
+  sl: '止损',
+  tp: '止盈',
+  so: '强平',
+  stop_out: '强平',
+  manual: '手动',
+};
+
+function heldText(sec: number): string {
+  const minutes = Math.max(0, Math.round(sec / 60));
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} 小时 ${minutes % 60} 分`;
+}
+
+/** 实盘 vs 重演：按 referenceRole 找第一笔重演成交，只做过程对照 */
+function ReferenceCompare({ session }: { session: ReplaySession }) {
+  const reference = session.reference;
+  const currentLogin = useApp((s) => s.account?.login ?? null);
+  const retry = session.trades.find((trade) => trade.referenceRole === 'retry') ?? null;
+  if (!reference) return null;
+
+  const digits = session.symbolInfo.digits;
+  const sideText = (side: string) => (side === 'buy' ? '买入' : '卖出');
+  const rows: { label: string; real: string; replay: string }[] = [
+    {
+      label: '方向 / 手数',
+      real: `${sideText(reference.side)} ${fmtVolume(reference.volume)}`,
+      replay: retry ? `${sideText(retry.side)} ${fmtVolume(retry.volume)}` : '—',
+    },
+    {
+      label: '入场',
+      real: `${fmtPrice(reference.entry, digits)} · ${fmtDateTime(reference.openTs).split(' ').pop()}`,
+      replay: retry
+        ? `${fmtPrice(retry.entry, digits)} · ${fmtDateTime(retry.openTs).split(' ').pop()}`
+        : '—',
+    },
+    {
+      label: '出场',
+      real: `${fmtPrice(reference.exit, digits)} · ${fmtDateTime(reference.closeTs).split(' ').pop()}`,
+      replay: retry
+        ? `${fmtPrice(retry.exit, digits)} · ${fmtDateTime(retry.closeTs).split(' ').pop()}`
+        : '—',
+    },
+    {
+      label: 'R',
+      real: reference.r == null ? '—' : fmtSigned(reference.r),
+      replay: retry && retry.r != null ? fmtSigned(retry.r) : '—',
+    },
+    {
+      label: 'MFE / MAE',
+      real: `${fmtMoney(reference.mfe)} / ${fmtMoney(reference.mae)}`,
+      replay: retry ? `${fmtMoney(retry.mfe)} / ${fmtMoney(retry.mae)}` : '—',
+    },
+    {
+      label: '持仓时长',
+      real: heldText(reference.closeTs - reference.openTs),
+      replay: retry ? heldText(retry.closeTs - retry.openTs) : '—',
+    },
+    {
+      label: '出场方式',
+      real: reference.closedBy
+        ? JOURNAL_CLOSED_BY[reference.closedBy] ?? reference.closedBy
+        : '—',
+      replay: retry ? closedByText(retry.closedBy) : '—',
+    },
+  ];
+
+  return (
+    <section className="mt-4 rounded-[12px] border border-console-line bg-console-card p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-[12px] font-medium">实盘 vs 重演</h2>
+        <span className="font-mono text-[10px] text-console-muted">
+          实盘 #{reference.positionId}
+          {currentLogin != null && currentLogin !== reference.login
+            ? ` · 账户 ${reference.login} · 当前终端为 ${currentLogin}`
+            : ''}
+        </span>
+      </div>
+      <table className="mt-3 w-full text-[11px]">
+        <thead>
+          <tr className="text-left text-[10px] text-console-muted">
+            <th className="pb-1.5 font-normal">指标</th>
+            <th className="pb-1.5 pl-3 font-normal">实盘</th>
+            <th className="pb-1.5 pl-3 font-normal">重演</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label} className="border-t border-console-line">
+              <td className="py-1.5 text-console-muted">{row.label}</td>
+              <td className="num py-1.5 pl-3 font-mono text-console-ink-2">{row.real}</td>
+              <td className="num py-1.5 pl-3 font-mono text-console-ink-2">{row.replay}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {retry ? (
+        <p className="mt-2 text-[10px] leading-4 text-console-faint">
+          实盘含真实滑点、隔夜利息；回放按 M1 保守撮合、不含隔夜利息。只用于过程对照，不能据此断言「实盘比回放差」。
+        </p>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-console-muted">
+          还没有重演成交。回到工作台点「重演这笔」，成交后这里会自动出现对照。
+          <button
+            onClick={() => goReplaySession(session.id)}
+            className="text-console-accent hover:underline"
+          >
+            回到工作台
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function ReplayReport({ sessionId }: { sessionId: string }) {
   const session = useReplaySession(sessionId);
   const duplicateSession = useReplay((s) => s.duplicateSession);
@@ -332,6 +449,8 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
             </div>
           ))}
         </section>
+
+        {session.reference && <ReferenceCompare session={session} />}
 
         <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="rounded-[12px] border border-console-line bg-console-card p-5">

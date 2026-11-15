@@ -304,6 +304,23 @@ function BookDetail({
         />
       </div>
 
+      {stats.preTrade && stats.preTrade.total > 0 && (
+        <div className="mx-5 -mt-1 mb-4 rounded-lg border border-console-line bg-console-canvas px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[11px] text-console-muted">开仓前清单</span>
+            <span className="num font-mono text-[11px] text-console-ink-2">
+              完成率 {fmtPct(stats.preTrade.completionRate)} · 强行下单{' '}
+              {fmtPct(stats.preTrade.overrideRate)}
+            </span>
+          </div>
+          <div className="mt-1 text-[11px] leading-5 text-console-faint">
+            共 {stats.preTrade.total} 次开仓尝试 · 通过 {stats.preTrade.passed} · 破例{' '}
+            {stats.preTrade.overridden} · 跳过 {stats.preTrade.skipped} · 未完成{' '}
+            {stats.preTrade.pending}
+          </div>
+        </div>
+      )}
+
       {hint && (
         <div className="mx-5 -mt-1 mb-4 rounded-lg border border-console-warn/30 bg-console-warn-soft px-3 py-2 text-[12px] text-console-warn">
           {hint}。遵守度只统计已勾选的规则，不把「没评估」当成「遵守」。
