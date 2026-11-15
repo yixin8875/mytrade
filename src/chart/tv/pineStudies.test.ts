@@ -4,6 +4,7 @@ import { savePineScript } from '../../lib/pineScripts';
 
 interface MetainfoShape {
   plots: { id: string; type: string }[];
+  styles: Record<string, { title: string; isHidden?: boolean }>;
   defaults: {
     styles: Record<string, { visible: boolean }>;
     inputs: Record<string, unknown>;
@@ -98,5 +99,26 @@ plot(open, 'Open')
     expect(metainfo.plots).toHaveLength(2);
     expect(metainfo.defaults.styles.plot_0.visible).toBe(true);
     expect(metainfo.is_price_study).toBe(false);
+  });
+
+  it('declares styles titles so the settings dialog can render', async () => {
+    await savePineScript(`//@version=6
+indicator('有标题', overlay=true)
+plot(close, '收盘')
+`);
+
+    const metainfo = metainfoOf(0);
+    // 对话框样式页用 metaInfo.styles[id].title，缺失会抛 Value is undefined
+    expect(metainfo.styles.plot_0).toEqual({ title: '收盘', isHidden: false });
+  });
+
+  it('declares a styles title for the hidden placeholder plot', async () => {
+    await savePineScript(`//@version=6
+indicator('仅绘图二', overlay=true)
+box.new(bar_index - 1, high, bar_index, low)
+`);
+
+    const metainfo = metainfoOf(0);
+    expect(metainfo.styles.plot_0.title).toBeTruthy();
   });
 });

@@ -151,6 +151,13 @@ function buildIndicator(
     defaults[id] = input.defval;
   }
 
+  // 图表库的「设置」对话框按 metaInfo.styles[plotId].title 渲染样式页，
+  // 缺了 styles 会在 ensureDefined 里抛 "Value is undefined"，对话框直接打不开。
+  const stylesMeta: Record<string, { title: string; isHidden: boolean }> = {};
+  metas.forEach((meta, index) => {
+    stylesMeta[`plot_${index}`] = { title: meta.title || `曲线 ${index + 1}`, isHidden: false };
+  });
+
   return {
     name: `${script.title}（Pine）`,
     metainfo: {
@@ -165,6 +172,7 @@ function buildIndicator(
       is_hidden_study: false,
       format: { type: 'inherit' },
       plots,
+      styles: stylesMeta,
       defaults: {
         styles,
         inputs: defaults,
