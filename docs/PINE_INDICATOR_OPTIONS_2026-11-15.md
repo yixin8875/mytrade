@@ -1,7 +1,7 @@
 # Pine 指标还原：方案调研与技术选型
 
 > 日期：2026-11-15  
-> 适用版本：mytrade 0.7.11 / TradingView Charting Library 32.1.0  
+> 适用版本：mytrade 0.7.12 / TradingView Charting Library 32.1.0  
 > 实测引擎：PineTS 0.13.1、Piner 0.13.0、PyneTS 0.10.0、AlphaResin 0.1.7  
 > 结论先行：**不建议为此更换图表库。引擎侧首选 Piner，PineTS 作为成熟回退；两者都必须补渲染桥，才能把 Pine 的绘图对象、marker、背景色和表格画出来。**
 
@@ -515,7 +515,7 @@ export interface PineRunResult {
 0 曲线脚本（FVG 这类只有 `box` 的指标）：
 
 - 保存时允许 `plots` 为空（只要试跑产出了绘图对象），图表指标里补一条隐藏的「（绘图对象）」占位曲线，满足图表库「至少一条 plot」的硬要求；保存提示相应改成「仅绘图对象（box/label/table）」。
-- 元信息必须带顶层 `styles: { plot_0: { title, isHidden } }`：图表库「设置」对话框的样式页用 `metaInfo.styles[id].title` 渲染，缺了会在 `ensureDefined` 里抛 `Value is undefined`，表现为点「设置」毫无反应。另外颜色默认值必须写成 `#RRGGBB`/`rgba()`，8 位 `#RRGGBBAA` 同样会让对话框打不开（旧模板在加载时自动迁移）。
+- 元信息必须带顶层 `styles: { plot_0: { title, isHidden } }`：图表库「设置」对话框的样式页用 `metaInfo.styles[id].title` 渲染，缺了会在 `ensureDefined` 里抛 `Value is undefined`，表现为点「设置」毫无反应。内置的 `mt-ema-ribbon`、`mt-pro-sessions` 与所有 Pine 指标都要声明。另外颜色默认值必须写成 `#RRGGBB`/`rgba()`，8 位 `#RRGGBBAA` 同样会让对话框打不开（旧模板在加载时自动迁移）。
 - `syminfo.mintick` 由 `PineRunner` 从网关的 `SymbolInfo.tickSize || point` 取值传入引擎，`math.round(gap_size / syminfo.mintick)` 这类跳数过滤才和 TradingView 一致（Piner 默认 0.01）。
 - 实测 `DeepCharts - FVG Identifier [v6]`（`build/pine-bakeoff/fvg-probe.mjs`，300 根合成 bars）：`type FvgData`、`array<FvgData>`、`switch`、降序 `for`、`box.new/set_right/delete`、`timeframe.change("D")` 全部可编译可运行，产出 58 个 box、0 条 plot；`mintick` 0.01 / 0.25 均正常。
 
@@ -528,7 +528,7 @@ export interface PineRunResult {
 - 表格位置用固定内边距（右侧避让价格轴 72px、底部避让时间轴 28px），不是像素级精确。
 - 绘图对象都落在主图；非 overlay 指标（副图振荡器）上的绘图暂未做 pane 映射。
 
-验收：`pineRenderLayer.test.ts` 9 例（marker 坐标、可见范围过滤与去重、label/line/box、bgcolor 价格区间、plotcandle 实体+影线、barcolor 与共享预算、fill 色带、table HTML、隐藏/删除清理）、`pineEngine.test.ts` 7 例、`pineStudies.test.ts` 6 例（0 曲线占位、多曲线元信息、styles 标题、颜色迁移、隐藏占位 styles）；`npx vitest run` 68 个文件 603 例全绿，`npm run build` 通过。真实图表上的视觉验收还需要你在应用里挂一个用 `plotshape + label + table` 的脚本看一眼。
+验收：`pineRenderLayer.test.ts` 9 例（marker 坐标、可见范围过滤与去重、label/line/box、bgcolor 价格区间、plotcandle 实体+影线、barcolor 与共享预算、fill 色带、table HTML、隐藏/删除清理）、`pineEngine.test.ts` 7 例、`pineStudies.test.ts` 6 例（0 曲线占位、多曲线元信息、styles 标题、颜色迁移、隐藏占位 styles）、`studies.test.ts` 1 例（每个内置指标的每条 plot 都有 styles 标题）；`npx vitest run` 68 个文件 603 例全绿，`npm run build` 通过。真实图表上的视觉验收还需要你在应用里挂一个用 `plotshape + label + table` 的脚本看一眼。
 
 ### 5.2 P0：先修 4 个确定性 bug（1–3 天）
 

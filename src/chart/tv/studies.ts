@@ -177,6 +177,12 @@ export function customIndicators(
         { id: 'plot_0', type: 'line' },
         { id: 'plot_1', type: 'line' },
       ],
+      // 设置对话框的样式页按 metaInfo.styles[id].title 渲染，缺了会抛
+      // "Value is undefined"，整个「设置」打不开
+      styles: {
+        plot_0: { title: '快线 EMA', isHidden: false },
+        plot_1: { title: '慢线 EMA', isHidden: false },
+      },
       defaults: {
         styles: {
           plot_0: {
@@ -227,6 +233,8 @@ export function customIndicators(
   }));
 
   const sessionsStyles: Record<string, unknown> = {};
+  const sessionsMetaStyles: Record<string, { title: string; isHidden: boolean }> = {};
+  const plotTitles = [...KEY_OPEN_DEFS.map((key) => key.label), '昨日高', '昨日低', '昨日中'];
   sessionsPlots.forEach((plot, index) => {
     sessionsStyles[plot.id] = {
       plottype: 2,
@@ -236,6 +244,11 @@ export function customIndicators(
       transparency: 0,
       visible: true,
       color: PLOT_COLORS[index] ?? '#787B86',
+    };
+    // 样式页需要每个 plot 的标题，否则设置对话框渲染即抛错
+    sessionsMetaStyles[plot.id] = {
+      title: plotTitles[index] ?? `曲线 ${index + 1}`,
+      isHidden: false,
     };
   });
 
@@ -270,6 +283,7 @@ export function customIndicators(
       is_hidden_study: false,
       format: PRICE_FORMAT,
       plots: sessionsPlots,
+      styles: sessionsMetaStyles,
       defaults: {
         styles: sessionsStyles,
         inputs: sessionsInputDefaults,
