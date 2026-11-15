@@ -1,7 +1,7 @@
 # Pine 指标还原：方案调研与技术选型
 
 > 日期：2026-11-15  
-> 适用版本：mytrade 0.7.9 / TradingView Charting Library 32.1.0  
+> 适用版本：mytrade 0.7.10 / TradingView Charting Library 32.1.0  
 > 实测引擎：PineTS 0.13.1、Piner 0.13.0、PyneTS 0.10.0、AlphaResin 0.1.7  
 > 结论先行：**不建议为此更换图表库。引擎侧首选 Piner，PineTS 作为成熟回退；两者都必须补渲染桥，才能把 Pine 的绘图对象、marker、背景色和表格画出来。**
 
