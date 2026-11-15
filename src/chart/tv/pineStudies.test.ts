@@ -57,7 +57,11 @@ plot(close, 'Close', color=fillCol)
         {
           sources: [
             {
-              metaInfo: { name: 'mt-pine-abc' },
+              metaInfo: {
+                name: 'mt-pine-abc',
+                inputs: [{ id: '填充色', type: 'color', defval: '#4CAF5033' }],
+                defaults: { inputs: { 填充色: '#4CAF5033' } },
+              },
               state: { inputs: { 填充色: '#4CAF5033', 周期: 5 } },
             },
             {
@@ -74,6 +78,11 @@ plot(close, 'Close', color=fillCol)
       填充色: 'rgba(76, 175, 80, 0.2)',
       周期: 5,
     });
+    // 元信息快照里的默认值也要一起迁移，否则恢复出来的指标依旧打不开设置
+    expect(state.panes[0].sources[0].metaInfo?.inputs?.[0]?.defval).toBe('rgba(76, 175, 80, 0.2)');
+    expect(state.panes[0].sources[0].metaInfo?.defaults?.inputs?.填充色).toBe(
+      'rgba(76, 175, 80, 0.2)',
+    );
     // 非 Pine 指标不动
     expect(state.panes[0].sources[1].state.inputs.颜色).toBe('#4CAF5033');
   });

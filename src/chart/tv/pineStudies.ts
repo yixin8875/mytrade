@@ -197,9 +197,21 @@ function buildIndicator(
   };
 }
 
+function migrateInputColors(inputs: unknown): void {
+  if (!inputs || typeof inputs !== 'object') return;
+  const values = inputs as Record<string, unknown>;
+  for (const [key, value] of Object.entries(values)) {
+    if (typeof value === 'string') values[key] = libraryColor(value);
+  }
+}
+
 /**
  * 旧版本把 Piner 的 #RRGGBBAA 直接存进了指标模板，图表库解析不了会让「设置」打不开。
- * 加载模板前把 Pine 指标的输入颜色统一转成 rgba()；非 Pine 指标不动。
+ * 模板里有三份需要一起改（少改一份，恢复出来的指标仍然打不开设置）：
+ *   - state.inputs：当前输入值
+ *   - metaInfo.inputs[].defval：保存时的指标元信息快照
+ *   - metaInfo.defaults.inputs：快照里的默认值
+ * 非 Pine 指标不动。
  */
 export function migratePineTemplate(state: unknown): void {
   const panes = (state as { panes?: unknown })?.panes;
@@ -209,15 +221,19 @@ export function migratePineTemplate(state: unknown): void {
     if (!Array.isArray(sources)) continue;
     for (const source of sources) {
       const item = source as {
-        metaInfo?: { name?: string };
-        state?: { inputs?: Record<string, unknown> };
+        metaInfo?: {
+          name?: string;
+          inputs?: { defval?: unknown }[];
+          defaults?: { inputs?: unknown };
+        };
+        state?: { inputs?: unknown };
       };
       if (!String(item.metaInfo?.name ?? '').startsWith('mt-pine-')) continue;
-      const inputs = item.state?.inputs;
-      if (!inputs || typeof inputs !== 'object') continue;
-      for (const [key, value] of Object.entries(inputs)) {
-        if (typeof value === 'string') inputs[key] = libraryColor(value);
+      migrateInputColors(item.state?.inputs);
+      for (const input of item.metaInfo?.inputs ?? []) {
+        if (typeof input.defval === 'string') input.defval = libraryColor(input.defval);
       }
+      migrateInputColors(item.metaInfo?.defaults?.inputs);
     }
   }
 }
