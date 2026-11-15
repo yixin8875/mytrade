@@ -9,6 +9,7 @@ import { CalendarLayer } from '../chart/tv/calendarLayer';
 import { GatewayDatafeed } from '../chart/tv/datafeed';
 import { PineRunner } from '../chart/tv/pineRunner';
 import { currenciesForSymbol, loadCalendar } from '../lib/calendar';
+import { migratePineTemplate } from '../chart/tv/pineStudies';
 import { PriceLineLayer, hasSelectedDrawing, type PriceLineSpec } from '../chart/tv/priceLines';
 import { shouldPlacePrice } from '../chart/tv/placement';
 import { registerWidget, setActiveSlot } from '../chart/tv/registry';
@@ -802,6 +803,8 @@ export function ChartPanel({
         if (saved?.state) {
           applying = true;
           try {
+            // 旧版本的 8 位颜色会让指标「设置」对话框打不开，加载前先迁移
+            migratePineTemplate(saved.state);
             active.applyStudyTemplate(saved.state);
           } catch {
             /* 旧版本模板不兼容时保留默认指标 */

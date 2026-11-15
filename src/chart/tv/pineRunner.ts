@@ -74,13 +74,37 @@ function updateLiveBar(payload: { symbol?: string; resolution?: string; bar?: Ba
   else if (!last || payload.bar.time > last.time) bars.push(payload.bar);
 }
 
-function toInputValue(meta: PineInputMeta, value: unknown): unknown {
+/**
+ * 图表库的颜色输入是 #RRGGBB / rgb() / rgba()，Piner 的绘图颜色统一用 #RRGGBBAA；
+ * 不转换的话 FVG 这类脚本拿到的颜色字符串没法直接当绘图颜色用。
+ */
+export function pineColor(value: unknown): string {
+  const text = String(value ?? '').trim();
+  const hex = /^#([0-9a-fA-F]{6})$/.exec(text);
+  if (hex) return `#${hex[1]}FF`;
+  const rgba = /^rgba\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*([\d.]+)\s*\)$/i.exec(text);
+  if (rgba) {
+    const alpha = Math.round(Math.max(0, Math.min(1, Number(rgba[4]))) * 255);
+    const part = (raw: string) => Math.max(0, Math.min(255, Number(raw))).toString(16).padStart(2, '0');
+    return `#${part(rgba[1])}${part(rgba[2])}${part(rgba[3])}${alpha.toString(16).padStart(2, '0')}`.toUpperCase();
+  }
+  const rgb = /^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i.exec(text);
+  if (rgb) {
+    const part = (raw: string) => Math.max(0, Math.min(255, Number(raw))).toString(16).padStart(2, '0');
+    return `#${part(rgb[1])}${part(rgb[2])}${part(rgb[3])}FF`.toUpperCase();
+  }
+  return text;
+}
+
+export function toInputValue(meta: PineInputMeta, value: unknown): unknown {
   switch (meta.type) {
     case 'int':
     case 'float':
       return Number(value);
     case 'bool':
       return Boolean(value);
+    case 'color':
+      return pineColor(value);
     default:
       return String(value ?? '');
   }

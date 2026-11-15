@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { pineIndicators } from './pineStudies';
+import { migratePineTemplate, pineIndicators } from './pineStudies';
 import { savePineScript } from '../../lib/pineScripts';
 
 interface MetainfoShape {
   plots: { id: string; type: string }[];
-  defaults: { styles: Record<string, { visible: boolean }> };
-  inputs: { id: string }[];
+  defaults: {
+    styles: Record<string, { visible: boolean }>;
+    inputs: Record<string, unknown>;
+  };
+  inputs: { id: string; defval?: unknown }[];
   is_price_study: boolean;
 }
 
@@ -32,6 +35,47 @@ box.new(bar_index - 1, high, bar_index, low)
     expect(metainfo.defaults.styles.plot_0.visible).toBe(false);
     expect(metainfo.is_price_study).toBe(true);
     expect(metainfo.inputs.map((item) => item.id)).toContain('in_refresh');
+  });
+
+  it('converts 8-digit colors to rgba for the library settings dialog', async () => {
+    await savePineScript(`//@version=6
+indicator('颜色输入', overlay=true)
+fillCol = input.color(color.new(#4CAF50, 80), '填充色')
+plot(close, 'Close', color=fillCol)
+`);
+
+    const metainfo = metainfoOf(0);
+    const input = metainfo.inputs.find((item) => item.id === '填充色');
+    // 图表库解析不了 #RRGGBBAA，会让「设置」对话框直接抛错
+    expect(input?.defval).toBe('rgba(76, 175, 80, 0.2)');
+    expect(metainfo.defaults.inputs['填充色']).toBe('rgba(76, 175, 80, 0.2)');
+  });
+
+  it('migrates 8-digit colors saved in old chart templates', () => {
+    const state = {
+      panes: [
+        {
+          sources: [
+            {
+              metaInfo: { name: 'mt-pine-abc' },
+              state: { inputs: { 填充色: '#4CAF5033', 周期: 5 } },
+            },
+            {
+              metaInfo: { name: 'mt-ema-ribbon' },
+              state: { inputs: { 颜色: '#4CAF5033' } },
+            },
+          ],
+        },
+      ],
+    };
+
+    migratePineTemplate(state);
+    expect(state.panes[0].sources[0].state.inputs).toEqual({
+      填充色: 'rgba(76, 175, 80, 0.2)',
+      周期: 5,
+    });
+    // 非 Pine 指标不动
+    expect(state.panes[0].sources[1].state.inputs.颜色).toBe('#4CAF5033');
   });
 
   it('keeps one plot per curve for normal scripts', async () => {

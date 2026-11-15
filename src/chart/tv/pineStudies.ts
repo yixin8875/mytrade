@@ -47,6 +47,19 @@ export function clearPineResult(contextId: string, scriptId: string): void {
   results.delete(resultKey(contextId, scriptId));
 }
 
+/**
+ * 图表库的颜色解析只认 #RGB / #RRGGBB / rgb() / rgba()；8 位 #RRGGBBAA 会让
+ * 指标设置对话框抛 "Passed color string does not match..."，整个「设置」打不开。
+ * Piner 的颜色默认值带 alpha，这里统一转成 rgba()，运行前再由 pineRunner 转回。
+ */
+function libraryColor(value: unknown): string {
+  const raw = String(value ?? '');
+  const match = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(raw);
+  if (!match) return raw;
+  const alpha = Math.round((parseInt(match[4], 16) / 255) * 100) / 100;
+  return `rgba(${parseInt(match[1], 16)}, ${parseInt(match[2], 16)}, ${parseInt(match[3], 16)}, ${alpha})`;
+}
+
 function libraryInput(meta: PineInputMeta): Record<string, unknown> {
   const base = { id: meta.id, name: meta.title };
   switch (meta.type) {
@@ -71,7 +84,7 @@ function libraryInput(meta: PineInputMeta): Record<string, unknown> {
     case 'source':
       return { ...base, defval: String(meta.defval ?? 'close'), type: 'source' };
     case 'color':
-      return { ...base, defval: String(meta.defval ?? '#2962FF'), type: 'color' };
+      return { ...base, defval: libraryColor(meta.defval ?? '#2962FF'), type: 'color' };
     case 'enum':
     case 'string':
     case 'text_area':
@@ -129,8 +142,14 @@ function buildIndicator(
     },
   ];
 
+  // 默认值必须和 inputs 里声明的 defval 一致（颜色已经转成 rgba），
+  // 否则恢复默认时又会把 8 位颜色写回去
   const defaults: Record<string, unknown> = { in_refresh: 0 };
-  for (const meta of script.inputs) defaults[meta.id] = meta.defval;
+  for (const input of inputs) {
+    const id = String(input.id);
+    if (id === 'in_refresh') continue;
+    defaults[id] = input.defval;
+  }
 
   return {
     name: `${script.title}（Pine）`,
@@ -176,6 +195,31 @@ function buildIndicator(
       };
     } as never,
   };
+}
+
+/**
+ * 旧版本把 Piner 的 #RRGGBBAA 直接存进了指标模板，图表库解析不了会让「设置」打不开。
+ * 加载模板前把 Pine 指标的输入颜色统一转成 rgba()；非 Pine 指标不动。
+ */
+export function migratePineTemplate(state: unknown): void {
+  const panes = (state as { panes?: unknown })?.panes;
+  if (!Array.isArray(panes)) return;
+  for (const pane of panes) {
+    const sources = (pane as { sources?: unknown })?.sources;
+    if (!Array.isArray(sources)) continue;
+    for (const source of sources) {
+      const item = source as {
+        metaInfo?: { name?: string };
+        state?: { inputs?: Record<string, unknown> };
+      };
+      if (!String(item.metaInfo?.name ?? '').startsWith('mt-pine-')) continue;
+      const inputs = item.state?.inputs;
+      if (!inputs || typeof inputs !== 'object') continue;
+      for (const [key, value] of Object.entries(inputs)) {
+        if (typeof value === 'string') inputs[key] = libraryColor(value);
+      }
+    }
+  }
 }
 
 export function pineIndicators(PineJS: PineJS, contextId: string): CustomIndicator[] {
