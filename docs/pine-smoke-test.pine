@@ -1,0 +1,40 @@
+//@version=6
+// Pine 渲染桥自检脚本：一次覆盖 plot / hline / fill / bgcolor /
+// plotshape / plotchar / label / line / box / table。
+// 用法：复制整段到应用「Pine 指标」里保存，再到图表指标列表选中它。
+indicator('Pine 渲染桥自检', overlay=true)
+
+fast = ta.sma(close, 9)
+slow = ta.sma(close, 21)
+
+// 1) 数值曲线 + 两线之间的 fill（多头绿、空头红）
+p1 = plot(fast, 'Fast', color=color.new(color.aqua, 0))
+p2 = plot(slow, 'Slow', color=color.new(color.orange, 0))
+fill(p1, p2, color = fast >= slow ? color.new(color.green, 85) : color.new(color.red, 85))
+
+// 2) hline
+hline(0, 'Zero')
+
+// 3) 逐根背景色
+bgcolor(close > close[1] ? color.new(color.green, 92) : na)
+
+// 4) plotshape：箭头 + 文字
+plotshape(ta.crossover(fast, slow), '金叉', shape.triangleup, location.belowbar, color.new(color.green, 0), text='BUY')
+plotshape(ta.crossunder(fast, slow), '死叉', shape.triangledown, location.abovebar, color.new(color.red, 0), text='SELL')
+
+// 5) plotchar：只在每 50 根画一个菱形
+plotchar(bar_index % 50 == 0, '每 50 根', '◆', location.abovebar, color.new(color.gray, 0))
+
+// 6) label / line / box：只画在最后一根，避免历史对象太多
+if barstate.islast
+    label.new(bar_index, high, 'Close ' + str.tostring(close), style=label.style_label_down, color=color.new(color.blue, 20), textcolor=color.white)
+    line.new(bar_index - 20, low, bar_index, high, color=color.new(color.purple, 0), width=2, extend=extend.none)
+    box.new(bar_index - 20, high, bar_index, low, border_color=color.new(color.gray, 0), bgcolor=color.new(color.gray, 92))
+
+// 7) table：右上角 2x2
+var table t = table.new(position.top_right, 2, 2, border_width=1)
+if barstate.islast
+    table.cell(t, 0, 0, 'Fast', bgcolor=color.new(color.blue, 80))
+    table.cell(t, 0, 1, str.tostring(fast))
+    table.cell(t, 1, 0, 'Slow', bgcolor=color.new(color.orange, 80))
+    table.cell(t, 1, 1, str.tostring(slow))

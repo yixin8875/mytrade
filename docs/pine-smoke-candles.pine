@@ -1,0 +1,12 @@
+//@version=6
+// 蜡烛渲染自检：plotcandle 的实体/影线/边框 + barcolor 的逐根覆盖色。
+// 用法：复制整段到应用「Pine 指标」里保存，再到图表指标列表选中它。
+indicator('蜡烛渲染自检', overlay=true)
+
+up = close >= open
+
+// 1) 自定义蜡烛：涨青跌枣红，影线灰、边框浅灰
+plotcandle(open, high, low, close, color = up ? color.new(color.teal, 0) : color.new(color.maroon, 0), wickcolor = color.new(color.gray, 20), bordercolor = color.new(color.gray, 60))
+
+// 2) 每 7 根用 barcolor 盖一层半透明黄色
+barcolor(bar_index % 7 == 0 ? color.new(color.yellow, 40) : na)

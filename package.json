@@ -19,6 +19,7 @@
     "release": "node scripts/release.mjs"
   },
   "dependencies": {
+    "@heyphat/piner": "0.13.0",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.14.1",

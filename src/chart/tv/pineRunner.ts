@@ -7,6 +7,8 @@ import {
   type PineScriptRecord,
 } from '../../lib/pineScripts';
 import { clearPineResult, setPineResult } from './pineStudies';
+import { runPine, type PineSeriesOutput } from './pineEngine';
+import { PineRenderLayer, type PineShapeApi } from './pineRenderLayer';
 import type {
   IChartWidgetApi,
   IChartingLibraryWidget,
@@ -84,22 +86,46 @@ function toInputValue(meta: PineInputMeta, value: unknown): unknown {
   }
 }
 
-function candlesFrom(bars: Bar[]) {
-  return bars
-    .filter((bar) => Number.isFinite(bar.time))
-    .map((bar) => ({
-      openTime: bar.time * 1000,
-      open: bar.open,
-      high: bar.high,
-      low: bar.low,
-      close: bar.close,
-      volume: bar.volume,
-    }));
+/**
+ * 把引擎输出对齐到保存时记录的 plot 列表。
+ * 优先按 key/title 匹配；Piner 的标题可能为空，这时退回同类型的第一条。
+ */
+function alignSeries(
+  series: PineSeriesOutput[],
+  plots: PineScriptRecord['plots'],
+): (PineSeriesOutput | undefined)[] {
+  const used = new Set<number>();
+  return plots.map((meta) => {
+    const wantHline = meta.style === 'hline' || /^hline/i.test(meta.key);
+    const kindMatches = (candidate: PineSeriesOutput) =>
+      !meta.style || (wantHline ? candidate.kind === 'hline' : candidate.kind === 'plot');
+    let index = series.findIndex(
+      (candidate, candidateIndex) =>
+        !used.has(candidateIndex) &&
+        kindMatches(candidate) &&
+        (candidate.key === meta.key ||
+          candidate.title === meta.title ||
+          candidate.title === meta.key),
+    );
+    if (index < 0) {
+      index = series.findIndex(
+        (candidate, candidateIndex) => !used.has(candidateIndex) && kindMatches(candidate),
+      );
+    }
+    if (index < 0) {
+      index = series.findIndex((_, candidateIndex) => !used.has(candidateIndex));
+    }
+    if (index >= 0) used.add(index);
+    return index >= 0 ? series[index] : undefined;
+  });
 }
 
 export class PineRunner {
   private readonly widget: IChartingLibraryWidget;
   private readonly contextId: string;
+  private readonly host: HTMLElement | null;
+  private readonly getTickSize: () => number;
+  private renderer: PineRenderLayer | null = null;
 
   private pollTimer = 0;
   private disposed = false;
@@ -111,18 +137,32 @@ export class PineRunner {
   private lastRunAt = new Map<string, number>();
   private refreshCounters = new Map<string, number>();
   private reportedErrors = new Map<string, string>();
+  private reportedWarnings = new Map<string, string>();
+  private barTickTimer = 0;
   private offBar: (() => void) | null = null;
   private readonly unsubs: (() => void)[] = [];
 
-  constructor(widget: IChartingLibraryWidget, contextId: string) {
+  constructor(
+    widget: IChartingLibraryWidget,
+    contextId: string,
+    host: HTMLElement | null = null,
+    getTickSize: () => number = () => 0,
+  ) {
     this.widget = widget;
     this.contextId = contextId;
+    this.host = host;
+    this.getTickSize = getTickSize;
   }
 
   start(): void {
     if (this.disposed) return;
     this.syncScripts();
     const chart = this.chart();
+    if (chart) {
+      // 渲染桥只用到绘图/可视范围这几项，IChartWidgetApi 的类型比这宽
+      this.renderer = new PineRenderLayer(chart as unknown as PineShapeApi, this.host);
+      this.renderer.start();
+    }
     if (chart) {
       const symbolSub = chart.onSymbolChanged();
       const onSymbol = () => this.tick();
@@ -142,15 +182,27 @@ export class PineRunner {
 
     this.offBar = gateway.on('bar', (data) => {
       updateLiveBar(data as { symbol?: string; resolution?: string; bar?: Bar });
+      this.scheduleTick();
     });
     this.pollTimer = window.setInterval(() => this.tick(), POLL_MS);
     this.tick();
+  }
+
+  /** bar 事件可能很密；合并成一次 tick，避免每笔都遍历 study。 */
+  private scheduleTick(): void {
+    if (this.disposed || this.barTickTimer) return;
+    this.barTickTimer = window.setTimeout(() => {
+      this.barTickTimer = 0;
+      this.tick();
+    }, 120);
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     window.clearInterval(this.pollTimer);
+    window.clearTimeout(this.barTickTimer);
+    this.barTickTimer = 0;
     for (const timer of this.timers.values()) window.clearTimeout(timer);
     this.timers.clear();
     for (const off of this.unsubs) {
@@ -163,6 +215,8 @@ export class PineRunner {
     this.unsubs.length = 0;
     this.offBar?.();
     this.offBar = null;
+    this.renderer?.dispose();
+    this.renderer = null;
     for (const script of this.scripts) clearPineResult(this.contextId, script.id);
     this.signatures.clear();
     this.running.clear();
@@ -220,10 +274,18 @@ export class PineRunner {
       let api: IStudyApi;
       try {
         api = chart.getStudyById(info.id);
-        if (!api.isVisible()) continue;
       } catch {
         continue;
       }
+      let visible = true;
+      try {
+        visible = api.isVisible();
+      } catch {
+        visible = true;
+      }
+      // 指标被隐藏时连绘图对象一起收起来，取消隐藏后再重新画
+      this.renderer?.setVisible(info.id, visible);
+      if (!visible) continue;
 
       const inputs: Record<string, unknown> = {};
       try {
@@ -237,8 +299,18 @@ export class PineRunner {
       }
 
       const bars = barsCache.get(barsKey(symbol, resolution));
-      const lastBar = bars?.bars.length ? bars.bars[bars.bars.length - 1].time : 0;
-      const signature = JSON.stringify([script.id, symbol, resolution, inputs, lastBar]);
+      const lastBar = bars?.bars.length ? bars.bars[bars.bars.length - 1] : undefined;
+      const signature = JSON.stringify([
+        script.id,
+        symbol,
+        resolution,
+        inputs,
+        lastBar?.time,
+        lastBar?.open,
+        lastBar?.high,
+        lastBar?.low,
+        lastBar?.close,
+      ]);
       if (this.signatures.get(info.id) === signature) continue;
       if (this.running.has(info.id) || this.timers.has(info.id)) continue;
 
@@ -253,7 +325,9 @@ export class PineRunner {
       if (alive.has(studyId)) continue;
       this.signatures.delete(studyId);
       this.reportedErrors.delete(studyId);
+      this.reportedWarnings.delete(studyId);
       this.refreshCounters.delete(studyId);
+      this.renderer?.removeStudy(studyId);
     }
   }
 
@@ -287,32 +361,50 @@ export class PineRunner {
         overrides[meta.id] = toInputValue(meta, inputs[meta.id]);
       }
 
-      const { PineTS, Indicator } = await import('pinets');
-      const pine = new PineTS(candlesFrom(bars));
-      const indicator = new Indicator(script.source, overrides);
-      const ctx = await pine.run(indicator);
+      const result = await runPine({
+        source: script.source,
+        bars,
+        symbol,
+        resolution,
+        inputs: overrides,
+        inputMeta: script.inputs,
+        fetchBars: loadBars,
+        mintick: this.getTickSize(),
+      });
       if (this.disposed) return;
 
+      const aligned = alignSeries(result.series, script.plots);
       const byTime = new Map<number, number[]>();
-      script.plots.forEach((plot, index) => {
-        const data = (ctx.plots[plot.key]?.data ?? []) as { time: number; value: unknown }[];
-        for (const point of data) {
-          if (!Number.isFinite(point.time)) continue;
-          const time = Math.round(point.time / 1000);
-          let row = byTime.get(time);
-          if (!row) {
-            row = new Array(script.plots.length).fill(Number.NaN);
-            byTime.set(time, row);
-          }
-          row[index] = typeof point.value === 'number' ? point.value : Number.NaN;
-        }
-      });
+      for (let barIndex = 0; barIndex < bars.length; barIndex += 1) {
+        const row = new Array(script.plots.length).fill(Number.NaN);
+        aligned.forEach((series, plotIndex) => {
+          const value = series?.values[barIndex];
+          if (typeof value === 'number' && Number.isFinite(value)) row[plotIndex] = value;
+        });
+        byTime.set(bars[barIndex].time, row);
+      }
 
       setPineResult(this.contextId, script.id, { byTime });
+      this.renderer?.update(studyId, script.title, result.visuals);
       this.reportedErrors.delete(studyId);
+
+      const unsupported = result.visuals.unsupported;
+      const notes = [
+        ...result.warnings,
+        ...(unsupported.length > 0 ? [`暂不渲染 ${unsupported.join('、')}`] : []),
+      ];
+      if (notes.length > 0) {
+        if (this.reportedWarnings.get(studyId) !== signature) {
+          this.reportedWarnings.set(studyId, signature);
+          useApp.getState().notify('info', `${script.title}：${notes.slice(0, 2).join('；')}`);
+        }
+      } else {
+        this.reportedWarnings.delete(studyId);
+      }
       this.forceRecalc(studyId);
     } catch (error) {
       clearPineResult(this.contextId, script.id);
+      this.renderer?.removeStudy(studyId);
       this.forceRecalc(studyId);
       const message = (error as Error)?.message || 'Pine 脚本运行失败';
       if (this.reportedErrors.get(studyId) !== signature) {

@@ -1,14 +1,14 @@
 /**
  * Pine Script（实验）脚本存储与元信息解析。
  *
- * 真正的 Pine 运行由 PineTS（AGPL-3.0 / 商业授权）在本地完成，见 pineRunner.ts。
- * 这里只做两件事：
+ * 真正的 Pine 运行由 Piner（优先）或 PineTS（回退）在本地完成，见 pineEngine.ts
+ * 与 pineRunner.ts。这里只做两件事：
  *  1. 把用户粘贴的源码存进 localStorage；
- *  2. 用 PineTS 的 Indicator 扫描 inputs，并用一小段模拟 K 线试跑一次，
- *     得到 plot 的标题/颜色，供图表库生成指标元信息。
+ *  2. 用 Piner（失败时回退 PineTS）扫描 inputs，并用一小段模拟 K 线试跑一次，
+ *     得到 plot 的标题/颜色/样式，供图表库生成指标元信息。
  *
- * 注意：PineTS 与 TradingView 无关联，脚本能力只覆盖它实现的部分；
- * strategy、绘图对象和外部数据源不在原型范围内。
+ * 注意：Pine 引擎与 TradingView 无关联，脚本能力只覆盖它实现的部分；
+ * strategy、绘图对象渲染和外部数据源仍不在原型范围内。
  */
 
 export type PineInputType =
@@ -38,11 +38,15 @@ export interface PineInputMeta {
 }
 
 export interface PinePlotMeta {
-  /** PineTS 运行结果里的 key，用来取数据 */
+  /** 引擎输出里的 key（Piner 为 plot_<id>/hline_<id>），用来对齐运行结果 */
   key: string;
   /** 图表图例里显示的名字 */
   title: string;
   color: string;
+  /** Pine 的 plot style（line/area/histogram/hline/...） */
+  style?: string;
+  /** display.none 的曲线保留数值，但不在图上显示 */
+  visible?: boolean;
 }
 
 export interface PineScriptRecord {
@@ -202,26 +206,99 @@ function inputTitle(item: { title?: string; name?: string }): string {
   return item.title?.trim() || item.name?.trim() || '参数';
 }
 
+interface PineScanResult {
+  inputs: PineInputMeta[];
+  plots: PinePlotMeta[];
+  /** 试跑产出的绘图对象数量；只有 box/label 的脚本靠它判断能不能保存 */
+  visuals: number;
+  warning?: string;
+}
+
+/** 试跑用的 K 线；Piner 的时间轴是 epoch 毫秒。 */
+function syntheticPinerBars() {
+  return syntheticCandles().map((candle) => ({
+    time: candle.openTime,
+    open: candle.open,
+    high: candle.high,
+    low: candle.low,
+    close: candle.close,
+    volume: candle.volume,
+  }));
+}
+
+/** Piner 的颜色带 alpha（#RRGGBBAA），图表库只认 #RRGGBB。 */
+function plotColor(colors: (string | null)[] | undefined, fallback: string): string {
+  for (const color of colors ?? []) {
+    if (typeof color !== 'string' || !color) continue;
+    return /^#[0-9a-fA-F]{8}$/.test(color) ? color.slice(0, 7) : color;
+  }
+  return fallback;
+}
+
+function hasNumbers(values: number[] | undefined): boolean {
+  return !!values?.some((value) => typeof value === 'number' && Number.isFinite(value));
+}
+
 /**
- * 解析并保存一个 Pine 脚本。会先试跑 120 根模拟 K 线，确认能出图并拿到曲线
- * 标题/颜色；试跑失败时退回源码解析，并在记录里带上 warning。
+ * 用 Piner 预扫描：输入元信息、曲线标题/颜色/样式与图表运行时用的是同一个引擎，
+ * 保存下来的 key 能直接和运行结果对齐。
  */
-export async function savePineScript(source: string): Promise<PineScriptRecord> {
-  const trimmed = source.trim();
-  if (!trimmed) throw new Error('脚本为空');
-  if (/^\s*\/\/\s*@version\s*=\s*[1-4]\b/m.test(trimmed)) {
-    throw new Error('只支持 //@version=5 或 6 的脚本');
+async function scanWithPiner(source: string): Promise<PineScanResult> {
+  const { compile, Engine, ArrayFeed } = await import('@heyphat/piner');
+  const compiled = compile(source);
+  const inputs: PineInputMeta[] = (compiled.metadata.inputs ?? []).map((item) => ({
+    id: item.key,
+    title: item.title?.trim() || item.key,
+    type: item.kind as PineInputType,
+    defval: item.default,
+    ...(item.minval == null ? {} : { minval: item.minval }),
+    ...(item.maxval == null ? {} : { maxval: item.maxval }),
+    ...(item.step == null ? {} : { step: item.step }),
+    ...(item.options == null ? {} : { options: item.options }),
+  }));
+
+  const engine = new Engine(compiled, new ArrayFeed(syntheticPinerBars()));
+  await engine.run({ symbol: 'TEST', timeframe: '5' });
+
+  const plots: PinePlotMeta[] = [];
+  const plotList = [...engine.outputs.plots.values()].sort((a, b) => a.id - b.id);
+  for (const plot of plotList) {
+    if (plots.length >= 20) break;
+    if (!hasNumbers(plot.data)) continue;
+    const style = typeof plot.options?.style === 'string' ? plot.options.style : '';
+    plots.push({
+      key: `plot_${plot.id}`,
+      title: plot.title?.trim() || `曲线 ${plots.length + 1}`,
+      color: plotColor(plot.colors, PALETTE[plots.length % PALETTE.length]),
+      ...(style ? { style } : {}),
+    });
   }
-  if (/\bstrategy\s*\(/.test(trimmed)) {
-    throw new Error('暂不支持 strategy 策略脚本，只支持 indicator 指标');
-  }
-  if (!/\bindicator\s*\(/.test(trimmed)) {
-    throw new Error('没有找到 indicator() 声明');
+  const hlines = [...engine.outputs.hlines.values()].sort((a, b) => a.id - b.id);
+  for (const hline of hlines) {
+    if (plots.length >= 20) break;
+    plots.push({
+      key: `hline_${hline.id}`,
+      // Piner 的 hline 标题是自动编号（hline 3），图例里用序号更好认
+      title: `曲线 ${plots.length + 1}`,
+      color: PALETTE[plots.length % PALETTE.length],
+      style: 'hline',
+    });
   }
 
-  const { title: rawTitle, overlay } = parseDeclaration(trimmed);
+  const visuals =
+    engine.drawings.length +
+    engine.outputs.markers.size +
+    engine.outputs.candles.size +
+    engine.outputs.fills.size +
+    engine.outputs.bgColors.size;
+
+  return { inputs, plots, visuals };
+}
+
+/** PineTS 兜底预扫描。 */
+async function scanWithPineTS(source: string): Promise<PineScanResult> {
   const { PineTS, Indicator } = await import('pinets');
-  const indicator = new Indicator(trimmed);
+  const indicator = new Indicator(source);
   indicator.prepare();
   const inputs: PineInputMeta[] = indicator.getInputsMeta().map((item) => ({
     id: item.id,
@@ -234,8 +311,7 @@ export async function savePineScript(source: string): Promise<PineScriptRecord> 
     options: item.options,
   }));
 
-  let plots: PinePlotMeta[] = [];
-  let warning: string | undefined;
+  const plots: PinePlotMeta[] = [];
   try {
     const pine = new PineTS(syntheticCandles());
     const ctx = await pine.run(indicator);
@@ -256,15 +332,72 @@ export async function savePineScript(source: string): Promise<PineScriptRecord> 
         data.find((point) => point.options?.color)?.options?.color ??
         PALETTE[plots.length % PALETTE.length];
       const title = /^(plot|hline)#/.test(name) ? `曲线 ${plots.length + 1}` : name;
-      plots.push({ key: name, title, color });
+      const options = ctx.plots[name]?.options as
+        | { style?: string; display?: string }
+        | undefined;
+      const style = String(options?.style ?? '');
+      const visible = options?.display !== 'none';
+      plots.push({
+        key: name,
+        title,
+        color,
+        ...(style ? { style } : {}),
+        ...(visible ? {} : { visible: false }),
+      });
     }
+    return { inputs, plots, visuals: 0 };
   } catch (error) {
-    warning = `试跑失败：${(error as Error)?.message || '未知错误'}`;
+    return {
+      inputs,
+      plots,
+      visuals: 0,
+      warning: `试跑失败：${(error as Error)?.message || '未知错误'}`,
+    };
+  }
+}
+
+/**
+ * 解析并保存一个 Pine 脚本。会先用 Piner 试跑 120 根模拟 K 线，确认能出图并拿到
+ * 曲线标题/颜色/样式；Piner 跑不了时回退 PineTS，再不行退回源码解析并在记录里
+ * 带上 warning。
+ */
+export async function savePineScript(source: string): Promise<PineScriptRecord> {
+  const trimmed = source.trim();
+  if (!trimmed) throw new Error('脚本为空');
+  if (/^\s*\/\/\s*@version\s*=\s*[1-4]\b/m.test(trimmed)) {
+    throw new Error('只支持 //@version=5 或 6 的脚本');
+  }
+  if (/\bstrategy\s*\(/.test(trimmed)) {
+    throw new Error('暂不支持 strategy 策略脚本，只支持 indicator 指标');
+  }
+  if (!/\bindicator\s*\(/.test(trimmed)) {
+    throw new Error('没有找到 indicator() 声明');
   }
 
+  const { title: rawTitle, overlay } = parseDeclaration(trimmed);
+
+  let scan: PineScanResult;
+  try {
+    scan = await scanWithPiner(trimmed);
+  } catch (pinerError) {
+    const pinerMessage = (pinerError as Error)?.message || '未知错误';
+    try {
+      scan = await scanWithPineTS(trimmed);
+      scan.warning = `Piner 预扫描失败，已回退 PineTS：${pinerMessage}`;
+    } catch (pinetsError) {
+      throw new Error(
+        `脚本无法运行。Piner：${pinerMessage}；PineTS：${
+          (pinetsError as Error)?.message || '未知错误'
+        }`,
+      );
+    }
+  }
+
+  let plots = scan.plots;
   if (plots.length === 0) plots = regexPlots(trimmed);
-  if (plots.length === 0) {
-    throw new Error(warning ?? '没有找到可显示的 plot/hline 曲线');
+  // 只有 box/label/table 的脚本也要能保存：图表库里挂一个隐藏占位曲线
+  if (plots.length === 0 && scan.visuals === 0) {
+    throw new Error(scan.warning ?? '没有找到可显示的曲线或绘图对象');
   }
 
   const records = readPineScripts();
@@ -276,8 +409,8 @@ export async function savePineScript(source: string): Promise<PineScriptRecord> 
     savedAt: Date.now(),
     overlay,
     plots,
-    inputs,
-    warning,
+    inputs: scan.inputs,
+    warning: scan.warning,
   };
   writePineScripts([...records, record]);
   return record;

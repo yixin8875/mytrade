@@ -856,7 +856,10 @@ export function ChartPanel({
         calendarLayerRef.current = calendar;
 
         // Pine 脚本（实验）：按指标输入和品种/周期重算，再让指标重绘
-        const pineRunner = new PineRunner(widget, pineContextId);
+        const pineRunner = new PineRunner(widget, pineContextId, host, () => {
+          const current = infoRef.current;
+          return current?.tickSize || current?.point || 0;
+        });
         pineRunner.start();
         pineRunnerRef.current = pineRunner;
 

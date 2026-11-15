@@ -6,6 +6,7 @@ import type {
 import {
   readPineScripts,
   type PineInputMeta,
+  type PinePlotMeta,
   type PineScriptRecord,
 } from '../../lib/pineScripts';
 
@@ -91,19 +92,26 @@ function buildIndicator(
   contextId: string,
   PineJS: PineJS,
 ): CustomIndicator {
-  const plots = script.plots.map((_plot, index) => ({
+  // 只有 box/label/table 的脚本没有曲线；图库要求指标至少有一条 plot，
+  // 所以补一条隐藏的占位曲线，真正的对象由 pineRenderLayer 画。
+  const metas: PinePlotMeta[] =
+    script.plots.length > 0
+      ? script.plots
+      : [{ key: '__drawing__', title: '（绘图对象）', color: '#787B86', visible: false }];
+
+  const plots = metas.map((_plot, index) => ({
     id: `plot_${index}`,
     type: 'line',
   }));
   const styles: Record<string, unknown> = {};
-  script.plots.forEach((plot, index) => {
+  metas.forEach((plot, index) => {
     styles[`plot_${index}`] = {
       plottype: 2,
       linestyle: 0,
       linewidth: 1,
       trackprice: false,
       transparency: 0,
-      visible: true,
+      visible: plot.visible !== false,
       color: plot.color,
     };
   });
@@ -151,7 +159,7 @@ function buildIndicator(
         /* 结果由 runner 按品种/周期重新计算 */
       };
       this.main = function (this: Record<string, unknown>, ctx: IContext) {
-        const values: number[] = new Array(script.plots.length).fill(Number.NaN);
+        const values: number[] = new Array(metas.length).fill(Number.NaN);
         const result = getPineResult(contextId, script.id);
         if (!result) return values;
         const raw = PineJS.Std.time(ctx);
