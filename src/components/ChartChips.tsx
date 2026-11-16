@@ -25,7 +25,7 @@ export interface ChartBand {
   from: number;
   to: number;
   color: string;
-  label?: string;
+  /** R 刻度线与价格文字的颜色 */
   labelColor?: string;
   /** 区间内的刻度线，例如 1R/2R/3R；priceText 是该价位在价格轴旁的精确价格 */
   marks?: { price: number; text: string; priceText?: string }[];
@@ -483,14 +483,6 @@ export function ChartChips({
               backgroundColor: band.color,
             }}
           >
-            {band.label && (
-              <span
-                className="absolute left-2 top-1 whitespace-nowrap font-mono text-[11px]"
-                style={{ color: band.labelColor ?? 'rgba(209,212,220,0.75)' }}
-              >
-                {band.label}
-              </span>
-            )}
             {pos.marks.map((mark, index) => {
               // 刻度挨得太近时不标价格，免得两行数字叠在一起
               const prev = pos.marks[index - 1];

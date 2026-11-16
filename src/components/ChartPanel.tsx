@@ -255,6 +255,24 @@ function signedMoney(
   return `  ${approx ? '≈' : ''}${fmtSigned(amount)}${currency ? ` ${currency}` : ''}`;
 }
 
+/** 止盈相当于几个 1R；没有止损、风险距离为 0 或数值异常时返回 null */
+function rewardR(
+  entry: number,
+  sl: number | null | undefined,
+  tp: number | null | undefined,
+): number | null {
+  if (!(entry > 0) || sl == null || !(sl > 0) || tp == null || !(tp > 0)) return null;
+  const risk = Math.abs(entry - sl);
+  if (!(risk > 0)) return null;
+  const ratio = Math.abs(tp - entry) / risk;
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : null;
+}
+
+/** 右侧标签追加「 · 8.2R」；没有倍数就不加 */
+function rSuffix(ratio: number | null): string {
+  return ratio == null ? '' : ` · ${ratio.toFixed(1)}R`;
+}
+
 export function ChartPanel({
   slot = 'main',
   symbol: symbolProp,
@@ -451,7 +469,7 @@ export function ChartPanel({
         key: 'draft:sl',
         price: draft.sl,
         color: SIDE_SELL,
-        text: `${volume(draft.volume)}${moneySuffix(draftRisk, '-', currency, draftRiskApprox)}`,
+        text: `${volume(draft.volume)}${moneySuffix(draftRisk, '-', currency, draftRiskApprox)} · 1R`,
         onMove: (price) => patchDraft({ sl: roundPrice(price) }),
         onRemove: () => patchDraft({ sl: null }),
       });
@@ -461,48 +479,39 @@ export function ChartPanel({
         key: 'draft:tp',
         price: draft.tp,
         color: SIDE_BUY,
-        text: `${volume(draft.volume)}${moneySuffix(draftReward, '+', currency, draftRewardApprox)}`,
+        text: `${volume(draft.volume)}${moneySuffix(draftReward, '+', currency, draftRewardApprox)}${rSuffix(
+          rewardR(draftAnchor, draft.sl, draft.tp),
+        )}`,
         onMove: (price) => patchDraft({ tp: roundPrice(price) }),
         onRemove: () => patchDraft({ tp: null }),
       });
     }
   }
 
-  // ---- 图上风险区间：止损一侧红色、止盈一侧绿色，止盈一侧标 1R/2R… 刻度 ----
+  // ---- 图上风险区间：只画 R 刻度线；金额与 R 倍数统一放在右边缘标签里 ----
   const bands: ChartBand[] = [];
-  const amountText = (value: number | null | undefined, approx = false) =>
-    value == null || !Number.isFinite(value)
-      ? ''
-      : `${approx ? '≈' : ''}${fmtMoney(Math.abs(value))}${currency ? ` ${currency}` : ''}`;
 
   const addBands = (
     prefix: string,
     entry: number,
     sl: number | null | undefined,
     tp: number | null | undefined,
-    riskAmount?: number | null,
-    rewardAmount?: number | null,
-    riskApprox = false,
-    rewardApprox = false,
   ) => {
     const hasSl = sl != null && sl > 0 && Math.abs(entry - sl) > 0;
     const hasTp = tp != null && tp > 0 && Math.abs(tp - entry) > 0;
     const risk = hasSl ? Math.abs(entry - (sl as number)) : 0;
     if (hasSl) {
-      const text = amountText(riskAmount, riskApprox);
       bands.push({
         key: `${prefix}:risk`,
         from: entry,
         to: sl as number,
         color: BAND_FILL,
-        label: text ? `1R = ${text}` : '风险 1R',
         labelColor: 'rgba(239, 83, 80, 0.9)',
       });
     }
     if (hasTp) {
       const target = tp as number;
       const reward = Math.abs(target - entry);
-      const ratio = risk > 0 ? reward / risk : null;
       const marks =
         risk > 0
           ? Array.from(
@@ -520,17 +529,11 @@ export function ChartPanel({
               },
             )
           : [];
-      const text = amountText(rewardAmount, rewardApprox);
       bands.push({
         key: `${prefix}:reward`,
         from: entry,
         to: target,
         color: BAND_FILL,
-        label: text
-          ? `盈利 ${text}${ratio ? ` · ${ratio.toFixed(1)}R` : ''}`
-          : ratio
-            ? `目标 ${ratio.toFixed(1)}R`
-            : '目标',
         labelColor: 'rgba(38, 166, 154, 0.95)',
         marks,
       });
@@ -539,16 +542,7 @@ export function ChartPanel({
 
   if (draft.active && draftAnchor > 0) {
     // 区间从计价基准画起：限价/停损用委托价，市价用对手价
-    addBands(
-      'draft',
-      draftAnchor,
-      draft.sl,
-      draft.tp,
-      draftRisk,
-      draftReward,
-      draftRiskApprox,
-      draftRewardApprox,
-    );
+    addBands('draft', draftAnchor, draft.sl, draft.tp);
   }
 
   for (const order of orders) {
@@ -573,6 +567,43 @@ export function ChartPanel({
         void cancelOrderWithUndo(order, notify);
       },
     });
+    // 挂单的止损/止盈金额与 R 倍数也放在右侧标签里，左侧不再写字
+    if (order.sl) {
+      const slKey = `order:${order.ticket}:sl`;
+      const slShown = resolvePrice(slKey, order.sl, tol).price ?? order.sl;
+      chips.push({
+        key: slKey,
+        price: slShown,
+        color: SIDE_SELL,
+        text: `${volume(order.volume)}${signedMoney(
+          estimateProfit(info, order.volume, order.price, slShown),
+          currency,
+          true,
+        )} · 1R`,
+        onMove: (price) =>
+          moveTo(slKey, order.sl, price, (value) =>
+            gateway.call('order.modify', { ticket: order.ticket, sl: value }),
+          ),
+      });
+    }
+    if (order.tp) {
+      const tpKey = `order:${order.ticket}:tp`;
+      const tpShown = resolvePrice(tpKey, order.tp, tol).price ?? order.tp;
+      chips.push({
+        key: tpKey,
+        price: tpShown,
+        color: SIDE_BUY,
+        text: `${volume(order.volume)}${signedMoney(
+          estimateProfit(info, order.volume, order.price, tpShown),
+          currency,
+          true,
+        )}${rSuffix(rewardR(order.price, order.sl, tpShown))}`,
+        onMove: (price) =>
+          moveTo(tpKey, order.tp, price, (value) =>
+            gateway.call('order.modify', { ticket: order.ticket, tp: value }),
+          ),
+      });
+    }
   }
 
   for (const position of positions) {
@@ -606,10 +637,6 @@ export function ChartPanel({
       position.openPrice,
       slShown.price,
       tpShown.price,
-      slAmount,
-      tpAmount,
-      slApprox,
-      tpApprox,
     );
     if (position.stopOutPrice != null && position.stopOutPrice > 0) {
       chips.push({
@@ -633,7 +660,7 @@ export function ChartPanel({
         key: `protect:${position.ticket}:sl`,
         price: slShown.price ?? position.sl,
         color: SIDE_SELL,
-        text: `${volume(position.volume)}${signedMoney(slAmount, currency, slApprox)}`,
+        text: `${volume(position.volume)}${signedMoney(slAmount, currency, slApprox)} · 1R`,
         onMove: (price) =>
           moveTo(slKey, position.sl, price, (value) =>
             gateway.call('position.modify', { ticket: position.ticket, sl: value }),
@@ -650,7 +677,9 @@ export function ChartPanel({
         key: `protect:${position.ticket}:tp`,
         price: tpShown.price ?? position.tp,
         color: SIDE_BUY,
-        text: `${volume(position.volume)}${signedMoney(tpAmount, currency, tpApprox)}`,
+        text: `${volume(position.volume)}${signedMoney(tpAmount, currency, tpApprox)}${rSuffix(
+          rewardR(position.openPrice, slShown.price, tpShown.price),
+        )}`,
         onMove: (price) =>
           moveTo(tpKey, position.tp, price, (value) =>
             gateway.call('position.modify', { ticket: position.ticket, tp: value }),
