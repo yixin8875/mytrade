@@ -59,6 +59,7 @@ export function OrderTicket() {
   const risk = useApp((s) => s.risk);
   const patchRisk = useApp((s) => s.patchRisk);
   const orderTag = useApp((s) => s.orderTag);
+  const breakevenOffset = useApp((s) => s.breakevenOffset);
   const setOrderTag = useApp((s) => s.setOrderTag);
   const template = useApp(activeTemplate);
   const templates = useApp((s) => s.templates);
@@ -487,6 +488,7 @@ export function OrderTicket() {
                 })),
                 templateId: template.id,
                 templateName: template.name,
+                breakevenOffsetPoints: breakevenOffset,
               }
             : undefined,
       });

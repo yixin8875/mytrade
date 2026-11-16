@@ -117,6 +117,8 @@ export interface PositionPlan {
   templateId?: string | null;
   templateName?: string | null;
   source: 'template' | 'manual';
+  /** 移保本时的偏移点数：补偿手续费/隔夜利息/滑点，0 表示按开仓价 */
+  breakevenOffsetPoints?: number;
 }
 
 export interface Position {

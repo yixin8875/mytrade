@@ -1296,6 +1296,8 @@ function DisciplineSection() {
 function RiskSection() {
   const health = useApp((s) => s.health);
   const notify = useApp((s) => s.notify);
+  const breakevenOffset = useApp((s) => s.breakevenOffset);
+  const setBreakevenOffset = useApp((s) => s.setBreakevenOffset);
   const config = health?.config;
   const limits = health?.limits;
   const overrides = health?.accountRisk ?? {};
@@ -1556,6 +1558,35 @@ function RiskSection() {
             的风控值，不是券商限制；自动手数会被截到上限，手动超过会被网关拒绝。
           </span>
         </div>
+      </Card>
+
+      <Card
+        title="保本偏移"
+        description="点差已经包含在开仓价里；这里只按点数补偿手续费、隔夜利息和止损滑点，让保本出场时账户不亏。"
+      >
+        <Row
+          label="偏移点数"
+          hint="0 = 只在开仓价保本。按成本折算：每点价值 × 点数 ≈ 往返手续费 + 负隔夜利息 + 预估滑点。"
+        >
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={0}
+              max={500}
+              step={1}
+              value={breakevenOffset}
+              onChange={(event) => setBreakevenOffset(Number(event.target.value))}
+              className="h-8 w-24 rounded-lg border border-console-line bg-console-canvas px-2 text-right font-mono text-[12px] text-console-ink outline-none focus:border-console-accent"
+            />
+            <span className="text-[11px] text-console-muted">点</span>
+          </div>
+        </Row>
+        <Row
+          label="适用范围"
+          hint="「保本」「平一半」立即使用；分批档位的「移保本」在添加档位时记录，之后新增的档位使用新值。"
+        >
+          <span className="text-[12px] text-console-muted">多单加在开仓价上方，空单减在下方</span>
+        </Row>
       </Card>
 
       <Card

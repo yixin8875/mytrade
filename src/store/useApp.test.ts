@@ -62,6 +62,7 @@ function resetStore(): void {
     activeTemplateId: template.id,
     templateArmed: false,
     theme: 'light',
+    breakevenOffset: 0,
     layout: '1',
     layoutSync: { symbol: false, interval: false, crosshair: true, time: false, dateRange: false },
     accentColor: DEFAULT_ACCENT,
@@ -314,6 +315,18 @@ describe('设置项', () => {
     useApp.getState().setLayout('bogus');
     expect(useApp.getState().layout).toBe('1');
     expect(JSON.parse(window.localStorage.getItem('mytrade.layout') ?? '""')).toBe('1');
+  });
+
+  it('保本偏移按 0–500 整数保存', () => {
+    useApp.getState().setBreakevenOffset(5.6);
+    expect(useApp.getState().breakevenOffset).toBe(6);
+    expect(JSON.parse(window.localStorage.getItem('mytrade.breakevenOffset') ?? 'null')).toBe(6);
+
+    useApp.getState().setBreakevenOffset(-3);
+    expect(useApp.getState().breakevenOffset).toBe(0);
+
+    useApp.getState().setBreakevenOffset(999);
+    expect(useApp.getState().breakevenOffset).toBe(500);
   });
 
   it('多图同步开关按字段合并', () => {

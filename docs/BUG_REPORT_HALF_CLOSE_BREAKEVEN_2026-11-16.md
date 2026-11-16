@@ -192,3 +192,12 @@
 - 测试：改写 3 个固化截断行为的旧用例；新增亏损多/空、微利、亏损时部分平仓、`_auto_move_breakeven` 跳过、档位跳过保本仍平仓、前端 4 个文案用例、`maxLoss` 5 个用例。
 - 验证：`npx tsc --noEmit` 通过；`npm run check` 全绿（前端 642、后端 624）。
 - README / USER_GUIDE 的「平一半 / 保本」说明已同步。
+
+## 13. 补充：保本偏移设置（2026-11-16）
+
+点差已经包含在开仓价里（多单按 ask 成交、按 bid 触发止损），所以「止损 = 开仓价」就是毛利为零；但手续费、隔夜利息和止损滑点不在里面。为此增加一个可选偏移：
+
+- 位置：设置 → 交易与风控 → 保本偏移。单位是点，0–500 的整数，存在 `localStorage` 的 `mytrade.breakevenOffset`。
+- 应用：`position.breakeven` 的 `offsetPoints`、`position.close` 的 `beOffsetPoints`、`position.plan.add` / 模板下单的 `breakevenOffsetPoints`；多单加在开仓价上方，空单减在下方。
+- 分批计划在**添加档位时**记录偏移（计划字段 `breakevenOffsetPoints`），之后新增的档位使用新值；旧计划缺省按 0。
+- 测试：后端 `_auto_move_breakeven` 偏移、`_plan_add` 持久化；前端 store 钳制、保本/平一半/分批请求参数。

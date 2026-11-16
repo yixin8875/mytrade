@@ -56,6 +56,7 @@ function resetStore() {
     orders: [],
     symbols: [GOLD_INFO],
     quote: null,
+    breakevenOffset: 0,
     notify: notify as unknown as Notify,
   });
 }
@@ -222,6 +223,7 @@ describe('PositionsPanel', () => {
         ticket: 101,
         volume: 0.1,
         moveToBe: true,
+        beOffsetPoints: 0,
       });
     });
     await waitFor(() => {
@@ -308,6 +310,68 @@ describe('PositionsPanel', () => {
     });
   });
 
+  it('保本偏移会随保本与分批请求下发', async () => {
+    resetStore();
+    useApp.setState({
+      breakevenOffset: 5,
+      positions: [makePosition(101, { sl: 3940 })],
+    });
+    const call = vi.spyOn(gateway, 'call').mockImplementation((async (method: string) => {
+      if (method === 'position.breakeven') {
+        return { ticket: 101, sl: 3945, changed: true };
+      }
+      if (method === 'position.plan.add') return {};
+      throw new Error(`未预置的方法：${method}`);
+    }) as typeof gateway.call);
+
+    render(<PositionsPanel />);
+    await userEvent.click(screen.getByRole('button', { name: '保本' }));
+
+    await waitFor(() => {
+      expect(call).toHaveBeenCalledWith('position.breakeven', {
+        ticket: 101,
+        offsetPoints: 5,
+      });
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: '分批' }));
+    await userEvent.click(screen.getByRole('button', { name: '+ 添加一档' }));
+
+    await waitFor(() => {
+      expect(call).toHaveBeenCalledWith('position.plan.add', {
+        ticket: 101,
+        price: 3960,
+        closePercent: 50,
+        breakevenOffsetPoints: 5,
+      });
+    });
+  });
+
+  it('平一半会带上保本偏移点数', async () => {
+    resetStore();
+    useApp.setState({
+      breakevenOffset: 8,
+      positions: [makePosition(101, { volume: 0.2 })],
+    });
+    const call = vi.spyOn(gateway, 'call').mockResolvedValue({
+      volume: 0.1,
+      breakeven: { ticket: 101, sl: 3940, changed: false, reason: 'not_in_profit' },
+    } as never);
+
+    render(<PositionsPanel />);
+    await userEvent.click(screen.getByRole('button', { name: '平一半' }));
+    await userEvent.click(screen.getByRole('button', { name: '确认平一半' }));
+
+    await waitFor(() => {
+      expect(call).toHaveBeenCalledWith('position.close', {
+        ticket: 101,
+        volume: 0.1,
+        moveToBe: true,
+        beOffsetPoints: 8,
+      });
+    });
+  });
+
   it('单仓平仓需要二次确认，确认后按持仓号发请求', async () => {
     const call = mockGateway();
 
@@ -355,6 +419,7 @@ describe('PositionsPanel', () => {
         ticket: 101,
         price: 3960,
         closePercent: 50,
+        breakevenOffsetPoints: 0,
       });
     });
     await waitFor(() => {

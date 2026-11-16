@@ -218,6 +218,8 @@ interface AppStore {
   layoutSync: ChartSync;
   /** 深色 / 浅色主题，存 localStorage */
   theme: Theme;
+  /** 保本偏移（点）：补偿手续费/隔夜利息/滑点，存 localStorage */
+  breakevenOffset: number;
   /** 隐私模式：除交易台外把金额显示成 ••••，存 localStorage */
   privacy: boolean;
   /** 强调色 #rrggbb，存 localStorage；默认色不写覆盖，交给 CSS 默认值 */
@@ -267,6 +269,8 @@ interface AppStore {
   setLayout: (layout: ChartLayout) => void;
   setLayoutSync: (patch: Partial<ChartSync>) => void;
   setTheme: (theme: Theme) => void;
+  /** 0–500 的整数点；非法值按 0 */
+  setBreakevenOffset: (points: number) => void;
   setPrivacy: (privacy: boolean) => void;
   /** 传非法值时回到默认强调色 */
   setAccentColor: (hex: string) => void;
@@ -310,6 +314,7 @@ const defaultRisk: RiskSettings = {
 };
 
 const RISK_KEY = 'mytrade.risk';
+const BREAKEVEN_OFFSET_KEY = 'mytrade.breakevenOffset';
 
 const TEMPLATES_KEY = 'mytrade.templates';
 /** 旧版本单个模板的键，启动时迁移成列表里的「默认模板」 */
@@ -395,6 +400,14 @@ export function activeTemplate(state: {
   return (
     state.templates.find((item) => item.id === state.activeTemplateId) ?? state.templates[0]
   );
+}
+
+/** 保本偏移（点）：补偿手续费/隔夜利息/滑点；0 表示只按开仓价保本 */
+function loadBreakevenOffset(): number {
+  const raw = readJson<unknown>(BREAKEVEN_OFFSET_KEY, 0);
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.min(Math.round(value), 500);
 }
 
 /** 风险设置存 localStorage，刷新后不用重新填 */
@@ -546,6 +559,7 @@ export const useApp = create<AppStore>((set, get) => ({
   layout: loadLayout(),
   layoutSync: loadLayoutSync(),
   theme: loadTheme(),
+  breakevenOffset: loadBreakevenOffset(),
   privacy: loadPrivacy(),
   accentColor: normalizeHex(readJson<unknown>(ACCENT_KEY, DEFAULT_ACCENT)) ?? DEFAULT_ACCENT,
   alertSound: loadPrefs().sound,
@@ -709,6 +723,13 @@ export const useApp = create<AppStore>((set, get) => ({
   setTheme: (theme) => {
     writeJson(THEME_KEY, theme);
     set({ theme });
+  },
+  setBreakevenOffset: (points) => {
+    const breakevenOffset = Number.isFinite(points)
+      ? Math.min(Math.max(Math.round(points), 0), 500)
+      : 0;
+    writeJson(BREAKEVEN_OFFSET_KEY, breakevenOffset);
+    set({ breakevenOffset });
   },
   setPrivacy: (privacy) => {
     try {

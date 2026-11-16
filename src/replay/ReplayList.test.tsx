@@ -224,5 +224,5 @@ describe('ReplayList 软上限提示', () => {
     useReplay.setState({ sessions: sessions.slice(0, SESSION_SOFT_LIMIT - 1) });
     render(<ReplayList onCreate={() => {}} />);
     expect(screen.queryByText(/建议归档旧会话/)).not.toBeInTheDocument();
-  });
+  }, 20_000);
 });

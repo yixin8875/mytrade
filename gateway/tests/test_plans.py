@@ -251,6 +251,32 @@ def test_auto_move_breakeven_skips_when_not_enough_profit(monkeypatch):
     assert sent == []
 
 
+def test_auto_move_breakeven_applies_plan_offset(monkeypatch):
+    worker, sent = make_worker(monkeypatch)
+    info = fake_symbol_info()
+    tick = types.SimpleNamespace(bid=1.2, ask=1.2002)
+    position = {
+        "ticket": 11,
+        "symbol": "EURUSD",
+        "side": "buy",
+        "openPrice": 1.1,
+        "sl": 1.09,
+        "tp": None,
+    }
+
+    target = worker._auto_move_breakeven(
+        11,
+        {"entry": 1.1, "side": "buy", "breakevenOffsetPoints": 2},
+        position,
+        info,
+        tick,
+    )
+
+    # 2 个点 = 0.02，保本价放在开仓价上方补偿成本
+    assert target is not None and abs(target - 1.12) < 1e-9
+    assert abs(sent[-1]["sl"] - 1.12) < 1e-9
+
+
 def test_auto_move_breakeven_noop_when_already_at_breakeven(monkeypatch):
     worker, sent = make_worker(monkeypatch)
     info = fake_symbol_info()

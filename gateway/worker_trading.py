@@ -499,6 +499,9 @@ class WorkerTrading:
                         "side": a["side"],
                         "steps": steps,
                         "next": 0.0,
+                        "breakevenOffsetPoints": self._plan_offset_points(
+                            plan.get("breakevenOffsetPoints")
+                        ),
                         "source": "template",
                         "templateId": str(plan.get("templateId") or "")[:40] or None,
                         "templateName": str(plan.get("templateName") or "")[:40] or None,
@@ -838,6 +841,9 @@ class WorkerTrading:
             "side": a["side"],
             "sl": float(a["sl"]),
             "steps": steps,
+            "breakevenOffsetPoints": self._plan_offset_points(
+                plan.get("breakevenOffsetPoints")
+            ),
             "placedAt": time.time(),
             "goneAt": None,
             "templateId": str(plan.get("templateId") or "")[:40] or None,
@@ -918,6 +924,7 @@ class WorkerTrading:
             plan["next"] = 0.0
             # 旧版 autoBreakeven 都来自模板；手动计划一定会带 source 落盘
             plan.setdefault("source", "template")
+            plan.setdefault("breakevenOffsetPoints", 0.0)
             steps = plan.get("steps")
             if isinstance(steps, list):
                 for index, step in enumerate(steps):
@@ -1141,6 +1148,9 @@ class WorkerTrading:
                 "side": side,
                 "steps": steps,
                 "next": 0.0,
+                "breakevenOffsetPoints": self._plan_offset_points(
+                    record.get("breakevenOffsetPoints")
+                ),
                 "source": "template",
                 "templateId": record.get("templateId"),
                 "templateName": record.get("templateName"),
@@ -1396,10 +1406,22 @@ class WorkerTrading:
             "side": "buy" if int(getattr(position, "type", 0)) == 0 else "sell",
             "steps": [],
             "next": 0.0,
+            "breakevenOffsetPoints": 0.0,
             "source": "manual",
             "templateId": None,
             "templateName": None,
         }
+
+    @staticmethod
+    def _plan_offset_points(raw: Any) -> float:
+        """保本偏移（点）：补偿手续费/隔夜利息/滑点；非法值按 0，最多 500 点。"""
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return 0.0
+        if not math.isfinite(value) or value <= 0:
+            return 0.0
+        return min(value, 500.0)
 
     @staticmethod
     def _plan_tick(info: Any) -> float:
@@ -1490,6 +1512,9 @@ class WorkerTrading:
             "risk": float(plan.get("risk") or 0),
             "side": str(plan.get("side") or "buy"),
             "steps": out,
+            "breakevenOffsetPoints": self._plan_offset_points(
+                plan.get("breakevenOffsetPoints")
+            ),
             "templateId": plan.get("templateId"),
             "templateName": plan.get("templateName"),
             "source": str(plan.get("source") or "manual"),
@@ -1524,6 +1549,10 @@ class WorkerTrading:
             "done": False,
             "skipped": False,
         }
+        if "breakevenOffsetPoints" in p:
+            plan["breakevenOffsetPoints"] = self._plan_offset_points(
+                p.get("breakevenOffsetPoints")
+            )
         plan["steps"] = self._sort_plan_steps([*steps, step], plan)
         self._auto_be[ticket] = plan
         self._save_auto_be()

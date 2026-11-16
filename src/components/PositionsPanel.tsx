@@ -24,6 +24,7 @@ export function PositionsPanel() {
   const symbols = useApp((s) => s.symbols);
   const quote = useApp((s) => s.quote);
   const notify = useApp((s) => s.notify);
+  const breakevenOffset = useApp((s) => s.breakevenOffset);
   const [confirmTicket, setConfirmTicket] = useState<number | null>(null);
   const [confirmHalf, setConfirmHalf] = useState<number | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
@@ -61,7 +62,7 @@ export function PositionsPanel() {
     try {
       const res = await gateway.call<BreakevenResult>('position.breakeven', {
         ticket,
-        offsetPoints: 0,
+        offsetPoints: breakevenOffset,
       });
       if (res.changed) {
         notify('success', `止损已移到开仓价 ${fmtPrice(res.sl, digits)}`);
@@ -98,7 +99,12 @@ export function PositionsPanel() {
     try {
       const res = await gateway.call<{ volume?: number; breakeven?: BreakevenResult }>(
         'position.close',
-        { ticket: position.ticket, volume: half, moveToBe: true },
+        {
+          ticket: position.ticket,
+          volume: half,
+          moveToBe: true,
+          beOffsetPoints: breakevenOffset,
+        },
       );
       const closed = res?.volume ?? half;
       const remaining = Math.max(0, position.volume - closed);
@@ -285,6 +291,7 @@ export function PositionsPanel() {
         ticket: position.ticket,
         price,
         closePercent: 50,
+        breakevenOffsetPoints: breakevenOffset,
       });
       notify('success', `已添加分批：${fmtPrice(price, info?.digits ?? 5)} 平 50%`);
     } catch (error) {

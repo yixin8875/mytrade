@@ -390,8 +390,9 @@ class WorkerRisk:
             int(getattr(info, "trade_freeze_level", 0) or 0),
         )
         min_dist = (max(stops, 1) + 5) * point
+        offset = self._plan_offset_points(plan.get("breakevenOffsetPoints")) * point
         price = float(tick.bid if buy else tick.ask)
-        target = align_price(entry, info)
+        target = align_price(entry + offset if buy else entry - offset, info)
         # 开仓价还不在现价有利一侧、或留不出最小止损距离：保持原止损，
         # 不能像旧版那样把它压到现价旁边，否则一次正常回撤就会打掉剩余仓位。
         if buy and target > price - min_dist:

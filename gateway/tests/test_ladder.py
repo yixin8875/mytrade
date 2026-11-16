@@ -370,6 +370,29 @@ def test_already_filled_step_is_not_repeated(monkeypatch):
     assert worker.store.kinds().count("position.plan.step.recovered") == 1
 
 
+def test_step_breakeven_uses_plan_offset(monkeypatch):
+    worker, sent, _ = make_worker(monkeypatch)
+    plan = seed_plan(worker, step={"price": 1.1001, "moveBreakeven": True})
+    plan["breakevenOffsetPoints"] = 3.0
+
+    worker._auto_breakeven()
+
+    sltp = next(item for item in sent if item["action"] == 6)
+    # 3 个点 = 0.00003，多单保本价加在开仓价上方
+    assert sltp["sl"] == pytest.approx(1.10003)
+
+
+def test_add_step_persists_breakeven_offset(monkeypatch):
+    worker, _, _ = make_worker(monkeypatch)
+
+    out = worker._plan_add(
+        {"ticket": 11, "price": 1.105, "closePercent": 50, "breakevenOffsetPoints": 4}
+    )
+
+    assert out["plan"]["breakevenOffsetPoints"] == pytest.approx(4)
+    assert worker.store.state["autoBreakeven"]["11"]["breakevenOffsetPoints"] == pytest.approx(4)
+
+
 def test_step_skips_breakeven_but_still_closes(monkeypatch):
     worker, sent, _ = make_worker(monkeypatch)
     seed_plan(worker, step={"price": 1.10002, "moveBreakeven": True})
