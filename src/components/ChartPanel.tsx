@@ -34,8 +34,8 @@ const SIDE_BUY = '#0f7a55';
 const SIDE_SELL = '#c2413a';
 const ENTRY_COLOR = '#1f5fd6';
 const STOP_OUT_COLOR = '#a9691a';
-const RISK_FILL = 'rgba(194, 65, 58, 0.08)';
-const REWARD_FILL = 'rgba(15, 122, 85, 0.08)';
+// 风险/盈利区间只画 R 刻度线和文字，不铺红绿底色
+const BAND_FILL = 'transparent';
 
 /**
  * 背景、网格、坐标文字由应用主题决定。库恢复的旧图表属性优先级高于 overrides，
@@ -489,7 +489,7 @@ export function ChartPanel({
         key: `${prefix}:risk`,
         from: entry,
         to: sl as number,
-        color: RISK_FILL,
+        color: BAND_FILL,
         label: text ? `1R = ${text}` : '风险 1R',
         labelColor: 'rgba(239, 83, 80, 0.9)',
       });
@@ -520,7 +520,7 @@ export function ChartPanel({
         key: `${prefix}:reward`,
         from: entry,
         to: target,
-        color: REWARD_FILL,
+        color: BAND_FILL,
         label: text
           ? `盈利 ${text}${ratio ? ` · ${ratio.toFixed(1)}R` : ''}`
           : ratio
