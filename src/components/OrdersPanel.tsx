@@ -1,15 +1,18 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
+import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { fmtPrice, fmtVolume } from '../lib/format';
 import { cancelOrderWithUndo } from '../lib/orderActions';
-import type { Order } from '../gateway/types';
+import type { CancelAllResult, Order } from '../gateway/types';
 
 export function OrdersPanel() {
   const orders = useApp((s) => s.orders);
   const symbols = useApp((s) => s.symbols);
   const notify = useApp((s) => s.notify);
   const [busy, setBusy] = useState<number | null>(null);
+  const [confirmCancelAll, setConfirmCancelAll] = useState(false);
+  const [cancellingAll, setCancellingAll] = useState(false);
 
   const cancel = async (order: Order) => {
     setBusy(order.ticket);
@@ -17,6 +20,34 @@ export function OrdersPanel() {
       await cancelOrderWithUndo(order, notify);
     } finally {
       setBusy(null);
+    }
+  };
+
+  /** 批量撤销不提供撤销：原价可能已经穿过，重挂是另一笔委托。 */
+  const cancelAll = async () => {
+    if (!confirmCancelAll) {
+      setConfirmCancelAll(true);
+      window.setTimeout(() => setConfirmCancelAll(false), 4000);
+      return;
+    }
+    setConfirmCancelAll(false);
+    setCancellingAll(true);
+    try {
+      const res = await gateway.call<CancelAllResult>('order.cancelAll', {});
+      const results = res?.results ?? [];
+      const failed = results.filter((item) => item.error).length;
+      const ok = results.length - failed;
+      const rest = res?.remaining ? `，剩余 ${res.remaining} 个` : '';
+      notify(
+        failed || rest ? 'error' : 'success',
+        failed
+          ? `已撤销 ${ok}/${results.length} 个，${failed} 个失败${rest}`
+          : `已撤销 ${results.length} 个挂单${rest}`,
+      );
+    } catch (error) {
+      notify('error', (error as Error).message);
+    } finally {
+      setCancellingAll(false);
     }
   };
 
@@ -29,6 +60,20 @@ export function OrdersPanel() {
             {orders.length}
           </span>
         </span>
+        {orders.length > 0 && (
+          <button
+            onClick={() => void cancelAll()}
+            disabled={cancellingAll}
+            title="批量撤销全部挂单（不支持撤销）"
+            className={clsx(
+              'rounded-md px-1.5 py-0.5 text-[11px] transition-colors',
+              confirmCancelAll ? 'bg-tv-down text-white' : 'text-tv-muted hover:text-tv-text',
+              cancellingAll && 'cursor-not-allowed opacity-50',
+            )}
+          >
+            {cancellingAll ? '撤销中…' : confirmCancelAll ? '确认全部撤销？' : '全部撤销'}
+          </button>
+        )}
       </div>
       <div className="max-h-[200px] overflow-auto">
         {orders.length === 0 && (

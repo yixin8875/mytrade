@@ -90,6 +90,35 @@ export interface TrailingPlan {
   activatedAt: number;
 }
 
+/** 分批止盈的一档：价格触及时平掉当时剩余仓位的百分比 */
+export interface PositionPlanStep {
+  /** 稳定 id，拖拽/删除按它定位 */
+  id: string;
+  /** 触发价（服务端已按 tick 对齐） */
+  price: number;
+  /** 占当时剩余仓位的百分比（1–99） */
+  closePercent: number | null;
+  /** 平仓后把止损移到开仓价 */
+  moveBreakeven: boolean;
+  done: boolean;
+  /** 仓位小到拆不开时置 true，不再重试 */
+  skipped: boolean;
+  /** 派生显示：相对初始风险的倍数；没有止损时为 null */
+  atR: number | null;
+}
+
+/** 持仓上的分批止盈计划；由网关执行，App 关闭时不会运行 */
+export interface PositionPlan {
+  entry: number;
+  /** 1R 的价格距离（|入场 - 初始止损|）；0 表示没有止损基准 */
+  risk: number;
+  side: Side;
+  steps: PositionPlanStep[];
+  templateId?: string | null;
+  templateName?: string | null;
+  source: 'template' | 'manual';
+}
+
 export interface Position {
   ticket: number;
   identifier: number;
@@ -113,6 +142,8 @@ export interface Position {
   stopOutPrice?: number | null;
   /** 已启用的移动止损计划 */
   trailing?: TrailingPlan | null;
+  /** 分批止盈计划；没有计划时为 null */
+  plan?: PositionPlan | null;
 }
 
 export interface Order {
@@ -131,6 +162,26 @@ export interface Order {
   magic: number;
   createdAt: number;
   expiration: number | null;
+}
+
+/** 批量撤单/全清里单笔的结果；error 为空表示成功 */
+export interface BulkActionItem {
+  ticket: number;
+  error?: string;
+  volume?: number;
+}
+
+export interface CancelAllResult {
+  results: BulkActionItem[];
+  /** 操作后仍存在的挂单数量（逐笔失败时会大于 0） */
+  remaining: number;
+}
+
+export interface FlattenResult {
+  cancelled: BulkActionItem[];
+  closed: BulkActionItem[];
+  /** 操作后券商侧剩余数量，用于提示“还有没清掉的” */
+  remaining: { positions: number; orders: number };
 }
 
 /** 可按账户覆盖的风控字段；账户覆盖会盖在全局默认之上 */
@@ -246,6 +297,10 @@ export interface BreakevenResult {
   ticket: number;
   sl: number;
   changed: boolean;
+  /** 没有移动止损的原因：未回本 / 已回本但离现价太近放不下止损 */
+  reason?: 'not_in_profit' | 'too_close';
+  /** 未移动时的当时现价，便于界面说明 */
+  price?: number;
   retcode: number;
   comment: string;
 }

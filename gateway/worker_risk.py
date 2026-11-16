@@ -175,14 +175,24 @@ class WorkerRisk:
         self.store.set_state("halted", self._halted, self._login())
         self.store.audit("system.halt", {"reason": reason, "closeAll": close_all})
         closed: list[dict] = []
+        cancelled: list[dict] = []
         if close_all:
+            # 停机必须连挂单一起撤：只平仓的话，券商侧挂单仍可能成交，
+            # 等于绕过了「禁止再开仓」。
             try:
-                closed = self._close_all({}).get("results", [])
+                result = self._flatten({})
+                closed = result.get("closed", [])
+                cancelled = result.get("cancelled", [])
             except GatewayError as exc:
                 closed = [{"error": exc.message}]
         self._poll_risk(force=True)
         self._emit("gateway", self.health())
-        return {"halted": True, "reason": reason, "closed": closed}
+        return {
+            "halted": True,
+            "reason": reason,
+            "closed": closed,
+            "cancelled": cancelled,
+        }
 
     def _resume(self, p: dict) -> dict:
         self._halted = None
@@ -338,6 +348,8 @@ class WorkerRisk:
             "magic": int(p.magic),
             "comment": p.comment,
             "openTime": int(p.time),
+            # 分批止盈计划随持仓一起下发，图上的拖拽线和面板都由它驱动
+            "plan": self._position_plan(int(p.ticket)),
         }
 
     def _order_payload(self, o: Any) -> dict:
@@ -365,7 +377,7 @@ class WorkerRisk:
     def _auto_move_breakeven(
         self, ticket: int, plan: dict, position: dict, info: Any, tick: Any
     ) -> float | None:
-        """把止损移到开仓价；已经在保本或更好时返回 None，成功返回新止损价。
+        """把止损移到开仓价；已在保本或更好、或保本放不下时返回 None。
 
         position 是 `_position_payload` 的 dict（openPrice/sl/tp），不是 MT5 的
         TradePosition 对象；早期版本按对象取属性，导致所有移保本阶段抛 AttributeError。
@@ -379,8 +391,13 @@ class WorkerRisk:
         )
         min_dist = (max(stops, 1) + 5) * point
         price = float(tick.bid if buy else tick.ask)
-        target = min(entry, price - min_dist) if buy else max(entry, price + min_dist)
-        target = align_price(target, info)
+        target = align_price(entry, info)
+        # 开仓价还不在现价有利一侧、或留不出最小止损距离：保持原止损，
+        # 不能像旧版那样把它压到现价旁边，否则一次正常回撤就会打掉剩余仓位。
+        if buy and target > price - min_dist:
+            return None
+        if not buy and target < price + min_dist:
+            return None
         current_sl = float(position.get("sl") or 0)
         if current_sl:
             if buy and current_sl >= target - point / 2:
@@ -456,37 +473,62 @@ class WorkerRisk:
                 continue
             buy = str(plan.get("side")) == "buy"
             price = float(tick.bid if buy else tick.ask)
-            entry = float(plan.get("entry") or position["openPrice"])
-            risk = float(plan.get("risk") or 0)
-            if risk <= 0:
-                self._auto_be.pop(ticket, None)
-                changed = True
-                continue
-            steps = self._plan_steps(plan)
-            step = next((item for item in steps if not item.get("done")), None)
+            # 按触发价排序后再取第一档：手动计划的数组顺序不代表执行顺序
+            steps = self._sort_plan_steps(self._plan_steps(plan), plan)
+            step = next(
+                (item for item in steps if not item.get("done") and not item.get("skipped")),
+                None,
+            )
             if step is None:
+                # 全部走完也保留计划：面板要显示历史，持仓消失时上面才清理
+                continue
+            trigger = self._step_trigger(step, plan)
+            if trigger is None:
+                # 旧模板算不出触发价（例如 risk=0），留着只会每轮空转
                 self._auto_be.pop(ticket, None)
                 changed = True
                 continue
-            at_r = float(step.get("atR") or 0)
-            trigger = entry + risk * at_r if buy else entry - risk * at_r
+            tp = float(position.get("tp") or 0)
+            half = self._plan_tick(info) / 2 or 1e-9
+            if tp > 0 and (trigger >= tp - half if buy else trigger <= tp + half):
+                # 最终止盈被拖到某一档之前：这一档永远轮不到，等用户调整，不执行也不报错
+                continue
             if (buy and price < trigger) or (not buy and price > trigger):
                 continue
+            at_r = self._step_at_r(trigger, plan)
+            if at_r is None:
+                at_r = float(step.get("atR") or 0)
+            step_id = str(step.get("id") or "step")
+            # 备注带档位 id：发单成功但响应丢失时，下一轮靠它查到已成交，避免重复平仓
+            comment = f"plan-{step_id}"[:31]
+            percent = step.get("closePercent")
+            moved = None
+            closed = None
+            recovered = False
             try:
-                # 先移止损再分批：移保本是幂等的（已到保本就返回 None），
-                # 这样即使平仓失败重试，也不会把同一阶段平两次。
-                moved = (
-                    self._auto_move_breakeven(ticket, plan, position, info, tick)
-                    if step.get("moveBreakeven")
-                    else None
-                )
-                closed = self._auto_partial_close(ticket, step.get("closePercent"))
+                if self._step_filled(ticket, comment):
+                    recovered = True
+                    self.store.audit(
+                        "position.plan.step.recovered",
+                        {"ticket": ticket, "stepId": step_id, "comment": comment},
+                    )
+                else:
+                    # 先移止损再分批：移保本是幂等的（已到保本就返回 None），
+                    # 这样即使平仓失败重试，也不会把同一阶段平两次。
+                    moved = (
+                        self._auto_move_breakeven(ticket, plan, position, info, tick)
+                        if step.get("moveBreakeven")
+                        else None
+                    )
+                    if percent is not None:
+                        closed = self._auto_partial_close(ticket, percent, comment)
             except Exception as exc:  # noqa: BLE001 - 单条计划失败不能中断整轮轮询
                 plan["next"] = time.monotonic() + 3.0
                 self.store.audit(
                     "position.template_step.failed",
                     {
                         "ticket": ticket,
+                        "stepId": step_id,
                         "atR": at_r,
                         "error": str(exc),
                         "type": type(exc).__name__,
@@ -494,24 +536,51 @@ class WorkerRisk:
                 )
                 continue
             step["done"] = True
+            # 有比例却平不出来 = 仓位拆不开；只移保本的档位不算跳过
+            skipped = percent is not None and closed is None and not recovered
+            step["skipped"] = skipped
             changed = True
+            source = str(plan.get("source") or "template")
+            # 勾了移保本却没动止损：多半是还没回本或离现价太近（保本放不下）
+            breakeven_skipped = bool(step.get("moveBreakeven")) and not recovered and moved is None
             self.store.audit(
-                "position.template_step",
+                "position.plan.step",
                 {
                     "ticket": ticket,
+                    "stepId": step_id,
+                    "price": trigger,
                     "atR": at_r,
                     "closedVolume": closed,
                     "breakeven": moved,
+                    "breakevenSkipped": breakeven_skipped,
+                    "skipped": skipped,
+                    "recovered": recovered,
+                    "source": source,
                 },
             )
-            if closed is not None:
+            if source == "template":
+                # 旧审计名保留：历史日志仍按模板阶段读取
+                self.store.audit(
+                    "position.template_step",
+                    {
+                        "ticket": ticket,
+                        "atR": at_r,
+                        "closedVolume": closed,
+                        "breakeven": moved,
+                    },
+                )
+            if closed is not None or skipped:
                 self._emit(
                     "templateStep",
                     {
                         "ticket": ticket,
                         "symbol": position["symbol"],
+                        "stepId": step_id,
+                        "price": trigger,
                         "atR": at_r,
-                        "volume": closed,
+                        "volume": closed or 0.0,
+                        "skipped": skipped,
+                        "source": source,
                     },
                 )
             if moved is not None:
@@ -525,9 +594,6 @@ class WorkerRisk:
                     },
                 )
             self._poll_trade_state()
-            position = next((x for x in self._positions if x["ticket"] == ticket), None)
-            if position is None or all(item.get("done") for item in steps):
-                self._auto_be.pop(ticket, None)
         if changed:
             self._save_auto_be()
             self._poll_trade_state()

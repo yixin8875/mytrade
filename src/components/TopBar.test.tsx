@@ -156,7 +156,7 @@ describe('TopBar 急停', () => {
     await waitFor(() =>
       expect(call).toHaveBeenCalledWith('system.halt', { closeAll: true, reason: '手动急停' }),
     );
-    expect(useApp.getState().toast?.text).toContain('1 个仓位平仓失败');
+    expect(useApp.getState().toast?.text).toContain('1 个失败');
   });
 
   it('已停机时按钮显示恢复交易，点击发系统恢复', async () => {

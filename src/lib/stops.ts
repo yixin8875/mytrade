@@ -3,6 +3,8 @@
  * 免得出站后拿到券商模糊的 retcode。0 表示清除，不参与校验。
  */
 
+import type { Side, SymbolInfo } from '../gateway/types';
+
 export interface StopCheckOptions {
   /** 券商最小止损距离（点）；没有就给 0 */
   stopsLevel?: number;
@@ -36,4 +38,25 @@ export function validateStops(
     }
   }
   return null;
+}
+
+/**
+ * 按止损价估算仓位的账户货币最大亏损。
+ *
+ * 换算方式与回放引擎的 calcProfit 一致（tickSize/tickValue 已包含合约换算）。
+ * 缺报价参数、数量非法或止损不在亏损一侧时返回 null，界面就不显示金额。
+ */
+export function maxLoss(
+  side: Side,
+  volume: number,
+  entry: number,
+  stop: number,
+  info: SymbolInfo | null | undefined,
+): number | null {
+  if (!info || !(volume > 0) || !(entry > 0) || !(stop > 0)) return null;
+  const tick = info.tickSize || info.point || 0;
+  if (!(tick > 0) || !(info.tickValue > 0)) return null;
+  const distance = side === 'buy' ? entry - stop : stop - entry;
+  if (!(distance > 0)) return null;
+  return (distance / tick) * info.tickValue * volume;
 }

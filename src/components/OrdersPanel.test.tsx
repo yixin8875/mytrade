@@ -68,6 +68,22 @@ describe('OrdersPanel 撤单', () => {
     expect(useApp.getState().toast?.action).toBeFalsy();
   });
 
+  it('全部撤销需要二次确认，确认后调用批量撤单', async () => {
+    const call = vi
+      .spyOn(gateway, 'call')
+      .mockResolvedValue({ results: [{ ticket: 123 }], remaining: 0 } as never);
+    render(<OrdersPanel />);
+
+    await userEvent.click(screen.getByRole('button', { name: '全部撤销' }));
+    expect(screen.getByRole('button', { name: '确认全部撤销？' })).toBeInTheDocument();
+    expect(call).not.toHaveBeenCalledWith('order.cancelAll', {});
+
+    await userEvent.click(screen.getByRole('button', { name: '确认全部撤销？' }));
+
+    await waitFor(() => expect(call).toHaveBeenCalledWith('order.cancelAll', {}));
+    expect(useApp.getState().toast?.text).toBe('已撤销 1 个挂单');
+  });
+
   it('没有挂单时显示空态', () => {
     useApp.setState({ orders: [] });
     render(<OrdersPanel />);

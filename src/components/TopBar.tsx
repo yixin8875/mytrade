@@ -123,15 +123,23 @@ export function TopBar() {
     setConfirmKill(false);
     setBusy('kill');
     try {
-      const res = await gateway.call<{ closed?: { error?: string }[] }>('system.halt', {
+      const res = await gateway.call<{
+        closed?: { error?: string }[];
+        cancelled?: { error?: string }[];
+      }>('system.halt', {
         closeAll: true,
         reason: '手动急停',
       });
-      const closed = res?.closed?.length ?? 0;
-      const failed = res?.closed?.filter((item) => item.error).length ?? 0;
+      const closed = res?.closed ?? [];
+      const cancelled = res?.cancelled ?? [];
+      const closedOk = closed.filter((item) => !item.error).length;
+      const cancelledOk = cancelled.filter((item) => !item.error).length;
+      const failed = closed.length + cancelled.length - closedOk - cancelledOk;
       notify(
         failed ? 'error' : 'success',
-        failed ? `已停机，${failed} 个仓位平仓失败` : `已停机并平掉 ${closed} 个仓位`,
+        failed
+          ? `已停机，平 ${closedOk} 个、撤 ${cancelledOk} 个挂单，${failed} 个失败`
+          : `已停机，平 ${closedOk} 个、撤 ${cancelledOk} 个挂单`,
       );
     } catch (error) {
       notify('error', (error as Error).message);

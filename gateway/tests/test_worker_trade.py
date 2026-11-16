@@ -1576,14 +1576,14 @@ def test_挂单成功时登记模板计划(monkeypatch):
     assert "type_filling" not in sent[0]
     assert worker.store.risks == []
     steps = remembered[0][3]
-    assert steps == [
-        {
-            "atR": 1.0,
-            "closePercent": 50.0,
-            "moveBreakeven": True,
-            "done": False,
-        }
-    ]
+    assert len(steps) == 1
+    step = steps[0]
+    assert step["atR"] == 1.0
+    assert step["closePercent"] == 50.0
+    assert step["moveBreakeven"] is True
+    assert step["done"] is False
+    assert step["skipped"] is False
+    assert step["id"]
     assert remembered[0][4]["templateName"] == "日内"
 
 

@@ -433,12 +433,14 @@ def test_分派到交易与数据处理器(worker):
     worker._size = lambda p: {"size": p}
     worker._modify_order = lambda p: {"modify": p}
     worker._cancel_order = lambda p: {"cancel": p}
+    worker._cancel_all_orders = lambda p: {"cancelall": p}
     worker._modify_position = lambda p: {"pmodify": p}
     worker._breakeven = lambda p: {"be": p}
     worker._set_trailing = lambda p: {"trail": p}
     worker._clear_trailing = lambda p: {"untrail": p}
     worker._close_position = lambda p: {"close": p}
     worker._close_all = lambda p: {"closeall": p}
+    worker._flatten = lambda p: {"flatten": p}
     worker._symbols_list = lambda p: ["sym"]
     worker._symbol_info = lambda p: {"symbol": p}
     worker._history = lambda p: {"history": p}
@@ -453,12 +455,14 @@ def test_分派到交易与数据处理器(worker):
         "order.place": {"place": {"v": 1}},
         "order.modify": {"modify": {"v": 1}},
         "order.cancel": {"cancel": {"v": 1}},
+        "order.cancelAll": {"cancelall": {"v": 1}},
         "position.modify": {"pmodify": {"v": 1}},
         "position.breakeven": {"be": {"v": 1}},
         "position.trailing.set": {"trail": {"v": 1}},
         "position.trailing.clear": {"untrail": {"v": 1}},
         "position.close": {"close": {"v": 1}},
         "position.closeAll": {"closeall": {"v": 1}},
+        "trade.flatten": {"flatten": {"v": 1}},
         "symbols.list": ["sym"],
         "symbol.info": {"symbol": {"v": 1}},
         "history.get": {"history": {"v": 1}},

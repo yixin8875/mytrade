@@ -14,12 +14,15 @@ export function hasSelectedDrawing(chart: IChartWidgetApi): boolean {
 }
 
 export interface PriceLineSpec {
-  price: number;  text: string;
+  price: number;
+  text: string;
   color: string;
   /** 允许用户用鼠标上下拖动，默认 true */
   editable?: boolean;
   /** 是否在价格轴上显示价格标签，默认 true；引导线设为 false */
   showPrice?: boolean;
+  /** 虚线（linestyle=2），用于分批止盈这类「计划线」 */
+  dashed?: boolean;
   /** 用户拖动结束后回调（价格已按最小变动价位取整） */
   onMove?: (price: number) => void;
 }
@@ -33,6 +36,7 @@ interface Entry {
   color: string;
   editable: boolean;
   showPrice: boolean;
+  dashed: boolean;
   time: number;
   /** 用户刚拖过线，在这之前不要用旧数据把它拉回去（等券商回执） */
   holdUntil: number;
@@ -120,6 +124,8 @@ export class PriceLineLayer {
       if (entry.editable !== editable) this.setEditable(entry, editable);
       const showPrice = spec.showPrice ?? true;
       if (entry.showPrice !== showPrice) this.setShowPrice(entry, showPrice);
+      const dashed = spec.dashed ?? false;
+      if (entry.dashed !== dashed) this.setDashed(entry, dashed);
       entry.onMove = spec.onMove;
     }
   }
@@ -173,6 +179,7 @@ export class PriceLineLayer {
       color: '',
       editable: true,
       showPrice: true,
+      dashed: false,
       time: pointTime,
       holdUntil: 0,
       onMove: spec.onMove,
@@ -182,6 +189,7 @@ export class PriceLineLayer {
     this.setText(entry, spec.text);
     if (spec.editable === false) this.setEditable(entry, false);
     if (spec.showPrice === false) this.setShowPrice(entry, false);
+    if (spec.dashed) this.setDashed(entry, true);
   }
 
   private setPrice(entry: Entry, price: number): void {
@@ -221,6 +229,17 @@ export class PriceLineLayer {
       entry.showPrice = showPrice;
     } catch {
       this.remove(entry);
+    }
+  }
+
+  private setDashed(entry: Entry, dashed: boolean): void {
+    try {
+      // 0 实线 / 1 点线 / 2 虚线
+      entry.api.setProperties({ linestyle: dashed ? 2 : 0 });
+      entry.dashed = dashed;
+    } catch {
+      // 该绘图对象不支持线型时保持实线，不要因此把整条线删掉
+      entry.dashed = dashed;
     }
   }
 

@@ -565,26 +565,60 @@ def test_多头保本按开仓价加偏移(make):
     assert out["sl"] == pytest.approx(2000.1)
 
 
-def test_保本止损与现价保持最小距离(make):
+def test_盈利太薄时不把止损压到现价附近(make):
     worker, _, state = make(
-        positions=[position(price_open=2000.0)], quote=tick(bid=2000.02, ask=2000.04)
+        positions=[position(price_open=2000.0, sl=1990.0)],
+        quote=tick(bid=2000.02, ask=2000.04),
     )
 
     out = worker._breakeven({"ticket": 1})
 
-    assert state["sent"][0]["sl"] == pytest.approx(1999.96)
-    assert out["sl"] == pytest.approx(1999.96)
+    assert out["changed"] is False
+    assert out["reason"] == "too_close"
+    assert out["sl"] == pytest.approx(1990.0)
+    assert state["sent"] == []
+
+
+def test_亏损多单不移保本(make):
+    worker, _, state = make(
+        positions=[position(price_open=2000.0, sl=1990.0)],
+        quote=tick(bid=1999.0, ask=1999.2),
+    )
+
+    out = worker._breakeven({"ticket": 1})
+
+    assert out == {
+        "ticket": 1,
+        "sl": 1990.0,
+        "changed": False,
+        "reason": "not_in_profit",
+        "price": 1999.0,
+    }
+    assert state["sent"] == []
+
+
+def test_亏损空单不移保本(make):
+    worker, _, state = make(
+        positions=[position(type=1, price_open=2000.0, sl=2010.0)],
+        quote=tick(bid=2001.0, ask=2001.2),
+    )
+
+    out = worker._breakeven({"ticket": 1})
+
+    assert out["changed"] is False
+    assert out["reason"] == "not_in_profit"
+    assert state["sent"] == []
 
 
 def test_空头保本按开仓价减偏移(make):
     worker, _, state = make(
         positions=[position(type=1, price_open=2000.0)],
-        quote=tick(bid=2000.5, ask=2000.7),
+        quote=tick(bid=1998.8, ask=1999.0),
     )
 
     worker._breakeven({"ticket": 1, "offsetPoints": 10})
 
-    assert state["sent"][0]["sl"] == pytest.approx(2000.76)
+    assert state["sent"][0]["sl"] == pytest.approx(1999.9)
 
 
 def test_已有更优止损时不改单(make):
@@ -605,17 +639,19 @@ def test_空头已有更低止损时不改单(make):
     assert state["sent"] == []
 
 
-def test_保本使用券商的stops_level(make):
+def test_保本按券商stops_level判断空间(make):
     worker, _, state = make(
         positions=[position()],
         info=symbol_info(trade_stops_level=20),
-        quote=tick(bid=2000.1, ask=2000.12),
+        quote=tick(bid=2000.2, ask=2000.22),
     )
 
-    worker._breakeven({"ticket": 1})
+    out = worker._breakeven({"ticket": 1})
 
-    # (20 + 5) 个点 = 0.25，目标被压到现价下方
-    assert state["sent"][0]["sl"] == pytest.approx(1999.85)
+    # (20 + 5) 个点 = 0.25：现价还没离开仓价这么远，保本放不下
+    assert out["changed"] is False
+    assert out["reason"] == "too_close"
+    assert state["sent"] == []
 
 
 # ---------- 移动止损 ----------
@@ -771,6 +807,19 @@ def test_部分平仓后把剩余仓位移到保本(make):
     assert calls == [{"ticket": 1, "offsetPoints": 2}]
     assert out["breakeven"] == {"ticket": 1, "sl": 2000.0}
     assert state["closed"] is False
+
+
+def test_亏损时部分平仓不动止损(make):
+    worker, _, state = make(
+        positions=[position(volume=1.0, price_open=2000.0, sl=1990.0)],
+        quote=tick(bid=1999.0, ask=1999.2),
+    )
+
+    out = worker._close_position({"ticket": 1, "volume": 0.5, "moveToBe": True})
+
+    assert out["breakeven"]["changed"] is False
+    assert out["breakeven"]["reason"] == "not_in_profit"
+    assert [item for item in state["sent"] if item.get("action") == 6] == []
 
 
 def test_部分平仓保本失败不影响平仓结果(make):

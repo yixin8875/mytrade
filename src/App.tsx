@@ -163,13 +163,29 @@ export default function App() {
           );
       }),
       gateway.on('templateStep', (data) => {
-        const event = data as { ticket: number; symbol: string; atR: number; volume: number };
-        useApp
-          .getState()
-          .notify(
-            'success',
-            `分批止盈：${event.symbol} 已到 ${Number(event.atR.toFixed(2))}R，平掉 ${event.volume} 手`,
-          );
+        const event = data as {
+          ticket: number;
+          symbol: string;
+          atR: number;
+          price?: number;
+          volume: number;
+          skipped?: boolean;
+        };
+        const where =
+          Number(event.atR) > 0
+            ? `${Number(event.atR).toFixed(2)}R`
+            : event.price
+              ? String(event.price)
+              : '目标价';
+        const state = useApp.getState();
+        if (event.skipped) {
+          state.notify('info', `仓位过小，已跳过 ${event.symbol} ${where} 分批`);
+          return;
+        }
+        state.notify(
+          'success',
+          `分批止盈：${event.symbol} 已到 ${where}，平掉 ${event.volume} 手`,
+        );
       }),
       gateway.on('alert', (data) => {
         const alert = data as AlertEvent;

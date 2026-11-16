@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import uuid
+
 from worker_base import *  # noqa: F401,F403
 from worker_base import _num  # noqa: F401
+
+# 服务端最多存 8 档；UI 只放 4 档，多余档位留给脚本/旧模板
+MAX_PLAN_STEPS = 8
 
 
 def _check_stops(side: str, ref: float, sl: float, tp: float, info: Any, label: str) -> None:
@@ -494,6 +499,7 @@ class WorkerTrading:
                         "side": a["side"],
                         "steps": steps,
                         "next": 0.0,
+                        "source": "template",
                         "templateId": str(plan.get("templateId") or "")[:40] or None,
                         "templateName": str(plan.get("templateName") or "")[:40] or None,
                     }
@@ -704,7 +710,11 @@ class WorkerTrading:
         return out
 
     def _breakeven(self, p: dict) -> dict:
-        """把止损移到开仓价（可加偏移点数），并避开券商最小止损距离。"""
+        """把止损移到开仓价（可加偏移点数）。
+
+        只有开仓价已经站在现价有利一侧、且留得出券商最小止损距离时才下单；
+        亏损或利润太薄时保持原止损不动，避免把它压到现价旁边被瞬间扫掉。
+        """
         self._guard_trade()
         ticket = int(p.get("ticket") or 0)
         found = mt5.positions_get(ticket=ticket)
@@ -718,7 +728,8 @@ class WorkerTrading:
         point = float(info.point)
         buy = int(position.type) == 0
         offset = max(0.0, _num(p.get("offsetPoints"))) * point
-        target = float(position.price_open) + offset if buy else float(position.price_open) - offset
+        desired = float(position.price_open) + offset if buy else float(position.price_open) - offset
+        desired = align_price(desired, info)
         stops = max(
             int(getattr(info, "trade_stops_level", 0) or 0),
             int(getattr(info, "trade_freeze_level", 0) or 0),
@@ -727,26 +738,43 @@ class WorkerTrading:
         # 再加 5 个点缓冲：贴着实盘 stops 边界发单，报价一跳动就会 Invalid stops。
         min_dist = (max(stops, 1) + 5) * point
         current_price = float(tick.bid if buy else tick.ask)
-        target = min(target, current_price - min_dist) if buy else max(target, current_price + min_dist)
-        target = align_price(target, info)
+        # 开仓价还没进到有利一侧、或离现价太近：保本放不下，保持原止损。
+        if buy and desired > current_price - min_dist:
+            reason = "not_in_profit" if desired >= current_price else "too_close"
+            return {
+                "ticket": ticket,
+                "sl": float(position.sl or 0),
+                "changed": False,
+                "reason": reason,
+                "price": current_price,
+            }
+        if not buy and desired < current_price + min_dist:
+            reason = "not_in_profit" if desired <= current_price else "too_close"
+            return {
+                "ticket": ticket,
+                "sl": float(position.sl or 0),
+                "changed": False,
+                "reason": reason,
+                "price": current_price,
+            }
         current_sl = float(position.sl or 0)
         if current_sl:
-            if buy and target <= current_sl + point / 2:
+            if buy and desired <= current_sl + point / 2:
                 return {"ticket": ticket, "sl": current_sl, "changed": False}
-            if not buy and target >= current_sl - point / 2:
+            if not buy and desired >= current_sl - point / 2:
                 return {"ticket": ticket, "sl": current_sl, "changed": False}
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "symbol": position.symbol,
             "position": ticket,
-            "sl": target,
+            "sl": desired,
             "tp": float(position.tp or 0),
             "magic": self.cfg.magic,
         }
         result = mt5.order_send(request)
         out = self._result_or_raise(result, "position.breakeven")
         self._poll_trade_state()
-        return {"ticket": ticket, "sl": target, "changed": True, **out}
+        return {"ticket": ticket, "sl": desired, "changed": True, **out}
 
     def _set_trailing(self, p: dict) -> dict:
         self._guard_trade()
@@ -888,6 +916,19 @@ class WorkerTrading:
                 continue
             plan = dict(value)
             plan["next"] = 0.0
+            # 旧版 autoBreakeven 都来自模板；手动计划一定会带 source 落盘
+            plan.setdefault("source", "template")
+            steps = plan.get("steps")
+            if isinstance(steps, list):
+                for index, step in enumerate(steps):
+                    if not isinstance(step, dict):
+                        continue
+                    step.setdefault("id", f"legacy-{index + 1}")
+                    step.setdefault("price", None)
+                    step.setdefault("done", False)
+                    step.setdefault("skipped", False)
+                    step.setdefault("moveBreakeven", False)
+                plan["steps"] = steps
             plans[ticket] = plan
         return plans
 
@@ -912,32 +953,105 @@ class WorkerTrading:
                     close = None
                 if close is not None and not (0 < close < 100):
                     close = None
+                price = None
+                try:
+                    if item.get("price") is not None:
+                        price = float(item["price"])
+                        if not math.isfinite(price) or price <= 0:
+                            price = None
+                except (TypeError, ValueError):
+                    price = None
                 out.append(
                     {
+                        "id": WorkerTrading._clean_step_id(item.get("id")),
+                        "price": price,
                         "atR": round(at_r, 4),
                         "closePercent": close,
                         "moveBreakeven": bool(item.get("moveBreakeven")),
                         "done": False,
+                        "skipped": False,
                     }
                 )
         out.sort(key=lambda step: step["atR"])
-        return out[:8]
+        return out[:MAX_PLAN_STEPS]
+
+    @staticmethod
+    def _clean_step_id(raw: Any) -> str:
+        text = str(raw or "").strip()[:16]
+        return text or uuid.uuid4().hex[:8]
 
     @staticmethod
     def _plan_steps(plan: dict) -> list[dict]:
         """读计划里的阶段；旧版本只存了 beR，这里补成一条「移保本」阶段。"""
         steps = plan.get("steps")
         if isinstance(steps, list):
+            for index, step in enumerate(steps):
+                if not isinstance(step, dict):
+                    continue
+                step.setdefault("id", f"legacy-{index + 1}")
+                step.setdefault("price", None)
+                step.setdefault("skipped", False)
+                step.setdefault("done", False)
             return steps
         try:
             be_r = float(plan.get("beR") or 1) or 1.0
         except (TypeError, ValueError):
             be_r = 1.0
-        steps = [{"atR": be_r, "closePercent": None, "moveBreakeven": True, "done": False}]
+        steps = [
+            {
+                "id": "legacy-1",
+                "price": None,
+                "atR": be_r,
+                "closePercent": None,
+                "moveBreakeven": True,
+                "done": False,
+                "skipped": False,
+            }
+        ]
         plan["steps"] = steps
         return steps
 
-    def _auto_partial_close(self, ticket: int, percent: Any) -> float | None:
+    @staticmethod
+    def _step_trigger(step: dict, plan: dict) -> float | None:
+        """一档的触发价：优先存下来的价格，否则按 entry ± risk × atR 折算。"""
+        try:
+            price = float(step.get("price"))
+            if math.isfinite(price) and price > 0:
+                return price
+        except (TypeError, ValueError):
+            pass
+        try:
+            at_r = float(step.get("atR") or 0)
+        except (TypeError, ValueError):
+            return None
+        risk = float(plan.get("risk") or 0)
+        entry = float(plan.get("entry") or 0)
+        if at_r <= 0 or risk <= 0 or entry <= 0:
+            return None
+        return entry + risk * at_r if str(plan.get("side")) == "buy" else entry - risk * at_r
+
+    @staticmethod
+    def _step_at_r(trigger: float | None, plan: dict) -> float | None:
+        risk = float(plan.get("risk") or 0)
+        entry = float(plan.get("entry") or 0)
+        if trigger is None or risk <= 0 or entry <= 0:
+            return None
+        return round(abs(trigger - entry) / risk, 4)
+
+    @classmethod
+    def _sort_plan_steps(cls, steps: list[dict], plan: dict) -> list[dict]:
+        """多单按触发价升序、空单降序；算不出触发价的放最后。"""
+        buy = str(plan.get("side")) != "sell"
+
+        def key(step: dict) -> tuple[int, float]:
+            trigger = cls._step_trigger(step, plan)
+            return (1, 0.0) if trigger is None else (0, trigger if buy else -trigger)
+
+        return sorted(steps, key=key)
+
+    def _auto_partial_close(
+        self, ticket: int, percent: Any, comment: str = "tpl-partial"
+    ) -> float | None:
         """按当前剩余仓位的百分比平仓；仓位小到拆不开时返回 None（只做止损动作）。"""
         try:
             pct = float(percent)
@@ -969,7 +1083,8 @@ class WorkerTrading:
             "price": float(tick.bid if buy else tick.ask),
             "deviation": self.cfg.deviation_points,
             "magic": self.cfg.magic,
-            "comment": "tpl-partial",
+            # MT5 备注最长 31 字节；plan-<8位id> 足够区分每一档，也用于查重
+            "comment": str(comment or "tpl-partial")[:31],
             "type_filling": self._filling_mode(info),
         }
         self._result_or_raise(mt5.order_send(request), "position.template_step.partial")
@@ -1026,6 +1141,7 @@ class WorkerTrading:
                 "side": side,
                 "steps": steps,
                 "next": 0.0,
+                "source": "template",
                 "templateId": record.get("templateId"),
                 "templateName": record.get("templateName"),
             }
@@ -1186,6 +1302,320 @@ class WorkerTrading:
             except GatewayError as exc:
                 results.append({"ticket": pos["ticket"], "error": exc.message})
         return {"results": results}
+
+    def _cancel_all_orders(self, p: dict) -> dict:
+        """批量撤单：逐笔走单笔撤单逻辑，单笔失败不影响其它单。"""
+        self._guard_trade()
+        symbol = p.get("symbol")
+        targets = [o for o in (mt5.orders_get() or []) if not symbol or o.symbol == symbol]
+        results = []
+        for order in targets:
+            ticket = int(order.ticket)
+            try:
+                self._cancel_order({"ticket": ticket})
+                results.append({"ticket": ticket})
+            except GatewayError as exc:
+                results.append({"ticket": ticket, "error": exc.message})
+        self._poll_trade_state()
+        remaining = [o for o in (mt5.orders_get() or []) if not symbol or o.symbol == symbol]
+        out = {"results": results, "remaining": len(remaining)}
+        self.store.audit(
+            "order.cancelAll",
+            {
+                "symbol": symbol,
+                "cancelled": sum(1 for item in results if not item.get("error")),
+                "failed": [item for item in results if item.get("error")],
+                "remaining": len(remaining),
+            },
+        )
+        return out
+
+    def _flatten(self, p: dict) -> dict:
+        """全部清仓：先撤挂单，再平持仓。
+
+        顺序不能反：先平仓的话，撤单期间挂单仍可能成交，清完又冒出新仓位。
+        """
+        self._guard_trade()
+        symbol = p.get("symbol")
+        cancelled = self._cancel_all_orders({"symbol": symbol}).get("results", [])
+        closed = self._close_all({"symbol": symbol}).get("results", [])
+        self._poll_trade_state()
+        # 用券商最新快照统计剩余，避免相信操作前的缓存
+        orders = [o for o in (mt5.orders_get() or []) if not symbol or o.symbol == symbol]
+        positions = [
+            x for x in (mt5.positions_get() or []) if not symbol or x.symbol == symbol
+        ]
+        remaining = {"positions": len(positions), "orders": len(orders)}
+        self.store.audit(
+            "trade.flatten",
+            {
+                "symbol": symbol,
+                "cancelled": sum(1 for item in cancelled if not item.get("error")),
+                "closed": sum(1 for item in closed if not item.get("error")),
+                "failed": [
+                    item for item in [*cancelled, *closed] if item.get("error")
+                ],
+                "remaining": remaining,
+            },
+        )
+        return {"cancelled": cancelled, "closed": closed, "remaining": remaining}
+
+    # ---------- 分批止盈计划（只改本地 state，不发券商请求） ----------
+
+    def _plan_position(self, ticket: int) -> Any:
+        try:
+            found = mt5.positions_get(ticket=ticket)
+        except Exception as exc:  # noqa: BLE001 - 终端异常统一报「找不到持仓」
+            raise GatewayError("NO_POSITION", f"找不到持仓 {ticket}") from exc
+        if not found:
+            raise GatewayError("NO_POSITION", f"找不到持仓 {ticket}")
+        return found[0]
+
+    def _plan_base(self, position: Any, ticket: int) -> dict:
+        """新计划的入场价与 1R：优先持仓当前 SL，其次历史落库的初始入场/止损。
+
+        注意落库的 `risk` 是账户货币金额，不是价格距离；这里只能用 entry/sl 折算。
+        """
+        entry = float(getattr(position, "price_open", 0) or 0)
+        sl = float(getattr(position, "sl", 0) or 0)
+        risk = abs(entry - sl) if entry > 0 and sl > 0 else 0.0
+        login = self._login()
+        if risk <= 0 and login > 0:
+            try:
+                recorded = self.store.position_risk_map(login, [ticket]).get(ticket) or {}
+            except Exception:  # noqa: BLE001 - 读不到就按无 R 处理
+                recorded = {}
+            if entry <= 0:
+                entry = float(recorded.get("entry") or 0)
+            recorded_sl = float(recorded.get("sl") or 0)
+            if entry > 0 and recorded_sl > 0:
+                risk = abs(entry - recorded_sl)
+        return {
+            "entry": entry,
+            "risk": risk,
+            "side": "buy" if int(getattr(position, "type", 0)) == 0 else "sell",
+            "steps": [],
+            "next": 0.0,
+            "source": "manual",
+            "templateId": None,
+            "templateName": None,
+        }
+
+    @staticmethod
+    def _plan_tick(info: Any) -> float:
+        try:
+            tick = float(getattr(info, "trade_tick_size", 0) or 0)
+        except (TypeError, ValueError):
+            tick = 0.0
+        if tick <= 0:
+            try:
+                tick = float(getattr(info, "point", 0) or 0)
+            except (TypeError, ValueError):
+                tick = 0.0
+        return tick if math.isfinite(tick) and tick > 0 else 0.0
+
+    def _validate_plan_price(
+        self, plan: dict, position: Any, info: Any, raw: Any, *, step_id: str | None = None
+    ) -> float:
+        try:
+            price = float(raw)
+        except (TypeError, ValueError):
+            raise GatewayError("BAD_PRICE", "触发价无效") from None
+        if not math.isfinite(price) or price <= 0:
+            raise GatewayError("BAD_PRICE", "触发价无效")
+        price = align_price(price, info)
+        half = self._plan_tick(info) / 2 or 1e-9
+        entry = float(plan.get("entry") or 0)
+        buy = str(plan.get("side")) == "buy"
+        if entry > 0:
+            if buy and price < entry + half:
+                raise GatewayError("PLAN_WRONG_SIDE", "多单的分批价必须高于开仓价")
+            if not buy and price > entry - half:
+                raise GatewayError("PLAN_WRONG_SIDE", "空单的分批价必须低于开仓价")
+        tp = float(getattr(position, "tp", 0) or 0)
+        if tp > 0:
+            beyond = price >= tp - half if buy else price <= tp + half
+            if beyond:
+                raise GatewayError("PLAN_BEYOND_TP", "该档在最终止盈之后，不会触发")
+        for step in self._plan_steps(plan):
+            if step_id and str(step.get("id")) == step_id:
+                continue
+            if step.get("done") or step.get("skipped"):
+                continue
+            other = self._step_trigger(step, plan)
+            if other is not None and abs(other - price) < half:
+                raise GatewayError("PLAN_DUPLICATE", "已有一档在这个价位")
+        return price
+
+    @staticmethod
+    def _validate_plan_percent(raw: Any) -> float:
+        try:
+            percent = float(raw)
+        except (TypeError, ValueError):
+            raise GatewayError("BAD_PERCENT", "平仓比例需在 1–99% 之间") from None
+        if not math.isfinite(percent) or not (1 <= percent <= 99):
+            raise GatewayError("BAD_PERCENT", "平仓比例需在 1–99% 之间")
+        return round(percent, 2)
+
+    def _plan_for_edit(self, ticket: int, *, require: bool = False) -> tuple[Any, dict]:
+        position = self._plan_position(ticket)
+        plan = self._auto_be.get(ticket)
+        if plan is None:
+            if require:
+                raise GatewayError("NO_PLAN", "该持仓还没有分批止盈")
+            plan = self._plan_base(position, ticket)
+            self._auto_be[ticket] = plan
+        return position, plan
+
+    def _plan_payload(self, plan: dict) -> dict:
+        steps = self._sort_plan_steps(self._plan_steps(plan), plan)
+        out = []
+        for step in steps:
+            trigger = self._step_trigger(step, plan)
+            if trigger is None:
+                continue
+            out.append(
+                {
+                    "id": str(step.get("id") or ""),
+                    "price": round(float(trigger), 8),
+                    "closePercent": step.get("closePercent"),
+                    "moveBreakeven": bool(step.get("moveBreakeven")),
+                    "done": bool(step.get("done")),
+                    "skipped": bool(step.get("skipped")),
+                    "atR": self._step_at_r(trigger, plan),
+                }
+            )
+        return {
+            "entry": float(plan.get("entry") or 0),
+            "risk": float(plan.get("risk") or 0),
+            "side": str(plan.get("side") or "buy"),
+            "steps": out,
+            "templateId": plan.get("templateId"),
+            "templateName": plan.get("templateName"),
+            "source": str(plan.get("source") or "manual"),
+        }
+
+    def _position_plan(self, ticket: int) -> dict | None:
+        """下发给前端的派生计划；没有计划时返回 None。"""
+        plan = getattr(self, "_auto_be", {}).get(int(ticket))
+        if not plan:
+            return None
+        return self._plan_payload(plan)
+
+    def _plan_add(self, p: dict) -> dict:
+        ticket = int(p.get("ticket") or 0)
+        if ticket <= 0:
+            raise GatewayError("BAD_TICKET", "缺少持仓号")
+        # 先不写进 _auto_be：校验失败时不应该留下一个空计划
+        position = self._plan_position(ticket)
+        plan = self._auto_be.get(ticket) or self._plan_base(position, ticket)
+        steps = self._plan_steps(plan)
+        if len(steps) >= MAX_PLAN_STEPS:
+            raise GatewayError("PLAN_LIMIT", f"分批止盈最多 {MAX_PLAN_STEPS} 档")
+        info = self._ensure_symbol(position.symbol)
+        price = self._validate_plan_price(plan, position, info, p.get("price"))
+        percent = self._validate_plan_percent(p.get("closePercent"))
+        step = {
+            "id": uuid.uuid4().hex[:8],
+            "price": price,
+            "atR": None,
+            "closePercent": percent,
+            "moveBreakeven": bool(p.get("moveBreakeven")),
+            "done": False,
+            "skipped": False,
+        }
+        plan["steps"] = self._sort_plan_steps([*steps, step], plan)
+        self._auto_be[ticket] = plan
+        self._save_auto_be()
+        self._poll_trade_state()
+        payload = self._plan_payload(plan)
+        self.store.audit(
+            "position.plan.add",
+            {
+                "ticket": ticket,
+                "stepId": step["id"],
+                "price": price,
+                "closePercent": percent,
+                "source": payload["source"],
+                "steps": payload["steps"],
+            },
+        )
+        return {"plan": payload}
+
+    def _plan_update(self, p: dict) -> dict:
+        ticket = int(p.get("ticket") or 0)
+        step_id = str(p.get("stepId") or "")
+        position, plan = self._plan_for_edit(ticket, require=True)
+        info = self._ensure_symbol(position.symbol)
+        steps = self._plan_steps(plan)
+        step = next((item for item in steps if str(item.get("id")) == step_id), None)
+        if step is None:
+            raise GatewayError("NO_STEP", "找不到该档")
+        if p.get("price") is not None:
+            step["price"] = self._validate_plan_price(
+                plan, position, info, p.get("price"), step_id=step_id
+            )
+        if "closePercent" in p and p.get("closePercent") is not None:
+            step["closePercent"] = self._validate_plan_percent(p.get("closePercent"))
+        if "moveBreakeven" in p:
+            step["moveBreakeven"] = bool(p.get("moveBreakeven"))
+        plan["steps"] = self._sort_plan_steps(steps, plan)
+        self._save_auto_be()
+        self._poll_trade_state()
+        payload = self._plan_payload(plan)
+        self.store.audit(
+            "position.plan.update",
+            {
+                "ticket": ticket,
+                "stepId": step_id,
+                "price": step.get("price"),
+                "closePercent": step.get("closePercent"),
+                "steps": payload["steps"],
+            },
+        )
+        return {"plan": payload}
+
+    def _plan_remove(self, p: dict) -> dict:
+        ticket = int(p.get("ticket") or 0)
+        step_id = str(p.get("stepId") or "")
+        _, plan = self._plan_for_edit(ticket, require=True)
+        steps = self._plan_steps(plan)
+        left = [item for item in steps if str(item.get("id")) != step_id]
+        if len(left) == len(steps):
+            raise GatewayError("NO_STEP", "找不到该档")
+        plan["steps"] = self._sort_plan_steps(left, plan)
+        self._save_auto_be()
+        self._poll_trade_state()
+        payload = self._plan_payload(plan)
+        self.store.audit(
+            "position.plan.remove",
+            {"ticket": ticket, "stepId": step_id, "steps": payload["steps"]},
+        )
+        return {"plan": payload}
+
+    def _plan_clear(self, p: dict) -> dict:
+        ticket = int(p.get("ticket") or 0)
+        self._plan_position(ticket)
+        existed = self._auto_be.pop(ticket, None) is not None
+        if existed:
+            self._save_auto_be()
+            self._poll_trade_state()
+        self.store.audit("position.plan.clear", {"ticket": ticket, "existed": existed})
+        return {"plan": None}
+
+    def _step_filled(self, ticket: int, comment: str) -> bool:
+        """这一档是否已经成交过：响应丢失时避免下一轮再平一次。
+
+        查历史失败按「没成交」处理（保持旧行为），只是可能多平一次。
+        """
+        try:
+            deals = mt5.history_deals_get(position=ticket)
+        except Exception:  # noqa: BLE001 - 历史读不到不能阻挡执行
+            return False
+        for deal in deals or []:
+            if str(getattr(deal, "comment", "") or "").strip() == comment:
+                return True
+        return False
 
     def _result_or_raise(
         self, result: Any, kind: str, enrich: Callable[[dict], None] | None = None

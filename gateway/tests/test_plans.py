@@ -98,7 +98,11 @@ def test_normalize_keeps_valid_steps_sorted_by_r():
     ]
     steps = Mt5Worker._normalize_plan_steps(raw)
     assert [step["atR"] for step in steps] == [1.0, 1.5, 2.0]
-    assert steps[0] == {"atR": 1.0, "closePercent": None, "moveBreakeven": True, "done": False}
+    assert steps[0]["closePercent"] is None
+    assert steps[0]["moveBreakeven"] is True
+    assert steps[0]["done"] is False
+    assert steps[0]["skipped"] is False
+    assert steps[0]["id"]
     assert steps[2]["closePercent"] == 50.0
 
 
@@ -162,7 +166,13 @@ def test_plan_steps_returns_existing_list_untouched():
 def test_plan_steps_migrates_legacy_be_r():
     plan = {"beR": 2.5}
     steps = Mt5Worker._plan_steps(plan)
-    assert steps == [{"atR": 2.5, "closePercent": None, "moveBreakeven": True, "done": False}]
+    assert len(steps) == 1
+    step = steps[0]
+    assert step["atR"] == 2.5
+    assert step["closePercent"] is None
+    assert step["moveBreakeven"] is True
+    assert step["done"] is False
+    assert step["id"] == "legacy-1"
     assert plan["steps"] is steps
 
 
@@ -214,6 +224,31 @@ def test_auto_move_breakeven_sell_side_falls_back_to_open_price(monkeypatch):
     assert target == 1.1
     assert sent[-1]["sl"] == 1.1
     assert sent[-1]["tp"] == 0
+
+
+def test_auto_move_breakeven_skips_when_not_enough_profit(monkeypatch):
+    worker, sent = make_worker(monkeypatch)
+    info = fake_symbol_info()
+    position = {
+        "ticket": 10,
+        "symbol": "EURUSD",
+        "side": "buy",
+        "openPrice": 1.1,
+        "sl": 1.05,
+        "tp": None,
+    }
+
+    # 还在亏损
+    in_loss = types.SimpleNamespace(bid=1.09, ask=1.0902)
+    assert worker._auto_move_breakeven(10, {"entry": 1.1, "side": "buy"}, position, info, in_loss) is None
+
+    # 已经回本，但离现价太近放不下止损
+    too_close = types.SimpleNamespace(bid=1.1001, ask=1.1003)
+    assert (
+        worker._auto_move_breakeven(10, {"entry": 1.1, "side": "buy"}, position, info, too_close)
+        is None
+    )
+    assert sent == []
 
 
 def test_auto_move_breakeven_noop_when_already_at_breakeven(monkeypatch):

@@ -5,6 +5,7 @@ import { accentForTheme } from '../lib/accent';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, snapToLevel } from '../lib/format';
 import { requestModify, revertModify } from '../lib/modifyQueue';
 import { cancelOrderWithUndo } from '../lib/orderActions';
+import { activeSteps, estimateStepLots, stepAtR } from '../lib/plan';
 import { CalendarLayer } from '../chart/tv/calendarLayer';
 import { GatewayDatafeed } from '../chart/tv/datafeed';
 import { PineRunner } from '../chart/tv/pineRunner';
@@ -34,6 +35,10 @@ const SIDE_BUY = '#0f7a55';
 const SIDE_SELL = '#c2413a';
 const ENTRY_COLOR = '#1f5fd6';
 const STOP_OUT_COLOR = '#a9691a';
+// 分批止盈计划线：比券商 TP 略浅的绿 + 虚线，和真正的止盈单区分开
+const PLAN_COLOR = '#4db6ac';
+// 最终止盈被拖到该档之前：线还在，但不该执行
+const PLAN_INVALID_COLOR = '#8a8f98';
 // 风险/盈利区间只画 R 刻度线和文字，不铺红绿底色
 const BAND_FILL = 'transparent';
 
@@ -657,6 +662,48 @@ export function ChartPanel({
         },
       });
     }
+    // 分批止盈：每档一个绿色小块，可直接上下拖动或点 ✕ 删除
+    const planSteps = activeSteps(position.plan);
+    if (planSteps.length > 0) {
+      const lots = estimateStepLots(position.volume, planSteps, info, position.side);
+      const lotsById = new Map(lots.rows.map((row) => [row.id, row]));
+      for (const planStep of planSteps) {
+        const key = `plan:${position.ticket}:${planStep.id}`;
+        const beyondTp =
+          position.tp != null &&
+          (position.side === 'buy' ? planStep.price >= position.tp : planStep.price <= position.tp);
+        const row = lotsById.get(planStep.id);
+        const percent = planStep.closePercent != null ? `${planStep.closePercent}%` : '移保本';
+        const lotsText = row && row.lots > 0 ? ` · ${volume(row.lots)}手` : '';
+        const r = stepAtR(planStep, position, position.plan);
+        const rText = r != null ? ` · ${r.toFixed(1)}R` : '';
+        chips.push({
+          key,
+          price: resolvePrice(key, planStep.price, tol).price ?? planStep.price,
+          color: beyondTp ? PLAN_INVALID_COLOR : PLAN_COLOR,
+          text: `${percent}${lotsText}${rText}${beyondTp ? ' · 超出止盈' : ''}`,
+          onMove: beyondTp
+            ? undefined
+            : (price) =>
+                moveTo(key, planStep.price, price, (value) =>
+                  gateway.call('position.plan.update', {
+                    ticket: position.ticket,
+                    stepId: planStep.id,
+                    price: value,
+                  }),
+                ),
+          onRemove: () => {
+            gateway
+              .call('position.plan.remove', {
+                ticket: position.ticket,
+                stepId: planStep.id,
+              })
+              .then(() => notify('info', '已删除该分批档位'))
+              .catch((err: Error) => notify('error', err.message));
+          },
+        });
+      }
+    }
   }
 
   // ---- 创建 widget（只创建一次，之后靠 setSymbol / setResolution 同步）----
@@ -1140,6 +1187,28 @@ export function ChartPanel({
           onMove: (price) =>
             moveTo(key, position.tp, price, (value) =>
               gateway.call('position.modify', { ticket: position.ticket, tp: value }),
+            ),
+        });
+      }
+      // 分批止盈档位：虚线、可拖动；超出最终止盈时画灰线且禁止拖动
+      for (const planStep of activeSteps(position.plan)) {
+        const key = `plan:${position.ticket}:${planStep.id}`;
+        const beyondTp =
+          position.tp != null &&
+          (position.side === 'buy' ? planStep.price >= position.tp : planStep.price <= position.tp);
+        specs.set(key, {
+          price: resolvePrice(key, planStep.price, tol).price ?? planStep.price,
+          color: beyondTp ? PLAN_INVALID_COLOR : PLAN_COLOR,
+          text: '',
+          editable: !beyondTp,
+          dashed: true,
+          onMove: (price) =>
+            moveTo(key, planStep.price, price, (value) =>
+              gateway.call('position.plan.update', {
+                ticket: position.ticket,
+                stepId: planStep.id,
+                price: value,
+              }),
             ),
         });
       }
