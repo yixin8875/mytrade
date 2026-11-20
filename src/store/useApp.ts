@@ -23,6 +23,10 @@ import type {
 } from '../gateway/types';
 
 export type SidebarTab = 'positions' | 'orders' | 'watchlist';
+/** 底部订单托盘页签：持仓 / 挂单 / 成交 / 已平仓 */
+export type DockTab = 'positions' | 'orders' | 'deals' | 'closed';
+/** 下单模式：常规确认 / 单击直发 / 风险计算表格 */
+export type OrderEntryMode = 'regular' | 'oneclick' | 'risk';
 /** 布局预设 id，见 chart/layouts.ts */
 export type ChartLayout = string;
 
@@ -234,6 +238,20 @@ interface AppStore {
   /** 下单时填的策略标签 */
   orderTag: string;
   sidebarTab: SidebarTab;
+  /** 交易台顶部的品种标签（最近打开的品种，当前品种在 setSymbol 时自动加入） */
+  openSymbols: string[];
+  /** 底部订单托盘高度（px）与是否收起 */
+  dockHeight: number;
+  dockCollapsed: boolean;
+  dockTab: DockTab;
+  /** 交易台左侧行情列是否展开 */
+  watchColumnOpen: boolean;
+  /** 左侧图标栏是否钉住（展开成完整导航） */
+  railPinned: boolean;
+  /** 下单面板模式；单击模式不持久化，每次启动回到常规 */
+  orderEntryMode: OrderEntryMode;
+  /** 下单面板是否展开（收起后留下窄条） */
+  ticketOpen: boolean;
   toast: Toast | null;
 
   setPage: (page: Page) => void;
@@ -280,6 +298,17 @@ interface AppStore {
   setWatchRows: (rows: WatchlistRow[]) => void;
   setOrderTag: (tag: string) => void;
   setSidebarTab: (tab: SidebarTab) => void;
+  /** 打开/关闭顶部品种标签；关掉当前品种时切到相邻标签 */
+  toggleOpenSymbol: (symbol: string) => void;
+  closeOpenSymbol: (symbol: string) => void;
+  /** 120–480px，越界自动夹紧 */
+  setDockHeight: (height: number) => void;
+  setDockCollapsed: (collapsed: boolean) => void;
+  setDockTab: (tab: DockTab) => void;
+  setWatchColumnOpen: (open: boolean) => void;
+  setRailPinned: (pinned: boolean) => void;
+  setOrderEntryMode: (mode: OrderEntryMode) => void;
+  setTicketOpen: (open: boolean) => void;
   notify: (kind: Toast['kind'], text: string, action?: ToastAction) => void;
   clearToast: () => void;
   /** 跳到设置页并打开指定分区 */
@@ -438,6 +467,16 @@ const RES_KEY = 'mytrade.resolution';
 const PREFS_KEY = 'mytrade.alertPrefs';
 const WATCH_KEY = 'mytrade.watchlist';
 const TAG_KEY = 'mytrade.orderTag';
+const OPEN_SYMBOLS_KEY = 'mytrade.openSymbols';
+const DOCK_HEIGHT_KEY = 'mytrade.dockHeight';
+const DOCK_COLLAPSED_KEY = 'mytrade.dockCollapsed';
+const DOCK_TAB_KEY = 'mytrade.dockTab';
+const WATCH_COLUMN_KEY = 'mytrade.watchColumnOpen';
+const RAIL_PINNED_KEY = 'mytrade.railPinned';
+const ENTRY_MODE_KEY = 'mytrade.orderEntryMode';
+
+export const DOCK_MIN_HEIGHT = 120;
+export const DOCK_MAX_HEIGHT = 480;
 
 /** 读 localStorage 里的 JSON，坏数据或读不到就用默认值 */
 function readJson<T>(key: string, fallback: T): T {
@@ -523,6 +562,41 @@ function loadTag(): string {
   return typeof raw === 'string' ? raw : '';
 }
 
+function loadOpenSymbols(): string[] {
+  const raw = readJson<unknown>(OPEN_SYMBOLS_KEY, []);
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item): item is string => typeof item === 'string' && !!item).slice(0, 12);
+}
+
+function loadDockHeight(): number {
+  const raw = Number(readJson<unknown>(DOCK_HEIGHT_KEY, 208));
+  if (!Number.isFinite(raw)) return 208;
+  return Math.min(Math.max(Math.round(raw), DOCK_MIN_HEIGHT), DOCK_MAX_HEIGHT);
+}
+
+function loadDockCollapsed(): boolean {
+  return window.localStorage.getItem(DOCK_COLLAPSED_KEY) === '1';
+}
+
+function loadDockTab(): DockTab {
+  const raw = readJson<unknown>(DOCK_TAB_KEY, 'positions');
+  return raw === 'orders' || raw === 'deals' || raw === 'closed' ? raw : 'positions';
+}
+
+function loadWatchColumnOpen(): boolean {
+  return window.localStorage.getItem(WATCH_COLUMN_KEY) !== '0';
+}
+
+function loadRailPinned(): boolean {
+  return window.localStorage.getItem(RAIL_PINNED_KEY) === '1';
+}
+
+/** 单击模式涉及实盘直发，按方案不跨启动保留 */
+function loadOrderEntryMode(): OrderEntryMode {
+  const raw = readJson<unknown>(ENTRY_MODE_KEY, 'regular');
+  return raw === 'risk' ? 'risk' : 'regular';
+}
+
 let toastSeq = 0;
 
 export const useApp = create<AppStore>((set, get) => ({
@@ -569,6 +643,14 @@ export const useApp = create<AppStore>((set, get) => ({
   watchRows: [],
   orderTag: loadTag(),
   sidebarTab: 'positions',
+  openSymbols: loadOpenSymbols(),
+  dockHeight: loadDockHeight(),
+  dockCollapsed: loadDockCollapsed(),
+  dockTab: loadDockTab(),
+  watchColumnOpen: loadWatchColumnOpen(),
+  railPinned: loadRailPinned(),
+  orderEntryMode: loadOrderEntryMode(),
+  ticketOpen: true,
   toast: null,
 
   setPage: (page) => {
@@ -595,15 +677,26 @@ export const useApp = create<AppStore>((set, get) => ({
   setSymbols: (symbols) => set({ symbols }),
   setSymbol: (symbol) => {
     const wasArmed = get().templateArmed;
-    set((state) => ({
-      symbol,
-      quote: null,
-      preview: null,
-      templateArmed: false,
-      draft: state.draft.active
-        ? { ...state.draft, active: false, sl: null, tp: null, price: 0 }
-        : state.draft,
-    }));
+    set((state) => {
+      // 第一次进入交易台时顺带打开自选前两个品种，和 Exness 的标签习惯一致
+      const base = state.openSymbols.length
+        ? state.openSymbols
+        : state.watchlist.filter((item) => item !== symbol).slice(0, 2);
+      const openSymbols = symbol
+        ? [symbol, ...base.filter((item) => item !== symbol)].slice(0, 12)
+        : base;
+      writeJson(OPEN_SYMBOLS_KEY, openSymbols);
+      return {
+        symbol,
+        openSymbols,
+        quote: null,
+        preview: null,
+        templateArmed: false,
+        draft: state.draft.active
+          ? { ...state.draft, active: false, sl: null, tp: null, price: 0 }
+          : state.draft,
+      };
+    });
     if (wasArmed) get().notify('info', '已切换品种，下单模板已解除');
   },
   setResolution: (resolution) => {
@@ -768,6 +861,67 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ orderTag });
   },
   setSidebarTab: (sidebarTab) => set({ sidebarTab }),
+  toggleOpenSymbol: (symbol) => {
+    const state = get();
+    if (state.openSymbols.includes(symbol)) {
+      state.closeOpenSymbol(symbol);
+      return;
+    }
+    const openSymbols = [...state.openSymbols, symbol].slice(-12);
+    writeJson(OPEN_SYMBOLS_KEY, openSymbols);
+    set({ openSymbols });
+  },
+  closeOpenSymbol: (symbol) => {
+    const state = get();
+    const index = state.openSymbols.indexOf(symbol);
+    if (index < 0) return;
+    const openSymbols = state.openSymbols.filter((item) => item !== symbol);
+    writeJson(OPEN_SYMBOLS_KEY, openSymbols);
+    const fallback = openSymbols[Math.min(index, openSymbols.length - 1)];
+    set({ openSymbols });
+    if (state.symbol === symbol && fallback) state.setSymbol(fallback);
+  },
+  setDockHeight: (height) => {
+    const dockHeight = Number.isFinite(height)
+      ? Math.min(Math.max(Math.round(height), DOCK_MIN_HEIGHT), DOCK_MAX_HEIGHT)
+      : 208;
+    writeJson(DOCK_HEIGHT_KEY, dockHeight);
+    set({ dockHeight, dockCollapsed: false });
+  },
+  setDockCollapsed: (dockCollapsed) => {
+    try {
+      window.localStorage.setItem(DOCK_COLLAPSED_KEY, dockCollapsed ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+    set({ dockCollapsed });
+  },
+  setDockTab: (dockTab) => {
+    writeJson(DOCK_TAB_KEY, dockTab);
+    set({ dockTab, dockCollapsed: false });
+  },
+  setWatchColumnOpen: (watchColumnOpen) => {
+    try {
+      window.localStorage.setItem(WATCH_COLUMN_KEY, watchColumnOpen ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+    set({ watchColumnOpen });
+  },
+  setRailPinned: (railPinned) => {
+    try {
+      window.localStorage.setItem(RAIL_PINNED_KEY, railPinned ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+    set({ railPinned });
+  },
+  setOrderEntryMode: (orderEntryMode) => {
+    // 单击模式只在本轮有效，写盘时按常规模式记
+    writeJson(ENTRY_MODE_KEY, orderEntryMode === 'oneclick' ? 'regular' : orderEntryMode);
+    set({ orderEntryMode, ticketOpen: true });
+  },
+  setTicketOpen: (ticketOpen) => set({ ticketOpen }),
 
   notify: (kind, text, action) => {
     const id = ++toastSeq;
@@ -815,6 +969,23 @@ export function handleGlobalShortcut(event: KeyboardEvent): void {
     event.preventDefault();
     const state = useApp.getState();
     state.setPaletteOpen(!state.paletteOpen);
+    return;
+  }
+  // 交易台布局：Ctrl/Cmd + \ 收放自选列，Ctrl/Cmd + J 收放底部托盘
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === '\\') {
+    const state = useApp.getState();
+    if (state.page === 'trade') {
+      event.preventDefault();
+      state.setWatchColumnOpen(!state.watchColumnOpen);
+    }
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'j') {
+    const state = useApp.getState();
+    if (state.page === 'trade') {
+      event.preventDefault();
+      state.setDockCollapsed(!state.dockCollapsed);
+    }
     return;
   }
   if (event.ctrlKey || event.metaKey || event.altKey) return;

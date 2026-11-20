@@ -5,6 +5,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from 'react';
+import { clsx } from 'clsx';
 import { subscribeCrosshair, type CrosshairState } from '../chart/tv/sync';
 import type { IChartWidgetApi } from '../../public/charting_library/charting_library';
 
@@ -17,6 +18,26 @@ export interface ChartChip {
   onRemove?: () => void;
   /** 拖动标签时回调；价格未取整，由调用方按 tick 对齐 */
   onMove?: (price: number) => void;
+  /** 价格前的小徽标（TP / SL）；muted = 尚未设置，pull = 按住上下拖动生成对应保护线 */
+  tags?: {
+    text: string;
+    muted?: boolean;
+    color?: string;
+    onClick?: () => void;
+    /** 按住徽标上下拖动：虚线跟随指针，松手时回调一次最终价格（只点不拖不触发） */
+    pull?: {
+      /** 预览小块的颜色，一般与保护线一致 */
+      color: string;
+      /** 预览小块上的价格文字 */
+      format?: (price: number) => string;
+      onPull: (price: number) => void;
+    };
+    title?: string;
+  }[];
+  /** 用覆盖层画一条横线（市价线跟随现价，不能落成图表绘图对象） */
+  drawLine?: boolean;
+  /** 不参与防重叠错行，始终贴合价格坐标 */
+  fixed?: boolean;
 }
 
 /** 图上从 from 到 to 的半透明区间（风险/盈利带），可带 R 倍数刻度 */
@@ -29,6 +50,12 @@ export interface ChartBand {
   labelColor?: string;
   /** 区间内的刻度线，例如 1R/2R/3R；priceText 是该价位在价格轴旁的精确价格 */
   marks?: { price: number; text: string; priceText?: string }[];
+  /** 拖动这些标签时加深本区间（例如 draft:sl） */
+  keys?: string[];
+  /** 拖动时使用的更深颜色 */
+  activeColor?: string;
+  /** 外部触发加深（直接拖图上的价格线时） */
+  highlight?: boolean;
 }
 
 interface Position {
@@ -55,10 +82,17 @@ interface GhostPosition {
   price: number;
 }
 
+interface LinePosition {
+  y: number;
+  left: number;
+  width: number;
+}
+
 interface Layout {
   chips: Record<string, Position | null>;
   bands: Record<string, BandPosition | null>;
   ghost: GhostPosition | null;
+  lines: Record<string, LinePosition | null>;
 }
 
 type ChartInternals = {
@@ -216,7 +250,7 @@ export function ChartChips({
   /** 关闭时不再显示其他图表的十字线 */
   syncCrosshair?: boolean;
 }) {
-  const [layout, setLayout] = useState<Layout>({ chips: {}, bands: {}, ghost: null });
+  const [layout, setLayout] = useState<Layout>({ chips: {}, bands: {}, ghost: null, lines: {} });
   const chipsRef = useRef(chips);
   chipsRef.current = chips;
   const bandsRef = useRef(bands);
@@ -226,6 +260,34 @@ export function ChartChips({
   const ghostRef = useRef<CrosshairState | null>(null);
   const lastRef = useRef('');
   const [drag, setDrag] = useState<{ key: string; y: number; right: number } | null>(null);
+  // 按住徽标/小块后铺一层透明接收层：图表是 iframe，指针一旦移出去事件就被它吃掉
+  const [armed, setArmed] = useState(false);
+  // 按住 TP/SL 徽标上下拉：松手前只在覆盖层画预览线，不进草稿
+  const [pull, setPull] = useState<{
+    label: string;
+    text: string;
+    y: number;
+    left: number;
+    width: number;
+    right: number;
+    color: string;
+  } | null>(null);
+  const pullRef = useRef<{
+    pointerId: number;
+    box: PaneBox;
+    paneTop: number;
+    left: number;
+    width: number;
+    right: number;
+    startY: number;
+    label: string;
+    color: string;
+    format?: (price: number) => string;
+    onPull: (price: number) => void;
+    price: number | null;
+    /** 解除 window 上的 pointer 监听 */
+    cleanup: () => void;
+  } | null>(null);
   const dragRef = useRef<{
     key: string;
     pointerId: number;
@@ -236,7 +298,17 @@ export function ChartChips({
     startPriceY: number;
     lastMove: number;
     onMove: (price: number) => void;
+    cleanup: () => void;
   } | null>(null);
+
+  const stopChipDrag = () => {
+    const current = dragRef.current;
+    if (!current) return;
+    current.cleanup();
+    dragRef.current = null;
+    setDrag(null);
+    setArmed(false);
+  };
 
   const startChipDrag = (chip: ChartChip, event: ReactPointerEvent<HTMLDivElement>) => {
     if (!chip.onMove) return;
@@ -249,7 +321,43 @@ export function ChartChips({
     if (startPriceY == null) return;
     const paneTop = box.top - hostRect.top;
     const right = hostRect.right - box.right + 6;
-    dragRef.current = {
+    event.preventDefault();
+    event.stopPropagation();
+    // 小块只有 20px 高，指针一动就滑出去：监听挂 window，不依赖 setPointerCapture
+    const onMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== current.pointerId) return;
+      moveEvent.preventDefault();
+      const targetY = current.startPriceY + (moveEvent.clientY - current.startY);
+      const price = current.box.priceAt(targetY);
+      if (price == null) return;
+      setDrag({
+        key: current.key,
+        y: current.paneTop + Math.min(Math.max(targetY, 8), current.box.height - 8),
+        right: current.right,
+      });
+      const now = performance.now();
+      if (now - current.lastMove >= 90) {
+        current.lastMove = now;
+        current.onMove(price);
+      }
+    };
+    const onUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== current.pointerId) return;
+      const targetY = current.startPriceY + (upEvent.clientY - current.startY);
+      const price = current.box.priceAt(targetY);
+      if (price != null) current.onMove(price);
+      stopChipDrag();
+    };
+    const onCancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId !== current.pointerId) return;
+      stopChipDrag();
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+    const current = {
       key: chip.key,
       pointerId: event.pointerId,
       box,
@@ -259,56 +367,115 @@ export function ChartChips({
       startPriceY,
       lastMove: 0,
       onMove: chip.onMove,
+      cleanup,
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.preventDefault();
-    event.stopPropagation();
+    stopChipDrag();
+    dragRef.current = current;
+    setArmed(true);
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
     setDrag({ key: chip.key, y: paneTop + startPriceY, right });
   };
 
-  const moveChipDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const current = dragRef.current;
-    if (!current || event.pointerId !== current.pointerId) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const targetY = current.startPriceY + (event.clientY - current.startY);
-    const price = current.box.priceAt(targetY);
+  type PullState = NonNullable<typeof pullRef.current>;
+
+  const stopTagPull = () => {
+    const current = pullRef.current;
+    if (!current) return;
+    current.cleanup();
+    pullRef.current = null;
+    setPull(null);
+    setArmed(false);
+  };
+
+  /** 按指针位置更新预览；3px 内不动算点击，不生成保护线 */
+  const trackTagPull = (current: PullState, clientY: number) => {
+    if (current.price == null && Math.abs(clientY - current.startY) < 3) return;
+    const y = Math.min(Math.max(clientY - current.box.top, 8), current.box.height - 8);
+    const price = current.box.priceAt(y);
     if (price == null) return;
-    setDrag({
-      key: current.key,
-      y: current.paneTop + Math.min(Math.max(targetY, 8), current.box.height - 8),
+    current.price = price;
+    setPull({
+      label: current.label,
+      text: current.format ? current.format(price) : price.toFixed(5),
+      y: current.paneTop + y,
+      left: current.left,
+      width: current.width,
       right: current.right,
+      color: current.color,
     });
-    const now = performance.now();
-    if (now - current.lastMove >= 90) {
-      current.lastMove = now;
-      current.onMove(price);
-    }
   };
 
-  const endChipDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const current = dragRef.current;
-    if (!current || event.pointerId !== current.pointerId) return;
+  const startTagPull = (
+    tag: NonNullable<ChartChip['tags']>[number],
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    const spec = tag.pull;
+    if (!spec) return;
+    // 按钮很窄，按住后很容易滑出去：监听挂在 window 上，不依赖 setPointerCapture
     event.preventDefault();
     event.stopPropagation();
-    const targetY = current.startPriceY + (event.clientY - current.startY);
-    const price = current.box.priceAt(targetY);
-    if (price != null) current.onMove(price);
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      /* 指针已释放 */
-    }
-    dragRef.current = null;
-    setDrag(null);
+    stopTagPull();
+    const hostEl = host.current;
+    const box = hostEl ? measurePane(hostEl, chartRef.current) : null;
+    const hostRect = hostEl?.getBoundingClientRect();
+    if (!box || !hostRect) return;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== current.pointerId) return;
+      moveEvent.preventDefault();
+      trackTagPull(current, moveEvent.clientY);
+    };
+    const onUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== current.pointerId) return;
+      trackTagPull(current, upEvent.clientY);
+      const price = current.price;
+      stopTagPull();
+      if (price != null) spec.onPull(price);
+    };
+    const onCancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId !== current.pointerId) return;
+      stopTagPull();
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+
+    const current: PullState = {
+      pointerId: event.pointerId,
+      box,
+      paneTop: box.top - hostRect.top,
+      left: box.left - hostRect.left,
+      width: box.width,
+      right: hostRect.right - box.right + 6,
+      startY: event.clientY,
+      label: tag.text,
+      color: spec.color,
+      format: spec.format,
+      onPull: spec.onPull,
+      price: null,
+      cleanup,
+    };
+    pullRef.current = current;
+    setArmed(true);
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    // 预览线先不出现：点了不动等于什么都没做
+    setPull(null);
   };
 
-  const cancelChipDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const current = dragRef.current;
-    if (!current || event.pointerId !== current.pointerId) return;
-    dragRef.current = null;
-    setDrag(null);
-  };
+  // 卸载时清掉 window 上的拖动监听
+  useEffect(
+    () => () => {
+      stopChipDrag();
+      stopTagPull();
+    },
+    [],
+  );
 
   // 其他图表的十字线：订阅后写进 ref，由下面的动画帧循环读取
   useEffect(() => {
@@ -328,7 +495,7 @@ export function ChartChips({
     const tick = (time: number) => {
       if (time - last >= 50) {
         last = time;
-        let next: Layout = { chips: {}, bands: {}, ghost: null };
+        let next: Layout = { chips: {}, bands: {}, ghost: null, lines: {} };
         try {
           const hostEl = host.current;
           const box = hostEl ? measurePane(hostEl, chartRef.current) : null;
@@ -348,7 +515,13 @@ export function ChartChips({
                 continue;
               }
               // 贴边时把小块往里收一点，别被图表顶栏/底栏切掉
-              raw.push({ key: chip.key, y: Math.min(Math.max(value, 10), box.height - 10) });
+              const y = Math.min(Math.max(value, 10), box.height - 10);
+              if (chip.fixed || chip.drawLine) {
+                // 市价线这类要贴着价格坐标，不参与下面的错行
+                next.chips[chip.key] = { y: paneTop + y, right };
+                continue;
+              }
+              raw.push({ key: chip.key, y });
             }
             // 同一价格附近有多笔持仓/挂单时，小块竖直错行，避免叠在一起看不清
             const CHIP_GAP = 18;
@@ -402,6 +575,19 @@ export function ChartChips({
               };
             }
 
+            // 覆盖层横线：市价线跟随现价，不落成图表绘图对象
+            for (const chip of chipsRef.current) {
+              if (!chip.drawLine) continue;
+              const value = box.coord(chip.price);
+              const outsideRange = !!box.range &&
+                (chip.price < box.range.from || chip.price > box.range.to);
+              if (outsideRange || value == null) {
+                next.lines[chip.key] = null;
+                continue;
+              }
+              next.lines[chip.key] = { y: paneTop + value, left, width: box.width };
+            }
+
             // 其他图表的十字线：横向按价格画，纵向按时间换算到本图坐标
             const ghost = ghostRef.current;
             if (ghost) {
@@ -425,7 +611,7 @@ export function ChartChips({
           }
         } catch {
           // 图表切换/销毁瞬间内部对象可能暂时不可用，下一帧再试
-          next = { chips: {}, bands: {}, ghost: null };
+          next = { chips: {}, bands: {}, ghost: null, lines: {} };
         }
 
         const fingerprint = JSON.stringify(next);
@@ -443,6 +629,14 @@ export function ChartChips({
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20">
+      {armed && (
+        // 拖动期间盖住整张图：指针移到 iframe 上方也不会丢失 pointermove
+        <div
+          data-drag-shield
+          className="pointer-events-auto absolute inset-0 cursor-ns-resize"
+          style={{ touchAction: 'none' }}
+        />
+      )}
       {layout.ghost && (
         <>
           <div
@@ -470,6 +664,7 @@ export function ChartChips({
       {bands.map((band) => {
         const pos = layout.bands[band.key];
         if (!pos) return null;
+        const active = band.highlight || (!!drag && !!band.keys?.includes(drag.key));
         return (
           <div
             key={band.key}
@@ -480,7 +675,7 @@ export function ChartChips({
               left: pos.left,
               width: pos.width,
               height: pos.height,
-              backgroundColor: band.color,
+              backgroundColor: active ? (band.activeColor ?? band.color) : band.color,
             }}
           >
             {pos.marks.map((mark, index) => {
@@ -522,6 +717,50 @@ export function ChartChips({
         );
       })}
       {chips.map((chip) => {
+        const pos = layout.lines[chip.key];
+        if (!chip.drawLine || !pos) return null;
+        return (
+          <div
+            key={`line:${chip.key}`}
+            data-line={chip.key}
+            className="pointer-events-none absolute border-t border-dashed"
+            style={{
+              top: pos.y,
+              left: pos.left,
+              width: pos.width,
+              borderColor: chip.color,
+            }}
+          />
+        );
+      })}
+      {pull && (
+        <>
+          <div
+            data-pull="line"
+            className="pointer-events-none absolute border-t border-dashed"
+            style={{
+              top: pull.y,
+              left: pull.left,
+              width: pull.width,
+              borderColor: pull.color,
+            }}
+          />
+          <div
+            data-pull="chip"
+            className="pointer-events-none absolute flex h-5 -translate-y-1/2 items-center rounded pl-1.5 font-mono text-[11px] font-medium text-white shadow-sm"
+            style={{ top: pull.y, right: pull.right, backgroundColor: pull.color }}
+          >
+            <span
+              className="mr-1 rounded-[2px] px-1 text-[9px] font-semibold leading-[13px]"
+              style={{ backgroundColor: 'rgba(255,255,255,0.92)', color: pull.color }}
+            >
+              {pull.label}
+            </span>
+            <span className="whitespace-nowrap pr-1.5">{pull.text}</span>
+          </div>
+        </>
+      )}
+      {chips.map((chip) => {
         const pos = layout.chips[chip.key];
         const dragging = drag?.key === chip.key;
         const top = dragging && drag ? drag.y : pos?.y;
@@ -540,10 +779,53 @@ export function ChartChips({
               cursor: chip.onMove ? 'ns-resize' : undefined,
             }}
             onPointerDown={chip.onMove ? (event) => startChipDrag(chip, event) : undefined}
-            onPointerMove={chip.onMove ? moveChipDrag : undefined}
-            onPointerUp={chip.onMove ? endChipDrag : undefined}
-            onPointerCancel={chip.onMove ? cancelChipDrag : undefined}
           >
+            {chip.tags?.map((tag) => {
+              const tagClass = clsx(
+                'mr-1 rounded-[2px] px-1 text-[9px] font-semibold leading-[13px]',
+                tag.muted ? 'bg-white/20 text-white/60' : undefined,
+                (tag.onClick || tag.pull) && 'hover:bg-white/40',
+                tag.onClick && 'cursor-pointer',
+                tag.pull && 'cursor-ns-resize',
+              );
+              const tagStyle = tag.muted
+                ? undefined
+                : { backgroundColor: 'rgba(255,255,255,0.92)', color: tag.color ?? chip.color };
+              if (tag.pull) {
+                return (
+                  <button
+                    key={tag.text}
+                    type="button"
+                    title={tag.title}
+                    onPointerDown={(event) => startTagPull(tag, event)}
+                    className={tagClass}
+                    style={{ ...tagStyle, touchAction: 'none' }}
+                  >
+                    {tag.text}
+                  </button>
+                );
+              }
+              return tag.onClick ? (
+                <button
+                  key={tag.text}
+                  type="button"
+                  title={tag.title}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    tag.onClick?.();
+                  }}
+                  className={tagClass}
+                  style={tagStyle}
+                >
+                  {tag.text}
+                </button>
+              ) : (
+                <span key={tag.text} className={tagClass} style={tagStyle}>
+                  {tag.text}
+                </span>
+              );
+            })}
             <span className="whitespace-nowrap pr-1">{chip.text}</span>
             {chip.onRemove && (
               <button

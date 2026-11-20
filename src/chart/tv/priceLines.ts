@@ -63,10 +63,14 @@ export class PriceLineLayer {
   private lostCount = 0;
   /** 拖完线后取消选中，否则图表会在线上画「添加文字」占位 */
   private deselectAt = 0;
+  /** 正在被拖动的线；停手 600ms 后清空，用来在图上加深对应区间 */
+  private activeKey: string | null = null;
+  private activeUntil = 0;
 
   constructor(
     private chart: IChartWidgetApi,
     private round: (price: number) => number,
+    private onActiveChange?: (key: string | null) => void,
   ) {}
 
   start(): void {
@@ -92,6 +96,10 @@ export class PriceLineLayer {
     for (const entry of [...this.entries.values()]) this.remove(entry);
     this.entries.clear();
     this.specs.clear();
+    if (this.activeKey) {
+      this.activeKey = null;
+      this.onActiveChange?.(null);
+    }
   }
 
   private async apply(specs: Map<string, PriceLineSpec>): Promise<void> {
@@ -261,9 +269,25 @@ export class PriceLineLayer {
     }
   }
 
+  /** 通知外部「这条线正在被拖动」；停手后清空 */
+  private markActive(key: string): void {
+    this.activeUntil = Date.now() + 600;
+    if (this.activeKey === key) return;
+    this.activeKey = key;
+    this.onActiveChange?.(key);
+  }
+
+  private clearActiveIfIdle(): void {
+    if (!this.activeKey || Date.now() < this.activeUntil) return;
+    this.activeKey = null;
+    this.onActiveChange?.(null);
+  }
+
   /** 用户拖动后没有事件，只能轮询线自己的位置 */
   private poll(): void {
-    if (this.disposed || this.entries.size === 0) return;
+    if (this.disposed) return;
+    this.clearActiveIfIdle();
+    if (this.entries.size === 0) return;
     let lost = false;
     for (const entry of [...this.entries.values()]) {
       let price: number | null = null;
@@ -281,6 +305,7 @@ export class PriceLineLayer {
       entry.price = price;
       entry.holdUntil = Date.now() + 1500;
       this.deselectAt = Date.now() + 700;
+      this.markActive(entry.key);
       entry.onMove?.(this.round(price));
     }
     if (this.deselectAt && Date.now() >= this.deselectAt) {

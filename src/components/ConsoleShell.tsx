@@ -8,6 +8,8 @@ import {
   EyeOff,
   History,
   LayoutDashboard,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Search,
   Settings as SettingsIcon,
@@ -21,32 +23,35 @@ import { sessionProgress, useReplaySession } from '../replay/store';
 import { Tape } from '../replay/Tape';
 import { useApp, type Page } from '../store/useApp';
 
-const NAV: { label: string; items: { page: Page; label: string; icon: typeof LayoutDashboard }[] }[] =
-  [
-    {
-      label: '工作台',
-      items: [
-        { page: 'overview', label: '概览', icon: LayoutDashboard },
-        { page: 'trade', label: '交易台', icon: ChartCandlestick },
-      ],
-    },
-    {
-      label: '复盘',
-      items: [{ page: 'replay', label: '历史复盘', icon: History }],
-    },
-    {
-      label: '记录',
-      items: [{ page: 'records', label: '交易记录', icon: BookOpen }],
-    },
-    {
-      label: '分析',
-      items: [{ page: 'insights', label: '分析', icon: BarChart3 }],
-    },
-    {
-      label: '纪律',
-      items: [{ page: 'discipline', label: '纪律', icon: ClipboardCheck }],
-    },
-  ];
+type NavItem = { page: Page; label: string; icon: typeof LayoutDashboard };
+
+const NAV: { label: string; items: NavItem[] }[] = [
+  {
+    label: '工作台',
+    items: [
+      { page: 'overview', label: '概览', icon: LayoutDashboard },
+      { page: 'trade', label: '交易台', icon: ChartCandlestick },
+    ],
+  },
+  {
+    label: '复盘',
+    items: [{ page: 'replay', label: '历史复盘', icon: History }],
+  },
+  {
+    label: '记录',
+    items: [{ page: 'records', label: '交易记录', icon: BookOpen }],
+  },
+  {
+    label: '分析',
+    items: [{ page: 'insights', label: '分析', icon: BarChart3 }],
+  },
+  {
+    label: '纪律',
+    items: [{ page: 'discipline', label: '纪律', icon: ClipboardCheck }],
+  },
+];
+
+const RAIL_ITEMS: NavItem[] = NAV.flatMap((group) => group.items);
 
 /** 与启动页同一支标记：五根蜡烛，不做渐变和阴影 */
 function Mark() {
@@ -74,6 +79,8 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   const setPaletteOpen = useApp((s) => s.setPaletteOpen);
   const privacy = useApp((s) => s.privacy);
   const setPrivacy = useApp((s) => s.setPrivacy);
+  const railPinned = useApp((s) => s.railPinned);
+  const setRailPinned = useApp((s) => s.setRailPinned);
   const masked = usePrivacyMask();
   const replayRoute = useReplayRoute();
   const replaySession = useReplaySession(routeSessionId(replayRoute));
@@ -90,209 +97,331 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
     : risk?.canTrade === false
       ? '暂不可开仓'
       : '交易正常';
+  const tradePage = page === 'trade';
+
+  const go = (target: Page) => {
+    // 复盘页有自己的子路由，点导航回列表
+    if (target === 'replay') goReplayList();
+    setPage(target);
+  };
+
+  /** 240px 完整导航；交易台钉住时作为浮层复用同一份内容 */
+  const sidebar = (
+    <aside className="flex h-full w-[240px] shrink-0 flex-col border-r border-console-line bg-console-sidebar">
+      <div className="flex h-16 items-center gap-3 px-4">
+        <Mark />
+        <div className="min-w-0 flex-1">
+          <div className="text-[15px] font-semibold leading-none">Tally</div>
+          <div className="mt-1 text-[11px] leading-none text-console-muted">MT5 交易终端</div>
+        </div>
+        {tradePage && (
+          <button
+            onClick={() => setRailPinned(false)}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-console-muted hover:bg-console-hover hover:text-console-ink"
+            title="收起导航"
+            aria-label="收起导航"
+          >
+            <PanelLeftClose size={15} strokeWidth={1.5} />
+          </button>
+        )}
+      </div>
+
+      <div className="px-3 pb-3">
+        <button
+          onClick={() => setPaletteOpen(true)}
+          title="搜索命令（Ctrl K）"
+          className="flex h-8 w-full items-center gap-2 rounded-lg border border-console-line bg-console-card px-2.5 text-[12px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+        >
+          <Search size={14} strokeWidth={1.5} className="shrink-0" />
+          <span className="flex-1 text-left">搜索命令</span>
+          <kbd className="rounded border border-console-line-2 px-1 py-0.5 font-mono text-[10px] text-console-faint">
+            Ctrl K
+          </kbd>
+        </button>
+      </div>
+
+      <div className="border-y border-console-line px-4 py-3">
+        {page === 'replay' ? (
+          <>
+            <div className="flex items-center justify-between text-[11px] text-console-muted">
+              <span>复盘 · 模拟账户</span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-console-warn" />
+                不连实盘
+              </span>
+            </div>
+            {replaySession ? (
+              <>
+                <div className="mt-1 truncate text-[12px] leading-tight text-console-ink">
+                  {replaySession.name}
+                </div>
+                <div className="mt-1.5 flex items-baseline justify-between gap-2">
+                  <span className="num font-mono text-[19px] font-medium leading-none tracking-tight">
+                    {fmtMoney(replaySession.equity)}
+                  </span>
+                  <span className="num font-mono text-[10px] text-console-muted">
+                    {Math.round(sessionProgress(replaySession) * 100)}%
+                  </span>
+                </div>
+                <Tape
+                  session={replaySession}
+                  height={16}
+                  count={64}
+                  className="mt-1.5 h-4 w-full"
+                />
+              </>
+            ) : (
+              <div className="mt-1 text-[11px] text-console-muted">未选择复盘会话</div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="flex items-center justify-between text-[11px] text-console-muted">
+              <span>余额</span>
+              <span className="flex items-center gap-1.5">
+                <span className={clsx('h-1.5 w-1.5 rounded-full', modeTone)} />
+                {modeLabel}
+              </span>
+            </div>
+            <div className="num mt-1 font-mono text-[20px] font-medium leading-none tracking-tight">
+              {fmtMoney(account?.balance)}
+            </div>
+            <div className="mt-2 flex items-center justify-between text-[11px] text-console-muted">
+              <span>净值</span>
+              <span className="num font-mono text-console-ink-2">{fmtMoney(account?.equity)}</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      <nav className="mt-5 px-3">
+        {NAV.map((group, groupIndex) => (
+          <div key={group.label} className={groupIndex > 0 ? 'mt-6' : undefined}>
+            <div className="console-label px-2.5 pb-2">{group.label}</div>
+            <div className="space-y-0.5">
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const badge =
+                  item.page === 'trade'
+                    ? positions.length
+                    : item.page === 'overview'
+                      ? orders.length
+                      : undefined;
+                return (
+                  <button
+                    key={item.page}
+                    onClick={() => go(item.page)}
+                    className={clsx('console-nav', page === item.page && 'console-nav-active')}
+                    aria-current={page === item.page ? 'page' : undefined}
+                  >
+                    <Icon
+                      size={16}
+                      strokeWidth={1.5}
+                      className={clsx(
+                        'shrink-0',
+                        page === item.page ? 'text-console-ink' : 'text-console-muted',
+                      )}
+                    />
+                    <span className="flex-1">{item.label}</span>
+                    {badge ? <span className="num text-[11px] text-console-faint">{badge}</span> : null}
+                    {item.page === 'trade' && risk?.halted ? (
+                      <span className="h-1.5 w-1.5 rounded-full bg-console-loss" title="已停机" />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </nav>
+
+      <div className="mt-auto px-3 pb-3">
+        <button
+          onClick={() => setPrivacy(!privacy)}
+          className={clsx('console-nav mb-1', privacy && 'console-nav-active')}
+          title="隐私模式下，复盘与报表页的金额显示为 ••••；交易台不受影响"
+          aria-pressed={privacy}
+        >
+          {privacy ? (
+            <EyeOff size={16} strokeWidth={1.5} className="text-console-ink" />
+          ) : (
+            <Eye size={16} strokeWidth={1.5} className="text-console-muted" />
+          )}
+          <span className="flex-1">隐私模式</span>
+          <span className="text-[10px] text-console-faint">
+            {privacy ? (masked ? '已遮金额' : '交易台不遮') : '关'}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setPage('settings')}
+          className={clsx('console-nav mb-1', page === 'settings' && 'console-nav-active')}
+          aria-current={page === 'settings' ? 'page' : undefined}
+        >
+          <SettingsIcon
+            size={16}
+            strokeWidth={1.5}
+            className={page === 'settings' ? 'text-console-ink' : 'text-console-muted'}
+          />
+          <span className="flex-1">设置</span>
+        </button>
+
+        {updateAvailable && (
+          <button
+            onClick={() => void checkForUpdates(true)}
+            className="console-nav mb-1"
+            title="检查 GitHub 上的新版本"
+          >
+            <RefreshCw size={16} strokeWidth={1.5} className="text-console-muted" />
+            <span className="flex-1">检查更新</span>
+          </button>
+        )}
+
+        <div className="mt-3 space-y-1.5 border-t border-console-line px-2.5 pt-3 text-[11px] text-console-muted">
+          <div className="flex items-center gap-1.5">
+            <span
+              className={clsx(
+                'h-1.5 w-1.5 rounded-full',
+                page === 'replay'
+                  ? 'bg-console-warn'
+                  : terminal
+                    ? 'bg-console-gain'
+                    : online
+                      ? 'bg-console-warn'
+                      : 'bg-console-loss',
+              )}
+            />
+            {page === 'replay'
+              ? '复盘模式 · 不连接实盘'
+              : terminal
+                ? '网关与终端已连接'
+                : online
+                  ? '等待 MT5 终端'
+                  : '网关未连接'}
+          </div>
+          <div className="flex items-center justify-between">
+            <span className={risk?.halted && page !== 'replay' ? 'text-console-loss' : undefined}>
+              {page === 'replay' ? '复盘不写实盘日志' : statusText}
+            </span>
+            <span className="num font-mono text-console-faint">v{health?.version ?? '—'}</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+
+  /** 交易台的 56px 图标栏：把图表宽度让出来，钉住后浮出完整导航 */
+  const rail = (
+    <aside className="relative z-30 flex w-14 shrink-0 flex-col items-center border-r border-console-line bg-console-sidebar">
+      <div className="flex h-11 w-full items-center justify-center">
+        <Mark />
+      </div>
+      <div className="flex w-full flex-col items-center gap-1 px-1.5">
+        {RAIL_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const active = page === item.page;
+          const badge =
+            item.page === 'trade' ? positions.length : item.page === 'overview' ? orders.length : 0;
+          return (
+            <button
+              key={item.page}
+              onClick={() => go(item.page)}
+              title={item.label}
+              aria-label={item.label}
+              aria-current={active ? 'page' : undefined}
+              className={clsx(
+                'relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
+                active
+                  ? 'bg-console-card text-console-ink shadow-[inset_0_0_0_1px_var(--color-console-line)]'
+                  : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
+              )}
+            >
+              <Icon size={17} strokeWidth={1.5} />
+              {badge > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-console-accent px-1 font-mono text-[9px] leading-none text-white">
+                  {badge > 99 ? '99' : badge}
+                </span>
+              )}
+              {item.page === 'trade' && risk?.halted ? (
+                <span className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-console-loss" />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-auto flex w-full flex-col items-center gap-1 px-1.5 pb-2">
+        <button
+          onClick={() => setPrivacy(!privacy)}
+          className={clsx(
+            'flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
+            privacy
+              ? 'bg-console-card text-console-ink'
+              : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
+          )}
+          title="隐私模式"
+          aria-label="隐私模式"
+          aria-pressed={privacy}
+        >
+          {privacy ? <EyeOff size={17} strokeWidth={1.5} /> : <Eye size={17} strokeWidth={1.5} />}
+        </button>
+        <button
+          onClick={() => setPage('settings')}
+          className={clsx(
+            'flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
+            page === 'settings'
+              ? 'bg-console-card text-console-ink'
+              : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
+          )}
+          title="设置"
+          aria-label="设置"
+        >
+          <SettingsIcon size={17} strokeWidth={1.5} />
+        </button>
+        <button
+          onClick={() => setRailPinned(!railPinned)}
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+          title="展开导航"
+          aria-label="展开导航"
+        >
+          <PanelLeftOpen size={17} strokeWidth={1.5} />
+        </button>
+        <span
+          className={clsx(
+            'mt-1 h-1.5 w-1.5 rounded-full',
+            terminal ? 'bg-console-gain' : online ? 'bg-console-warn' : 'bg-console-loss',
+          )}
+          title={terminal ? '网关与终端已连接' : online ? '等待 MT5 终端' : '网关未连接'}
+        />
+      </div>
+    </aside>
+  );
+
+  if (tradePage) {
+    return (
+      <div className="relative flex h-full min-h-0 bg-console-canvas text-console-ink">
+        {rail}
+        {railPinned && (
+          <>
+            <button
+              className="absolute inset-0 z-30 cursor-default bg-black/10"
+              onClick={() => setRailPinned(false)}
+              aria-label="收起导航"
+              tabIndex={-1}
+            />
+            <div className="absolute inset-y-0 left-14 z-40 shadow-[8px_0_24px_rgba(0,0,0,0.10)]">
+              {sidebar}
+            </div>
+          </>
+        )}
+        <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 bg-console-canvas text-console-ink">
-      <aside className="flex w-[240px] shrink-0 flex-col border-r border-console-line bg-console-sidebar">
-        <div className="flex h-16 items-center gap-3 px-4">
-          <Mark />
-          <div className="min-w-0">
-            <div className="text-[15px] font-semibold leading-none">Tally</div>
-            <div className="mt-1 text-[11px] leading-none text-console-muted">
-              MT5 交易终端
-            </div>
-          </div>
-        </div>
-
-        <div className="px-3 pb-3">
-          <button
-            onClick={() => setPaletteOpen(true)}
-            title="搜索命令（Ctrl K）"
-            className="flex h-8 w-full items-center gap-2 rounded-lg border border-console-line bg-console-card px-2.5 text-[12px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
-          >
-            <Search size={14} strokeWidth={1.5} className="shrink-0" />
-            <span className="flex-1 text-left">搜索命令</span>
-            <kbd className="rounded border border-console-line-2 px-1 py-0.5 font-mono text-[10px] text-console-faint">
-              Ctrl K
-            </kbd>
-          </button>
-        </div>
-
-        <div className="border-y border-console-line px-4 py-3">
-          {page === 'replay' ? (
-            <>
-              <div className="flex items-center justify-between text-[11px] text-console-muted">
-                <span>复盘 · 模拟账户</span>
-                <span className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-console-warn" />
-                  不连实盘
-                </span>
-              </div>
-              {replaySession ? (
-                <>
-                  <div className="mt-1 truncate text-[12px] leading-tight text-console-ink">
-                    {replaySession.name}
-                  </div>
-                  <div className="mt-1.5 flex items-baseline justify-between gap-2">
-                    <span className="num font-mono text-[19px] font-medium leading-none tracking-tight">
-                      {fmtMoney(replaySession.equity)}
-                    </span>
-                    <span className="num font-mono text-[10px] text-console-muted">
-                      {Math.round(sessionProgress(replaySession) * 100)}%
-                    </span>
-                  </div>
-                  <Tape
-                    session={replaySession}
-                    height={16}
-                    count={64}
-                    className="mt-1.5 h-4 w-full"
-                  />
-                </>
-              ) : (
-                <div className="mt-1 text-[11px] text-console-muted">未选择复盘会话</div>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="flex items-center justify-between text-[11px] text-console-muted">
-                <span>余额</span>
-                <span className="flex items-center gap-1.5">
-                  <span className={clsx('h-1.5 w-1.5 rounded-full', modeTone)} />
-                  {modeLabel}
-                </span>
-              </div>
-              <div className="num mt-1 font-mono text-[20px] font-medium leading-none tracking-tight">
-                {fmtMoney(account?.balance)}
-              </div>
-              <div className="mt-2 flex items-center justify-between text-[11px] text-console-muted">
-                <span>净值</span>
-                <span className="num font-mono text-console-ink-2">
-                  {fmtMoney(account?.equity)}
-                </span>
-              </div>
-            </>
-          )}
-        </div>
-
-        <nav className="mt-5 px-3">
-          {NAV.map((group, groupIndex) => (
-            <div key={group.label} className={groupIndex > 0 ? 'mt-6' : undefined}>
-              <div className="console-label px-2.5 pb-2">{group.label}</div>
-              <div className="space-y-0.5">
-                {group.items.map((item) => {
-                  const Icon = item.icon;
-                  const badge =
-                    item.page === 'trade'
-                      ? positions.length
-                      : item.page === 'overview'
-                        ? orders.length
-                        : undefined;
-                  return (
-                    <button
-                      key={item.page}
-                      onClick={() => {
-                        // 复盘页有自己的子路由，点导航回列表
-                        if (item.page === 'replay') goReplayList();
-                        setPage(item.page);
-                      }}
-                      className={clsx('console-nav', page === item.page && 'console-nav-active')}
-                      aria-current={page === item.page ? 'page' : undefined}
-                    >
-                      <Icon
-                        size={16}
-                        strokeWidth={1.5}
-                        className={clsx(
-                          'shrink-0',
-                          page === item.page ? 'text-console-ink' : 'text-console-muted',
-                        )}
-                      />
-                      <span className="flex-1">{item.label}</span>
-                      {badge ? <span className="num text-[11px] text-console-faint">{badge}</span> : null}
-                      {item.page === 'trade' && risk?.halted ? (
-                        <span className="h-1.5 w-1.5 rounded-full bg-console-loss" title="已停机" />
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </nav>
-
-        <div className="mt-auto px-3 pb-3">
-          <button
-            onClick={() => setPrivacy(!privacy)}
-            className={clsx('console-nav mb-1', privacy && 'console-nav-active')}
-            title="隐私模式下，复盘与报表页的金额显示为 ••••；交易台不受影响"
-            aria-pressed={privacy}
-          >
-            {privacy ? (
-              <EyeOff size={16} strokeWidth={1.5} className="text-console-ink" />
-            ) : (
-              <Eye size={16} strokeWidth={1.5} className="text-console-muted" />
-            )}
-            <span className="flex-1">隐私模式</span>
-            <span className="text-[10px] text-console-faint">
-              {privacy ? (masked ? '已遮金额' : '交易台不遮') : '关'}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setPage('settings')}
-            className={clsx('console-nav mb-1', page === 'settings' && 'console-nav-active')}
-            aria-current={page === 'settings' ? 'page' : undefined}
-          >
-            <SettingsIcon
-              size={16}
-              strokeWidth={1.5}
-              className={page === 'settings' ? 'text-console-ink' : 'text-console-muted'}
-            />
-            <span className="flex-1">设置</span>
-          </button>
-
-          {updateAvailable && (
-            <button
-              onClick={() => void checkForUpdates(true)}
-              className="console-nav mb-1"
-              title="检查 GitHub 上的新版本"
-            >
-              <RefreshCw size={16} strokeWidth={1.5} className="text-console-muted" />
-              <span className="flex-1">检查更新</span>
-            </button>
-          )}
-
-          <div className="mt-3 space-y-1.5 border-t border-console-line px-2.5 pt-3 text-[11px] text-console-muted">
-            <div className="flex items-center gap-1.5">
-              <span
-                className={clsx(
-                  'h-1.5 w-1.5 rounded-full',
-                  page === 'replay'
-                    ? 'bg-console-warn'
-                    : terminal
-                      ? 'bg-console-gain'
-                      : online
-                        ? 'bg-console-warn'
-                        : 'bg-console-loss',
-                )}
-              />
-              {page === 'replay'
-                ? '复盘模式 · 不连接实盘'
-                : terminal
-                  ? '网关与终端已连接'
-                  : online
-                    ? '等待 MT5 终端'
-                    : '网关未连接'}
-            </div>
-            <div className="flex items-center justify-between">
-              <span className={risk?.halted && page !== 'replay' ? 'text-console-loss' : undefined}>
-                {page === 'replay' ? '复盘不写实盘日志' : statusText}
-              </span>
-              <span className="num font-mono text-console-faint">v{health?.version ?? '—'}</span>
-            </div>
-          </div>
-        </div>
-      </aside>
-
+      {sidebar}
       <div className="flex min-w-0 flex-1 flex-col">{children}</div>
     </div>
   );

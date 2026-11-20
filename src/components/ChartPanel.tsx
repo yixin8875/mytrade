@@ -6,6 +6,7 @@ import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, snapToLevel } from '../lib/fo
 import { requestModify, revertModify } from '../lib/modifyQueue';
 import { cancelOrderWithUndo } from '../lib/orderActions';
 import { activeSteps, estimateStepLots, stepAtR } from '../lib/plan';
+import { classifyPending } from '../lib/pendingOrder';
 import { CalendarLayer } from '../chart/tv/calendarLayer';
 import { GatewayDatafeed } from '../chart/tv/datafeed';
 import { PineRunner } from '../chart/tv/pineRunner';
@@ -41,6 +42,11 @@ const PLAN_COLOR = '#4db6ac';
 const PLAN_INVALID_COLOR = '#8a8f98';
 // 风险/盈利区间只画 R 刻度线和文字，不铺红绿底色
 const BAND_FILL = 'transparent';
+// 草稿/挂单的区间：淡色铺底，拖动止损或止盈时加深
+const DRAFT_RISK_FILL = 'rgba(239, 83, 80, 0.07)';
+const DRAFT_RISK_ACTIVE = 'rgba(239, 83, 80, 0.2)';
+const DRAFT_REWARD_FILL = 'rgba(38, 166, 154, 0.07)';
+const DRAFT_REWARD_ACTIVE = 'rgba(38, 166, 154, 0.18)';
 
 /**
  * 背景、网格、坐标文字由应用主题决定。库恢复的旧图表属性优先级高于 overrides，
@@ -326,6 +332,8 @@ export function ChartPanel({
    * （最多几百毫秒，行情不动时更久）才会从旧位置跳过去，看起来就像拖不动。
    */
   const [, setOptimisticTick] = useState(0);
+  /** 图上正在被拖动的价格线（PriceLineLayer 轮询上报），用于加深区间 */
+  const [activeLine, setActiveLine] = useState<string | null>(null);
   const markOptimistic = (key: string, price: number) => {
     optimisticPrices.set(key, { price, at: Date.now() });
     setOptimisticTick((tick) => tick + 1);
@@ -432,14 +440,54 @@ export function ChartPanel({
   };
 
   const chips: ChartChip[] = [];
-  // 市价单的入场价取对手价；限价/停损单用草稿价格。本地估算金额时要有个有效入场价
-  const marketEntry = previewMatched
-    ? (preview?.price ?? 0)
-    : draft.side === 'buy'
-      ? (quote?.ask ?? 0)
-      : (quote?.bid ?? 0);
-  // 市价单没有可画的入场点：计价基准直接取对手价（成交预览价优先）
-  const draftAnchor = draft.type === 'market' ? marketEntry || draft.price : draft.price;
+  // 市价草稿的基准价跟随现价：图上那条虚线要一直贴在市场价上
+  const liveEntry = (draft.side === 'buy' ? quote?.ask : quote?.bid) ?? 0;
+  const draftAnchor = draft.type === 'market' ? liveEntry || draft.price : draft.price;
+  // 挂单类型由方向 + 价格推导，图上标签与面板保持同一套文案
+  const pendingInfo = classifyPending({
+    side: draft.side,
+    price: draft.price,
+    bid: quote?.bid,
+    ask: quote?.ask,
+    stopsLevelPoints: info?.stopsLevelPoints,
+    point: info?.point,
+  });
+  const draftSlSet = draft.sl != null && draft.sl > 0;
+  const draftTpSet = draft.tp != null && draft.tp > 0;
+
+  /**
+   * 入口标签上的 TP/SL 徽标：按住向上/向下拉出虚线预览，松手才写入草稿；
+   * 只点一下不拖不生成任何线。
+   */
+  const entryTags = (): NonNullable<ChartChip['tags']> => [
+    {
+      text: 'TP',
+      color: SIDE_BUY,
+      muted: !draftTpSet,
+      pull: draftTpSet
+        ? undefined
+        : {
+            color: SIDE_BUY,
+            format: (price: number) => fmtPrice(price, digits),
+            onPull: (price: number) => patchDraft({ tp: roundPrice(price) }),
+          },
+      title: draftTpSet ? undefined : '按住向上/向下拖动设置止盈',
+    },
+    {
+      text: 'SL',
+      color: STOP_OUT_COLOR,
+      muted: !draftSlSet,
+      pull: draftSlSet
+        ? undefined
+        : {
+            color: STOP_OUT_COLOR,
+            format: (price: number) => fmtPrice(price, digits),
+            onPull: (price: number) => patchDraft({ sl: roundPrice(price) }),
+          },
+      title: draftSlSet ? undefined : '按住向上/向下拖动设置止损',
+    },
+  ];
+
   // 预览回来之前先用 tick 价值估算，拖动时金额不会凭空消失
   const draftRiskEstimate = estimateProfit(info, draft.volume, draftAnchor, draft.sl ?? 0);
   const draftRewardEstimate = estimateProfit(info, draft.volume, draftAnchor, draft.tp ?? 0);
@@ -451,16 +499,33 @@ export function ChartPanel({
   const draftRewardApprox = !previewMatched || preview?.rewardAmount == null;
 
   if (draft.active && draftAnchor > 0) {
-    const side = draft.side === 'buy' ? '买入' : '卖出';
-    // 市价单成交价由行情决定，图上不放入场点，只留止损/止盈
+    // 挂单：入场线落在委托价上；市价：一条跟着现价走的虚线
     if (draft.type !== 'market') {
-      const kind = draft.type === 'limit' ? '限价' : '停损';
+      const invalid = !pendingInfo.type;
       chips.push({
         key: 'draft:entry',
         price: draft.price,
-        color: sideColor(draft.side),
-        text: `${kind}${side} ${volume(draft.volume)} @ ${fmtPrice(draft.price, digits)}`,
+        color: invalid ? STOP_OUT_COLOR : sideColor(draft.side),
+        text: `${invalid ? '待定价' : pendingInfo.label} ${volume(
+          draft.volume,
+        )} @ ${fmtPrice(draft.price, digits)}`,
+        tags: entryTags(),
         onMove: (price) => patchDraft({ price: roundPrice(price) }),
+        onRemove: () => resetDraft(),
+      });
+    } else if (liveEntry > 0) {
+      // 当前价平仓的浮亏（点差成本），让市价线右侧有个可读的数字
+      const exit = (draft.side === 'buy' ? quote?.bid : quote?.ask) ?? 0;
+      const spreadLoss = estimateProfit(info, draft.volume, liveEntry, exit);
+      const floating = spreadLoss == null ? null : -spreadLoss;
+      chips.push({
+        key: 'draft:market',
+        price: liveEntry,
+        color: sideColor(draft.side),
+        fixed: true,
+        drawLine: true,
+        tags: entryTags(),
+        text: `${volume(draft.volume)}${signedMoney(floating, currency, true)}`,
         onRemove: () => resetDraft(),
       });
     }
@@ -469,7 +534,13 @@ export function ChartPanel({
         key: 'draft:sl',
         price: draft.sl,
         color: SIDE_SELL,
-        text: `${volume(draft.volume)}${moneySuffix(draftRisk, '-', currency, draftRiskApprox)} · 1R`,
+        tags: [{ text: 'SL', color: STOP_OUT_COLOR }],
+        text: `${fmtPrice(draft.sl, digits)}${moneySuffix(
+          draftRisk,
+          '-',
+          currency,
+          draftRiskApprox,
+        )} · 1R`,
         onMove: (price) => patchDraft({ sl: roundPrice(price) }),
         onRemove: () => patchDraft({ sl: null }),
       });
@@ -479,9 +550,13 @@ export function ChartPanel({
         key: 'draft:tp',
         price: draft.tp,
         color: SIDE_BUY,
-        text: `${volume(draft.volume)}${moneySuffix(draftReward, '+', currency, draftRewardApprox)}${rSuffix(
-          rewardR(draftAnchor, draft.sl, draft.tp),
-        )}`,
+        tags: [{ text: 'TP', color: SIDE_BUY }],
+        text: `${fmtPrice(draft.tp, digits)}${moneySuffix(
+          draftReward,
+          '+',
+          currency,
+          draftRewardApprox,
+        )}${rSuffix(rewardR(draftAnchor, draft.sl, draft.tp))}`,
         onMove: (price) => patchDraft({ tp: roundPrice(price) }),
         onRemove: () => patchDraft({ tp: null }),
       });
@@ -496,6 +571,16 @@ export function ChartPanel({
     entry: number,
     sl: number | null | undefined,
     tp: number | null | undefined,
+    style?: {
+      riskFill?: string;
+      riskActive?: string;
+      rewardFill?: string;
+      rewardActive?: string;
+      slKey?: string;
+      tpKey?: string;
+      highlightSl?: boolean;
+      highlightTp?: boolean;
+    },
   ) => {
     const hasSl = sl != null && sl > 0 && Math.abs(entry - sl) > 0;
     const hasTp = tp != null && tp > 0 && Math.abs(tp - entry) > 0;
@@ -505,7 +590,10 @@ export function ChartPanel({
         key: `${prefix}:risk`,
         from: entry,
         to: sl as number,
-        color: BAND_FILL,
+        color: style?.riskFill ?? BAND_FILL,
+        activeColor: style?.riskActive,
+        keys: style?.slKey ? [style.slKey] : undefined,
+        highlight: style?.highlightSl,
         labelColor: 'rgba(239, 83, 80, 0.9)',
       });
     }
@@ -533,7 +621,10 @@ export function ChartPanel({
         key: `${prefix}:reward`,
         from: entry,
         to: target,
-        color: BAND_FILL,
+        color: style?.rewardFill ?? BAND_FILL,
+        activeColor: style?.rewardActive,
+        keys: style?.tpKey ? [style.tpKey] : undefined,
+        highlight: style?.highlightTp,
         labelColor: 'rgba(38, 166, 154, 0.95)',
         marks,
       });
@@ -541,8 +632,17 @@ export function ChartPanel({
   };
 
   if (draft.active && draftAnchor > 0) {
-    // 区间从计价基准画起：限价/停损用委托价，市价用对手价
-    addBands('draft', draftAnchor, draft.sl, draft.tp);
+    // 区间从计价基准画起：挂单用委托价，市价用现价；拖动时加深对应一侧
+    addBands('draft', draftAnchor, draft.sl, draft.tp, {
+      riskFill: DRAFT_RISK_FILL,
+      riskActive: DRAFT_RISK_ACTIVE,
+      rewardFill: DRAFT_REWARD_FILL,
+      rewardActive: DRAFT_REWARD_ACTIVE,
+      slKey: 'draft:sl',
+      tpKey: 'draft:tp',
+      highlightSl: activeLine === 'draft:sl',
+      highlightTp: activeLine === 'draft:tp',
+    });
   }
 
   for (const order of orders) {
@@ -918,8 +1018,11 @@ export function ChartPanel({
           }
         });
 
-        const layer = new PriceLineLayer(active, (price) =>
-          shiftRef.current ? snapLevel(price, infoRef.current) : roundToTick(price, infoRef.current),
+        const layer = new PriceLineLayer(
+          active,
+          (price) =>
+            shiftRef.current ? snapLevel(price, infoRef.current) : roundToTick(price, infoRef.current),
+          (key) => setActiveLine(key),
         );
         layer.start();
         layerRef.current = layer;
@@ -1102,26 +1205,23 @@ export function ChartPanel({
           },
         });
       }
-      const hasSl = draft.sl != null && draft.sl > 0;
-      const hasTp = draft.tp != null && draft.tp > 0;
-      specs.set('draft:sl', {
-        price: hasSl
-          ? (draft.sl as number)
-          : guidePrice(chart, draftAnchor, draft.side === 'buy', info, 1),
-        color: SIDE_SELL,
-        text: hasSl ? '' : '拖动设置止损',
-        showPrice: hasSl,
-        onMove: (price) => useApp.getState().patchDraft({ sl: price }),
-      });
-      specs.set('draft:tp', {
-        price: hasTp
-          ? (draft.tp as number)
-          : guidePrice(chart, draftAnchor, draft.side !== 'buy', info, 2),
-        color: SIDE_BUY,
-        text: hasTp ? '' : '拖动设置止盈',
-        showPrice: hasTp,
-        onMove: (price) => useApp.getState().patchDraft({ tp: price }),
-      });
+      // 止损/止盈只在设置后画线；未设置时点入口标签上的 TP/SL 徽标生成
+      if (draft.sl != null && draft.sl > 0) {
+        specs.set('draft:sl', {
+          price: draft.sl,
+          color: SIDE_SELL,
+          text: '',
+          onMove: (price) => useApp.getState().patchDraft({ sl: price }),
+        });
+      }
+      if (draft.tp != null && draft.tp > 0) {
+        specs.set('draft:tp', {
+          price: draft.tp,
+          color: SIDE_BUY,
+          text: '',
+          onMove: (price) => useApp.getState().patchDraft({ tp: price }),
+        });
+      }
     }
 
     for (const order of orders) {

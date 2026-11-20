@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { Check, ChevronDown, Pencil, Plus, Settings2 } from 'lucide-react';
+import { Check, ChevronDown, Pencil, Plus, Settings2, X } from 'lucide-react';
 import { gateway } from '../gateway/client';
-import { activeTemplate, useApp } from '../store/useApp';
+import { activeTemplate, useApp, type OrderEntryMode } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtVolume, roundVolume } from '../lib/format';
+import { classifyPending } from '../lib/pendingOrder';
 import {
   fmtNum,
   isRiskDeviated,
@@ -15,6 +16,7 @@ import {
 import { TemplateEditor } from './TemplateEditor';
 import type {
   DisciplineGate,
+  DraftOrder,
   OrderType,
   Playbook,
   Quote,
@@ -36,12 +38,6 @@ function defaultPrice(
   if (type === 'stop') return side === 'buy' ? quote.ask + tick * 10 : quote.bid - tick * 10;
   return side === 'buy' ? quote.ask : quote.bid;
 }
-
-const ORDER_TYPES: { value: OrderType; label: string }[] = [
-  { value: 'market', label: '市价' },
-  { value: 'limit', label: '限价' },
-  { value: 'stop', label: '停损' },
-];
 
 const inputClass =
   'h-8 w-full rounded-lg border border-tv-border bg-tv-raised px-2 font-mono text-[12px] text-tv-text outline-none transition-colors focus:border-tv-accent focus:bg-tv-panel';
@@ -73,7 +69,16 @@ export function OrderTicket() {
   const openSettings = useApp((s) => s.openSettings);
   const resetDraft = useApp((s) => s.resetDraft);
   const notify = useApp((s) => s.notify);
+  const entryMode = useApp((s) => s.orderEntryMode);
+  const setEntryMode = useApp((s) => s.setOrderEntryMode);
+  const setTicketOpen = useApp((s) => s.setTicketOpen);
 
+  const [modeMenu, setModeMenu] = useState(false);
+  const [liveAsk, setLiveAsk] = useState<Side | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const modeWrapRef = useRef<HTMLDivElement>(null);
+  const oneClickLiveRef = useRef(false);
+  const lastClickRef = useRef(0);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [sizing, setSizing] = useState<TradeSizing | null>(null);
   const [confirm, setConfirm] = useState(false);
@@ -115,6 +120,16 @@ export function OrderTicket() {
     draft.type === 'market'
       ? ((draft.side === 'buy' ? quote?.ask : quote?.bid) ?? 0) || draft.price
       : draft.price;
+  // 挂单类型：方向 + 价格相对市价的高低，决定限价还是停损
+  const pendingInfo = classifyPending({
+    side: draft.side,
+    price: draft.price,
+    bid: quote?.bid,
+    ask: quote?.ask,
+    stopsLevelPoints: info?.stopsLevelPoints,
+    point: info?.point,
+  });
+  const autoLots = templateArmed && risk.auto;
 
   useEffect(() => {
     if (!ready || !info || !draft.active) {
@@ -207,6 +222,11 @@ export function OrderTicket() {
     patchDraft,
   ]);
 
+  // 风险计算表格里手数只能由风险反算：启动时恢复成该模式也强制打开自动手数
+  useEffect(() => {
+    if (entryMode === 'risk' && !risk.auto) patchRisk({ auto: true });
+  }, [entryMode, risk.auto, patchRisk]);
+
   // 模板启用期间在设置或票内改了风险比例，这里跟着套用；手动改风险不会被覆盖
   useEffect(() => {
     if (!templateArmed) return;
@@ -219,6 +239,12 @@ export function OrderTicket() {
   useEffect(() => {
     setTpTouched(false);
   }, [draft.side, draft.type, draft.price, draft.sl]);
+
+  // 挂单项：价格或市价变化后重新推导限价 / 停损，并回写草稿类型
+  useEffect(() => {
+    if (!draft.active || draft.type === 'market' || !pendingInfo.type) return;
+    if (pendingInfo.type !== draft.type) patchDraft({ type: pendingInfo.type });
+  }, [draft.active, draft.type, pendingInfo.type, patchDraft]);
 
   // 切换模板时同样重新跟随
   useEffect(() => {
@@ -294,6 +320,24 @@ export function OrderTicket() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [confirm]);
 
+  // 下单模式菜单：点外部或 Esc 关闭
+  useEffect(() => {
+    if (!modeMenu) return;
+    const onDown = (event: MouseEvent) => {
+      if (modeWrapRef.current?.contains(event.target as Node)) return;
+      setModeMenu(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setModeMenu(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [modeMenu]);
+
   /** 打开/切换开仓清单；每次生成新的 clientOrderId，避免沿用旧快照 */
   const openDisciplineGate = async (playbookId?: string) => {
     if (!disciplineEnabled) return;
@@ -368,11 +412,26 @@ export function OrderTicket() {
 
   const activate = () => {
     if (!info) return;
-    patchDraft({
-      active: true,
-      price: defaultPrice(draft.side, draft.type, quote, info),
-      volume: Math.max(info.minVolume, Math.min(info.maxVolume, draft.volume)),
+    const volume = Math.max(info.minVolume, Math.min(info.maxVolume, draft.volume));
+    if (draft.type === 'market') {
+      patchDraft({
+        active: true,
+        price: defaultPrice(draft.side, 'market', quote, info),
+        volume,
+      });
+      return;
+    }
+    // 挂单要落在点差之外才有意义，默认给一个停损价，类型由价格推导
+    const price = defaultPrice(draft.side, 'stop', quote, info);
+    const next = classifyPending({
+      side: draft.side,
+      price,
+      bid: quote?.bid,
+      ask: quote?.ask,
+      stopsLevelPoints: info.stopsLevelPoints,
+      point: info.point,
     });
+    patchDraft({ active: true, type: next.type ?? 'stop', price, volume });
   };
 
   const applyTemplate = () => {
@@ -423,15 +482,44 @@ export function OrderTicket() {
     setPage('settings');
   };
 
-  const setSide = (side: Side) => {
-    patchDraft({ side, price: defaultPrice(side, draft.type, quote, info) });
+  /** 常规模式点买/卖：直接开一张市价草稿，图上出现跟随现价的委托线 */
+  const startMarket = (side: Side) => {
+    if (!info) return;
+    setTpTouched(false);
+    patchDraft({
+      active: true,
+      side,
+      type: 'market',
+      price: defaultPrice(side, 'market', quote, info),
+    });
   };
 
-  const setType = (type: OrderType) => {
-    patchDraft({
-      type,
-      price: draft.active ? defaultPrice(draft.side, type, quote, info) : draft.price,
+  /** 市价 / 挂单切换：挂单时给一个市价外的默认价，类型交给 classifyPending */
+  const setOrderMode = (pending: boolean) => {
+    if (!info) return;
+    // 已经是当前页签时不重置用户填好的价格
+    if (draft.active && pending === (draft.type !== 'market')) return;
+    if (!pending) {
+      patchDraft({
+        active: true,
+        type: 'market',
+        price: defaultPrice(draft.side, 'market', quote, info),
+      });
+      return;
+    }
+    const price =
+      draft.type === 'market' || !(draft.price > 0)
+        ? defaultPrice(draft.side, 'stop', quote, info)
+        : draft.price;
+    const next = classifyPending({
+      side: draft.side,
+      price,
+      bid: quote?.bid,
+      ask: quote?.ask,
+      stopsLevelPoints: info.stopsLevelPoints,
+      point: info.point,
     });
+    patchDraft({ active: true, type: next.type ?? 'stop', price });
   };
 
   const changeVolume = (delta: number) => {
@@ -442,33 +530,113 @@ export function OrderTicket() {
     patchRisk({ auto: false });
   };
 
+  /** 快捷价按钮只在草稿未激活时补一个入场价，不覆盖用户已经输入的价格 */
+  const patchOrder = (patch: Partial<DraftOrder>) => {
+    const needPrice = !draft.active && !(draft.price > 0);
+    patchDraft({
+      active: true,
+      ...(needPrice ? { price: defaultPrice(draft.side, draft.type, quote, info) } : {}),
+      ...patch,
+    });
+  };
+
+  const applySlPoints = (points: number) => {
+    if (!info) return;
+    const entry = rulerEntry > 0 ? rulerEntry : defaultPrice(draft.side, draft.type, quote, info);
+    if (!(entry > 0)) {
+      notify('info', '等待报价后再设置止损');
+      return;
+    }
+    const distance = points * (info.point || info.tickSize || 0);
+    const sl = draft.side === 'buy' ? entry - distance : entry + distance;
+    patchOrder({ sl: Number(sl.toFixed(digits)) });
+  };
+
+  const applyTpR = (multiple: number) => {
+    const entry = rulerEntry > 0 ? rulerEntry : defaultPrice(draft.side, draft.type, quote, info);
+    if (!draft.sl || !(entry > 0)) {
+      notify('info', '先设置止损，再按 R 设置止盈');
+      return;
+    }
+    const risk = Math.abs(entry - draft.sl);
+    if (!(risk > 0)) return;
+    const tp = draft.side === 'buy' ? entry + risk * multiple : entry - risk * multiple;
+    setTpTouched(true);
+    patchOrder({ tp: Number(tp.toFixed(digits)) });
+  };
+
+  /** 单击模式：跳过确认窗，但仍要求先设止损、遵守 800ms 防抖和实盘首次确认 */
+  const instantOrder = (side: Side, liveAcked = false) => {
+    if (!ready || !info) return;
+    if (mode === 'readonly') {
+      notify('info', '只读模式：请先在顶部切换到「模拟可交易」');
+      return;
+    }
+    const next: DraftOrder = {
+      ...draft,
+      active: true,
+      side,
+      type: 'market',
+      price: defaultPrice(side, 'market', quote, info),
+    };
+    if (!next.sl) {
+      notify('error', '单击模式必须先设置止损，模板不会代填止损');
+      return;
+    }
+    if (disciplineEnabled) {
+      // 有开仓清单时退回常规确认窗，避免绕过纪律检查
+      patchDraft(next);
+      setConfirm(true);
+      return;
+    }
+    if (mode === 'live' && !oneClickLiveRef.current && !liveAcked) {
+      setLiveAsk(side);
+      return;
+    }
+    const now = Date.now();
+    if (now - lastClickRef.current < 800) return;
+    lastClickRef.current = now;
+    patchDraft(next);
+    void send(next);
+  };
+
+  const chooseMode = (next: OrderEntryMode) => {
+    setModeMenu(false);
+    setEntryMode(next);
+    if (next === 'risk') patchRisk({ auto: true });
+    if (next === 'oneclick' && !draft.sl) {
+      notify('info', '单击模式需要先设置止损，否则不会发单');
+    }
+  };
+
   const handlePlace = () => {
     if (!ready || !info) return;
     if (mode === 'readonly') {
       notify('info', '只读模式：请先在顶部切换到「模拟可交易」');
       return;
     }
-    if (draft.type !== 'market' && !(draft.price > 0)) {
-      notify('error', '请先设置委托价格');
+    if (draft.type !== 'market' && !pendingInfo.type) {
+      notify('error', pendingInfo.warning ?? '请设置有效的委托价格');
       return;
     }
     setConfirm(true);
   };
 
-  const send = async () => {
+  const send = async (override?: Partial<DraftOrder>) => {
     if (!info) return;
+    const order = { ...draft, ...override };
     const clientOrderId = gateClientId ?? crypto.randomUUID();
     setBusy(true);
     try {
       await gateway.call('order.place', {
         clientOrderId,
         symbol,
-        side: draft.side,
-        type: draft.type,
-        volume: draft.volume,
-        price: draft.type === 'market' ? undefined : draft.price,
-        sl: draft.sl ?? undefined,
-        tp: draft.tp ?? undefined,
+        side: order.side,
+        type: order.type,
+        volume: order.volume,
+        price: order.type === 'market' ? undefined : order.price,
+        sl: order.sl ?? undefined,
+        tp: order.tp ?? undefined,
         tag: orderTag.trim() || undefined,
         discipline: disciplineEnabled
           ? {
@@ -507,13 +675,39 @@ export function OrderTicket() {
     }
   };
 
+  const pendingBlocked = draft.type !== 'market' && !pendingInfo.type;
+  // 风险计算表格：手数由「风险金额 + 止损」反算，没填止损就没有可下的单
+  const riskMode = entryMode === 'risk';
+  const slSet = draft.sl != null && draft.sl > 0;
+  const riskNeedsSl = riskMode && !slSet;
+  const riskStep = risk.mode === 'percent' ? 0.1 : 10;
+  const riskPctShown = sizing?.riskPct ?? preview?.riskPct ?? null;
+  const rrShown = sizing?.rr ?? preview?.rr ?? null;
+  const balance = health?.account?.balance ?? null;
+  const slDistancePoints =
+    slSet && rulerEntry > 0 && info?.point
+      ? Math.abs(rulerEntry - (draft.sl as number)) / info.point
+      : null;
+  const bumpRisk = (delta: number) => {
+    if (!Number.isFinite(risk.value)) return;
+    patchRisk({ value: Math.max(0, Math.round((risk.value + delta) * 100) / 100) });
+  };
   const buttonText = !ready
     ? '等待 MT5 连接'
     : !info
       ? '无可用品种'
       : mode === 'readonly'
         ? '只读模式 · 不会下单'
-        : `${draft.side === 'buy' ? '买入' : '卖出'} ${fmtVolume(draft.volume, step)}`;
+        : pendingBlocked
+          ? '委托价无效'
+          : riskNeedsSl
+            ? '设定止损与风险值'
+            : `${draft.side === 'buy' ? '买入' : '卖出'} ${fmtVolume(draft.volume, step)}`;
+
+  const entryModeLabel =
+    entryMode === 'oneclick' ? '单击模式' : entryMode === 'risk' ? '风险计算表格' : '常规模式';
+  const ask = quote?.ask ?? null;
+  const bid = quote?.bid ?? null;
 
   const tpTarget = templateTpTarget({
     side: draft.side,
@@ -570,66 +764,552 @@ export function OrderTicket() {
   }
 
   return (
-    <section className="shrink-0 border-b border-tv-border">
-      <div className="flex h-12 items-center justify-between px-4">
-        <span className="text-[13px] font-semibold text-tv-text">下单</span>
+    <section className="flex min-h-0 flex-1 flex-col">
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-tv-border px-3">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-semibold text-tv-text">
+            {symbol || '下单'}
+          </div>
+          <div className="truncate text-[10px] leading-tight text-tv-faint">
+            {info?.description ?? (ready ? '选择品种' : '等待 MT5 连接')}
+          </div>
+        </div>
         <button
           onClick={() => (draft.active ? resetDraft() : activate())}
           disabled={!draft.active && (!ready || !info)}
           className={clsx(
-            'h-7 rounded-lg border px-2.5 text-[12px] transition-colors',
+            'h-7 shrink-0 rounded-lg border px-2 text-[11px] transition-colors',
             draft.active
               ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent hover:bg-tv-accent/15'
               : 'border-tv-border bg-tv-panel text-tv-muted hover:bg-tv-hover hover:text-tv-text',
             !draft.active && (!ready || !info) && 'cursor-not-allowed opacity-40',
           )}
         >
-          {draft.active ? '取消划线' : '画线下单'}
+          {draft.active ? '取消划线' : '画线'}
+        </button>
+        <button
+          onClick={() => setTicketOpen(false)}
+          title="收起下单面板"
+          aria-label="收起下单面板"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+        >
+          <X size={15} strokeWidth={1.5} />
         </button>
       </div>
 
-      <div className="space-y-4 px-4 pb-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pb-4 pt-2">
+        <div className="flex items-end justify-between gap-2">
+          <div>
+            <div className="text-[10px] text-tv-faint">卖出 · Bid</div>
+            <div className="num font-mono text-[19px] font-medium leading-none text-tv-down">
+              {fmtPrice(bid, digits)}
+            </div>
+          </div>
+          <div className="pb-0.5 text-center text-[10px] leading-tight text-tv-faint">
+            <div>点差</div>
+            <div className="num font-mono text-[11px] text-tv-muted">
+              {preview ? `${preview.spreadPoints.toFixed(0)}` : '—'}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-[10px] text-tv-faint">买入 · Ask</div>
+            <div className="num font-mono text-[19px] font-medium leading-none text-tv-up">
+              {fmtPrice(ask, digits)}
+            </div>
+          </div>
+        </div>
+
+        <div ref={modeWrapRef} className="relative">
+          <button
+            onClick={() => setModeMenu(!modeMenu)}
+            aria-haspopup="menu"
+            aria-expanded={modeMenu}
+            className={clsx(
+              'flex h-8 w-full items-center justify-between rounded-lg border px-2.5 text-[12px] transition-colors',
+              entryMode === 'oneclick'
+                ? 'border-tv-down/40 bg-tv-down-soft text-tv-down'
+                : 'border-tv-border bg-tv-panel text-tv-text hover:bg-tv-hover',
+            )}
+          >
+            <span className="flex items-center gap-1.5">
+              <span className="text-tv-muted">下单模式</span>
+              <span className="font-medium">{entryModeLabel}</span>
+            </span>
+            <ChevronDown size={13} strokeWidth={1.8} className="text-tv-muted" />
+          </button>
+          {modeMenu && (
+            <div
+              role="menu"
+              className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-lg border border-tv-border bg-tv-panel py-1 shadow-[0_12px_32px_rgba(20,30,45,0.16)]"
+            >
+              {(
+                [
+                  ['regular', '常规模式', '每次下单都弹出确认窗，最稳妥'],
+                  ['oneclick', '单击模式', '点买/卖立即发单；必须先设止损'],
+                  ['risk', '风险计算表格', '按风险金额与止损自动算手数'],
+                ] as const
+              ).map(([value, label, hint]) => (
+                <button
+                  key={value}
+                  role="menuitemradio"
+                  aria-checked={entryMode === value}
+                  onClick={() => chooseMode(value)}
+                  disabled={value === 'oneclick' && mode === 'readonly'}
+                  title={
+                    value === 'oneclick' && mode === 'readonly'
+                      ? '只读模式下不能开启单击下单'
+                      : undefined
+                  }
+                  className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left hover:bg-tv-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  <Check
+                    size={13}
+                    strokeWidth={2}
+                    className={clsx(
+                      'mt-0.5 shrink-0',
+                      entryMode === value ? 'text-tv-accent' : 'text-transparent',
+                    )}
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-[12px] text-tv-text">{label}</span>
+                    <span className="block text-[10px] leading-tight text-tv-muted">{hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {entryMode === 'oneclick' && (
+          <div className="rounded-lg border border-tv-down/30 bg-tv-down-soft px-2.5 py-1.5 text-[10px] leading-relaxed text-tv-down">
+            单击直发已开启：买/卖按钮会立即下单，不再弹确认窗。
+            {mode === 'live' ? ' 实盘首次下单仍需确认一次。' : ''}
+            {disciplineEnabled ? ' 有开仓清单时自动退回确认窗。' : ''}
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-2">
           <button
-            onClick={() => setSide('buy')}
+            onClick={() => (entryMode === 'oneclick' ? instantOrder('sell') : startMarket('sell'))}
             className={clsx(
-              'h-9 rounded-lg text-[13px] font-medium transition-colors',
-              draft.side === 'buy'
-                ? 'bg-tv-up text-white'
-                : 'bg-tv-raised text-tv-muted hover:text-tv-text',
+              'flex h-14 flex-col items-center justify-center rounded-lg text-white transition-colors',
+              'bg-tv-down hover:bg-[#a93831]',
+              draft.side === 'sell' && entryMode !== 'oneclick' && 'ring-2 ring-tv-down/40 ring-offset-1',
+              mode === 'readonly' && 'opacity-60',
             )}
+            title={entryMode === 'oneclick' ? '单击立即卖出' : '以市价卖出'}
           >
-            买入
+            <span className="text-[13px] font-medium">卖出</span>
+            <span className="num font-mono text-[12px] opacity-90">{fmtPrice(bid, digits)}</span>
           </button>
           <button
-            onClick={() => setSide('sell')}
+            onClick={() => (entryMode === 'oneclick' ? instantOrder('buy') : startMarket('buy'))}
             className={clsx(
-              'h-9 rounded-lg text-[13px] font-medium transition-colors',
-              draft.side === 'sell'
-                ? 'bg-tv-down text-white'
-                : 'bg-tv-raised text-tv-muted hover:text-tv-text',
+              'flex h-14 flex-col items-center justify-center rounded-lg text-white transition-colors',
+              'bg-tv-up hover:bg-[#0c6a49]',
+              draft.side === 'buy' && entryMode !== 'oneclick' && 'ring-2 ring-tv-up/40 ring-offset-1',
+              mode === 'readonly' && 'opacity-60',
             )}
+            title={entryMode === 'oneclick' ? '单击立即买入' : '以市价买入'}
           >
-            卖出
+            <span className="text-[13px] font-medium">买入</span>
+            <span className="num font-mono text-[12px] opacity-90">{fmtPrice(ask, digits)}</span>
           </button>
         </div>
 
         <div className="flex rounded-lg border border-tv-border bg-tv-raised p-0.5">
-          {ORDER_TYPES.map((item) => (
-            <button
-              key={item.value}
-              onClick={() => setType(item.value)}
+          {(
+            [
+              [false, '市价订单'],
+              [true, '挂单'],
+            ] as const
+          ).map(([pending, label]) => {
+            const selected = pending === (draft.type !== 'market');
+            return (
+              <button
+                key={label}
+                onClick={() => setOrderMode(pending)}
+                aria-pressed={selected}
+                className={clsx(
+                  'h-7 flex-1 rounded-md text-[12px] transition-colors',
+                  selected
+                    ? 'bg-tv-panel text-tv-text shadow-[0_1px_2px_rgba(20,30,45,0.06)]'
+                    : 'text-tv-muted hover:text-tv-text',
+                )}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
+        {draft.type !== 'market' && (
+          <div className="rounded-lg border border-tv-border bg-tv-panel p-2">
+            <div className="flex items-center gap-1.5">
+              <span className="w-10 shrink-0 text-[11px] text-tv-muted">委托价</span>
+              <input
+                type="number"
+                step={info?.tickSize ?? 0.00001}
+                value={draft.price || ''}
+                aria-label="委托价格"
+                onChange={(event) => {
+                  const value = event.target.value === '' ? 0 : Number(event.target.value);
+                  patchDraft({ price: Number.isFinite(value) ? value : 0 });
+                }}
+                className="h-7 min-w-0 flex-1 rounded border border-tv-border bg-tv-raised px-1.5 font-mono text-[11px] text-tv-text outline-none focus:border-tv-accent"
+              />
+              <span
+                className={clsx(
+                  'shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium',
+                  pendingInfo.type
+                    ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
+                    : 'border-tv-warn/40 bg-tv-warn-soft text-tv-warn',
+                )}
+              >
+                {pendingInfo.label}
+              </span>
+            </div>
+            <div
               className={clsx(
-                'h-7 flex-1 rounded-md text-[12px] transition-colors',
-                draft.type === item.value
-                  ? 'bg-tv-panel text-tv-text shadow-[0_1px_2px_rgba(20,30,45,0.06)]'
-                  : 'text-tv-muted hover:text-tv-text',
+                'mt-1 text-[10px] leading-4',
+                pendingInfo.warning ? 'text-tv-warn' : 'text-tv-muted',
               )}
             >
-              {item.label}
+              {pendingInfo.warning ??
+                (draft.side === 'buy'
+                  ? '高于买价 = 停损买入，低于买价 = 限价买入'
+                  : '低于卖价 = 停损卖出，高于卖价 = 限价卖出')}
+            </div>
+          </div>
+        )}
+
+        {riskMode ? (
+          <div data-risk-table className="space-y-2 rounded-lg border border-tv-border bg-tv-panel p-2">
+            <div className="flex rounded-lg border border-tv-border bg-tv-raised p-0.5">
+              {(
+                [
+                  ['amount', '固定金额'],
+                  ['percent', '余额 %'],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => patchRisk({ mode: value })}
+                  aria-pressed={risk.mode === value}
+                  className={clsx(
+                    'h-7 flex-1 rounded-md text-[12px] transition-colors',
+                    risk.mode === value
+                      ? 'bg-tv-panel text-tv-text shadow-[0_1px_2px_rgba(20,30,45,0.06)]'
+                      : 'text-tv-muted hover:text-tv-text',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div>
+              <div className="mb-1 flex items-baseline justify-between gap-2">
+                <span className="text-[11px] text-tv-muted">
+                  {risk.mode === 'percent' ? '风险比例' : '风险金额'}
+                </span>
+                <span className="text-[10px] text-tv-faint">
+                  余额 {fmtMoney(balance)} {currency}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => bumpRisk(-riskStep)}
+                  aria-label="减少风险"
+                  className="h-8 w-8 shrink-0 rounded-lg bg-tv-raised text-[14px] text-tv-muted transition-colors hover:text-tv-text"
+                >
+                  −
+                </button>
+                <div className="relative min-w-0 flex-1">
+                  <input
+                    type="number"
+                    min={0}
+                    step={riskStep}
+                    value={risk.value}
+                    aria-label={risk.mode === 'percent' ? '风险比例' : '风险金额'}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      if (Number.isFinite(value)) patchRisk({ value });
+                    }}
+                    className={clsx(inputClass, 'pr-7 text-center')}
+                  />
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-tv-faint">
+                    {risk.mode === 'percent' ? '%' : currency}
+                  </span>
+                </div>
+                <button
+                  onClick={() => bumpRisk(riskStep)}
+                  aria-label="增加风险"
+                  className="h-8 w-8 shrink-0 rounded-lg bg-tv-raised text-[14px] text-tv-muted transition-colors hover:text-tv-text"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1 flex items-baseline justify-between gap-2">
+                <span className="text-[11px] text-tv-warn">止损价</span>
+                <span
+                  className={clsx(
+                    'text-[10px]',
+                    slSet ? 'text-tv-faint' : 'text-tv-warn',
+                  )}
+                >
+                  {slDistancePoints != null
+                    ? `距现价 ${slDistancePoints.toFixed(0)} 点`
+                    : '必填 · 决定手数'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  step={info?.tickSize ?? 0.00001}
+                  value={draft.sl ?? ''}
+                  placeholder="未设置"
+                  aria-label="止损价格"
+                  onChange={(event) => {
+                    const value = event.target.value === '' ? null : Number(event.target.value);
+                    patchOrder({ sl: Number.isFinite(value as number) ? value : null });
+                  }}
+                  className="h-7 min-w-0 flex-1 rounded border border-tv-border bg-tv-raised px-1.5 font-mono text-[11px] text-tv-warn outline-none focus:border-tv-accent"
+                />
+                {[100, 300, 500].map((points) => (
+                  <button
+                    key={points}
+                    onClick={() => applySlPoints(points)}
+                    title={`按现价偏移 ${points} 点`}
+                    className="h-7 shrink-0 rounded border border-tv-border bg-tv-panel px-1 text-[10px] text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+                  >
+                    {points}点
+                  </button>
+                ))}
+                {draft.sl != null && (
+                  <button
+                    onClick={() => patchOrder({ sl: null })}
+                    aria-label="清除止损"
+                    title="清除止损"
+                    className="flex h-7 w-5 shrink-0 items-center justify-center rounded text-tv-faint hover:text-tv-down"
+                  >
+                    <X size={11} strokeWidth={2} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1 flex items-baseline justify-between gap-2">
+                <span className="text-[11px] text-tv-accent">止盈价</span>
+                <span className="text-[10px] text-tv-faint">
+                  {rrShown != null ? `1 : ${rrShown.toFixed(2)}` : '可选'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  step={info?.tickSize ?? 0.00001}
+                  value={draft.tp ?? ''}
+                  placeholder="未设置"
+                  aria-label="止盈价格"
+                  onChange={(event) => {
+                    setTpTouched(true);
+                    const value = event.target.value === '' ? null : Number(event.target.value);
+                    patchOrder({ tp: Number.isFinite(value as number) ? value : null });
+                  }}
+                  className="h-7 min-w-0 flex-1 rounded border border-tv-border bg-tv-raised px-1.5 font-mono text-[11px] text-tv-accent outline-none focus:border-tv-accent"
+                />
+                {[1, 2, 3].map((multiple) => (
+                  <button
+                    key={multiple}
+                    onClick={() => applyTpR(multiple)}
+                    title={`按止损距离设置 ${multiple}R 止盈`}
+                    className="h-7 shrink-0 rounded border border-tv-border bg-tv-panel px-1.5 text-[10px] text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+                  >
+                    {multiple}R
+                  </button>
+                ))}
+                {draft.tp != null && (
+                  <button
+                    onClick={() => {
+                      setTpTouched(true);
+                      patchOrder({ tp: null });
+                    }}
+                    aria-label="清除止盈"
+                    title="清除止盈"
+                    className="flex h-7 w-5 shrink-0 items-center justify-center rounded text-tv-faint hover:text-tv-down"
+                  >
+                    <X size={11} strokeWidth={2} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-1 border-t border-tv-border pt-1.5">
+              <PreviewRow
+                label="自动手数"
+                value={slSet ? `${fmtVolume(sizing?.volume ?? draft.volume, step)} 手` : '—'}
+              />
+              <PreviewRow
+                label="风险占比"
+                value={riskPctShown != null ? `${riskPctShown.toFixed(2)}%` : '—'}
+              />
+              <PreviewRow label="保证金" value={fmtMoney(preview?.margin)} />
+              <PreviewRow
+                label="R:R"
+                value={rrShown != null ? `1 : ${rrShown.toFixed(2)}` : '—'}
+              />
+            </div>
+            {!slSet && (
+              <div className="text-[10px] leading-4 text-tv-faint">
+                填写止损价后按风险金额自动算手数
+              </div>
+            )}
+            {sizing?.warnings?.length ? (
+              <div className="text-[11px] text-tv-warn">{sizing.warnings.join('；')}</div>
+            ) : null}
+            {sizing?.capped?.length ? (
+              <div className="text-[11px] text-tv-warn">
+                手数已按 {sizing.capped.join(' / ')} 限制
+              </div>
+            ) : null}
+          </div>
+        ) : (
+        <>
+        <div className="rounded-lg border border-tv-border bg-tv-panel p-2">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-[11px] text-tv-muted">手数</span>
+            <span
+              className={clsx(
+                'rounded px-1 py-px text-[9px] font-medium',
+                autoLots
+                  ? 'bg-tv-accent-soft text-tv-accent'
+                  : risk.auto
+                    ? 'bg-tv-raised text-tv-muted'
+                    : 'text-tv-faint',
+              )}
+            >
+              {autoLots ? '模板自动' : risk.auto ? '风险自动' : '手动'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => changeVolume(-1)}
+              className="h-8 w-8 shrink-0 rounded-lg bg-tv-raised text-[14px] text-tv-muted transition-colors hover:text-tv-text"
+              aria-label="减少手数"
+            >
+              −
             </button>
-          ))}
+            <input
+              type="number"
+              step={step}
+              min={info?.minVolume}
+              max={info?.maxVolume}
+              value={draft.volume}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                if (Number.isFinite(value)) patchDraft({ volume: value });
+                patchRisk({ auto: false });
+              }}
+              className={clsx(inputClass, 'text-center')}
+            />
+            <button
+              onClick={() => changeVolume(1)}
+              className="h-8 w-8 shrink-0 rounded-lg bg-tv-raised text-[14px] text-tv-muted transition-colors hover:text-tv-text"
+              aria-label="增加手数"
+            >
+              +
+            </button>
+          </div>
+          {risk.auto && !draft.sl && (
+            <div className="mt-1 text-[10px] leading-4 text-tv-faint">
+              设置止损后按模板风险自动算手数
+            </div>
+          )}
         </div>
+
+        <div className="space-y-1.5 rounded-lg border border-tv-border bg-tv-panel p-2">
+          <div className="flex items-center gap-1">
+            <span className="w-7 shrink-0 text-[11px] text-tv-warn">止损</span>
+            <input
+              type="number"
+              step={info?.tickSize ?? 0.00001}
+              value={draft.sl ?? ''}
+              placeholder="未设置"
+              aria-label="止损价格"
+              onChange={(event) => {
+                const value = event.target.value === '' ? null : Number(event.target.value);
+                patchOrder({ sl: Number.isFinite(value as number) ? value : null });
+              }}
+              className="h-7 min-w-0 flex-1 rounded border border-tv-border bg-tv-raised px-1.5 font-mono text-[11px] text-tv-warn outline-none focus:border-tv-accent"
+            />
+            {[100, 300, 500].map((points) => (
+              <button
+                key={points}
+                onClick={() => applySlPoints(points)}
+                title={`按现价偏移 ${points} 点`}
+                className="h-7 shrink-0 rounded border border-tv-border bg-tv-panel px-1 text-[10px] text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+              >
+                {points}点
+              </button>
+            ))}
+            {draft.sl != null && (
+              <button
+                onClick={() => patchOrder({ sl: null })}
+                aria-label="清除止损"
+                title="清除止损"
+                className="flex h-7 w-5 shrink-0 items-center justify-center rounded text-tv-faint hover:text-tv-down"
+              >
+                <X size={11} strokeWidth={2} />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="w-7 shrink-0 text-[11px] text-tv-accent">止盈</span>
+            <input
+              type="number"
+              step={info?.tickSize ?? 0.00001}
+              value={draft.tp ?? ''}
+              placeholder="未设置"
+              aria-label="止盈价格"
+              onChange={(event) => {
+                setTpTouched(true);
+                const value = event.target.value === '' ? null : Number(event.target.value);
+                patchOrder({ tp: Number.isFinite(value as number) ? value : null });
+              }}
+              className="h-7 min-w-0 flex-1 rounded border border-tv-border bg-tv-raised px-1.5 font-mono text-[11px] text-tv-accent outline-none focus:border-tv-accent"
+            />
+            {[1, 2, 3].map((multiple) => (
+              <button
+                key={multiple}
+                onClick={() => applyTpR(multiple)}
+                title={`按止损距离设置 ${multiple}R 止盈`}
+                className="h-7 shrink-0 rounded border border-tv-border bg-tv-panel px-1.5 text-[10px] text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+              >
+                {multiple}R
+              </button>
+            ))}
+            {draft.tp != null && (
+              <button
+                onClick={() => {
+                  setTpTouched(true);
+                  patchOrder({ tp: null });
+                }}
+                aria-label="清除止盈"
+                title="清除止盈"
+                className="flex h-7 w-5 shrink-0 items-center justify-center rounded text-tv-faint hover:text-tv-down"
+              >
+                <X size={11} strokeWidth={2} />
+              </button>
+            )}
+          </div>
+        </div>
+        </>
+        )}
 
         <div ref={templateWrapRef} className="relative">
           <div className="flex gap-1.5">
@@ -840,6 +1520,7 @@ export function OrderTicket() {
           </div>
         )}
 
+        {moreOpen && !riskMode && (
         <Field label="风险开仓">
           <div className="space-y-2">
             <div className="flex rounded-lg border border-tv-border bg-tv-raised p-0.5">
@@ -902,39 +1583,21 @@ export function OrderTicket() {
             ) : null}
           </div>
         </Field>
+        )}
 
-        <Field label="手数">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => changeVolume(-1)}
-              className="h-8 w-8 shrink-0 rounded-lg bg-tv-raised text-[14px] text-tv-muted transition-colors hover:text-tv-text"
-              aria-label="减少手数"
-            >
-              −
-            </button>
-            <input
-              type="number"
-              step={step}
-              min={info?.minVolume}
-              max={info?.maxVolume}
-              value={draft.volume}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                if (Number.isFinite(value)) patchDraft({ volume: value });
-                patchRisk({ auto: false });
-              }}
-              className={clsx(inputClass, 'text-center')}
-            />
-            <button
-              onClick={() => changeVolume(1)}
-              className="h-8 w-8 shrink-0 rounded-lg bg-tv-raised text-[14px] text-tv-muted transition-colors hover:text-tv-text"
-              aria-label="增加手数"
-            >
-              +
-            </button>
-          </div>
-        </Field>
+        <button
+          onClick={() => setMoreOpen(!moreOpen)}
+          className="flex w-full items-center justify-between rounded-lg border border-dashed border-tv-border px-2.5 py-1.5 text-[11px] text-tv-muted transition-colors hover:border-tv-border hover:bg-tv-hover hover:text-tv-text"
+        >
+          <span>{moreOpen ? '收起附加设置' : '附加设置 · 策略标签 / 风险 / 计划'}</span>
+          <ChevronDown
+            size={12}
+            strokeWidth={1.8}
+            className={clsx('transition-transform', moreOpen && 'rotate-180')}
+          />
+        </button>
 
+        {moreOpen && (
         <Field label="策略标签">
           <input
             type="text"
@@ -945,54 +1608,12 @@ export function OrderTicket() {
             className={inputClass}
           />
         </Field>
-
-        {draft.type !== 'market' && (
-          <Field label="委托价格">
-            <input
-              type="number"
-              step={info?.tickSize ?? 0.00001}
-              value={draft.price || ''}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                patchDraft({ price: Number.isFinite(value) ? value : 0 });
-              }}
-              className={inputClass}
-            />
-          </Field>
         )}
-
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="止损">
-            <input
-              type="number"
-              step={info?.tickSize ?? 0.00001}
-              value={draft.sl ?? ''}
-              placeholder="无"
-              onChange={(event) =>
-                patchDraft({ sl: event.target.value === '' ? null : Number(event.target.value) })
-              }
-              className={inputClass}
-            />
-          </Field>
-          <Field label="止盈">
-            <input
-              type="number"
-              step={info?.tickSize ?? 0.00001}
-              value={draft.tp ?? ''}
-              placeholder="无"
-              onChange={(event) => {
-                setTpTouched(true);
-                patchDraft({ tp: event.target.value === '' ? null : Number(event.target.value) });
-              }}
-              className={inputClass}
-            />
-          </Field>
-        </div>
 
         <p className="text-[11px] leading-relaxed text-tv-muted">
           {draft.type === 'market'
-            ? '市价单按当前报价成交，图上不设入场点；直接拖动止损 / 止盈线即可，拖动后才写入并自动计算手数。'
-            : '图表上的止损 / 止盈参考线可直接拖动；拖动后才写入，并自动计算手数。'}
+            ? '市价单按当前报价成交，图上的虚线跟着现价走；按住线上 TP / SL 徽标向上或向下拉动即可设置保护，手数按模板自动计算。'
+            : '挂单价格高于 / 低于市价时自动切换停损或限价；按住线上 TP / SL 徽标上下拖动即可设置保护。'}
         </p>
 
         <div className="space-y-1.5 rounded-lg bg-tv-raised px-3 py-2.5 text-[12px]">
@@ -1025,17 +1646,28 @@ export function OrderTicket() {
           active={draft.active}
         />
 
-        <button
-          onClick={handlePlace}
-          disabled={!ready || !info}
-          className={clsx(
-            'h-9 w-full rounded-lg text-[13px] font-medium text-white transition-colors',
-            draft.side === 'buy' ? 'bg-tv-up hover:bg-[#0c6a49]' : 'bg-tv-down hover:bg-[#a93831]',
-            (!ready || !info) && 'cursor-not-allowed opacity-40',
-          )}
-        >
-          {buttonText}
-        </button>
+        {entryMode !== 'oneclick' ? (
+          <button
+            onClick={handlePlace}
+            disabled={!ready || !info || pendingBlocked || riskNeedsSl}
+            title={riskNeedsSl ? '先填写止损价，手数会按风险金额自动算' : undefined}
+            className={clsx(
+              'mt-auto h-10 w-full rounded-lg text-[13px] font-medium text-white transition-colors',
+              draft.side === 'buy'
+                ? 'bg-tv-up hover:bg-[#0c6a49]'
+                : 'bg-tv-down hover:bg-[#a93831]',
+              (!ready || !info || pendingBlocked || riskNeedsSl) &&
+                'cursor-not-allowed opacity-40',
+            )}
+          >
+            {buttonText}
+          </button>
+        ) : (
+          <div className="mt-auto rounded-lg border border-tv-border bg-tv-raised px-3 py-2 text-center text-[11px] text-tv-muted">
+            单击模式：点上方买 / 卖按钮立即发单
+            {!draft.sl && <span className="mt-0.5 block text-tv-warn">发送前必须先设置止损</span>}
+          </div>
+        )}
 
         <div className="text-center text-[11px] leading-relaxed text-tv-muted">
           {mode === 'readonly' ? '只读模式不会发送任何订单' : '订单发送到本机 MT5，确认后成交'}
@@ -1053,6 +1685,43 @@ export function OrderTicket() {
           </div>
         </div>
       </div>
+
+      {liveAsk && (
+        <div
+          data-confirm="oneclick-live"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6"
+        >
+          <div className="w-[380px] max-w-[92vw] rounded-xl border border-tv-border bg-tv-panel p-5 shadow-[0_16px_48px_rgba(20,30,45,0.18)]">
+            <div className="text-[14px] font-semibold text-tv-text">实盘单击下单确认</div>
+            <p className="mt-2 text-[12px] leading-relaxed text-tv-muted">
+              当前是实盘账户。单击模式会跳过每笔确认窗，点击买 / 卖即按市价真实成交。
+              本次启动只需确认一次，止损仍必须手动设置。
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setLiveAsk(null)}
+                className="h-9 flex-1 rounded-lg border border-tv-border text-[12px] text-tv-text hover:bg-tv-hover"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  const side = liveAsk;
+                  oneClickLiveRef.current = true;
+                  setLiveAsk(null);
+                  if (side) instantOrder(side, true);
+                }}
+                className={clsx(
+                  'h-9 flex-1 rounded-lg text-[12px] font-medium text-white',
+                  liveAsk === 'buy' ? 'bg-tv-up' : 'bg-tv-down',
+                )}
+              >
+                我知道，继续{liveAsk === 'buy' ? '买入' : '卖出'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirm && (
         <div
@@ -1072,7 +1741,7 @@ export function OrderTicket() {
               />
               <ConfirmRow
                 label="类型"
-                value={draft.type === 'market' ? '市价' : draft.type === 'limit' ? '限价' : '停损'}
+                value={draft.type === 'market' ? '市价' : pendingInfo.label}
               />
               <ConfirmRow label="手数" value={fmtVolume(draft.volume, step)} />
               <ConfirmRow
@@ -1219,7 +1888,7 @@ export function OrderTicket() {
                 取消
               </button>
               <button
-                onClick={send}
+                onClick={() => void send()}
                 disabled={busy || !!gateProblem}
                 className={clsx(
                   'h-9 flex-1 rounded-lg text-[12px] font-medium text-white transition-colors',

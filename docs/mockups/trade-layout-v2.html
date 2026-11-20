@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tally 交易台布局方案 v2 · 静态样稿</title>
+<style>
+  :root {
+    --bg: #eef1f5; --panel: #ffffff; --raised: #f4f6f9; --border: #e3e8ee;
+    --text: #1a222c; --muted: #64707f; --faint: #8b96a5;
+    --up: #0f7a55; --down: #c2413a; --warn: #a9691a; --accent: #1f5fd6;
+    --up-soft: #e7f4ee; --down-soft: #fbecea; --warn-soft: #fbf3e6;
+    --accent-soft: #e9effc; --hover: #eef2f6;
+    --canvas: #f6f3ec; --sidebar: #f1ece2; --line: #e5dfd4;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .app { display: flex; height: 100vh; min-height: 760px; background: var(--canvas); }
+
+  /* 导航图标栏 */
+  .rail { width: 56px; flex: none; background: var(--sidebar); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 14px 0 10px; gap: 4px; }
+  .mark { width: 26px; height: 20px; position: relative; margin-bottom: 14px; }
+  .mark i { position: absolute; top: 2px; width: 3px; height: 15px; border-radius: 1px; background: #211c16; }
+  .mark i:nth-child(1) { left: 2px; } .mark i:nth-child(2) { left: 8px; } .mark i:nth-child(3) { left: 14px; } .mark i:nth-child(4) { left: 20px; }
+  .mark b { position: absolute; left: -1px; top: 9px; width: 28px; height: 2.5px; border-radius: 1px; background: var(--accent); transform: rotate(-30deg); }
+  .rail button {
+    width: 40px; height: 38px; border: 0; border-radius: 9px; background: transparent; color: #6f675b;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative;
+  }
+  .rail button:hover { background: #eee8dd; color: #211c16; }
+  .rail button.active { background: #e9e1d3; color: #211c16; }
+  .rail button.active::before { content: ""; position: absolute; left: -8px; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: var(--accent); }
+  .rail svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .rail .badge { position: absolute; right: 4px; top: 5px; min-width: 13px; height: 13px; border-radius: 7px; background: var(--down); color: #fff; font: 9px/13px var(--mono); text-align: center; padding: 0 3px; }
+  .rail .spacer { flex: 1; }
+
+  /* 主列 */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+
+  /* 顶栏 */
+  .topbar { height: 44px; flex: none; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 12px; }
+  .layoutbtn { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--raised); color: var(--muted); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .split { width: 1px; height: 18px; background: var(--border); flex: none; }
+  .tabs { display: flex; align-items: stretch; gap: 2px; min-width: 0; overflow: hidden; }
+  .tab { height: 30px; padding: 0 10px; border-radius: 7px; display: flex; align-items: center; gap: 7px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+  .tab:hover { background: var(--hover); color: var(--text); }
+  .tab.active { background: var(--raised); color: var(--text); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); border-radius: 7px 7px 0 0; }
+  .tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .tab .x { color: var(--faint); font-size: 12px; line-height: 1; }
+  .tab .x:hover { color: var(--down); }
+  .addtab { width: 28px; height: 28px; border-radius: 7px; border: 1px dashed var(--border); background: transparent; color: var(--faint); cursor: pointer; font-size: 15px; }
+  .addtab:hover { color: var(--text); border-color: var(--faint); }
+  .topright { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .ghost { height: 28px; padding: 0 9px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .ghost:hover { background: var(--hover); color: var(--text); }
+  .ghost svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.5; }
+  .acct { display: flex; align-items: center; gap: 7px; padding: 0 8px; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: var(--raised); cursor: pointer; }
+  .acct .avatar { width: 16px; height: 16px; border-radius: 50%; background: #d9d2c4; }
+  .acct .login { font-family: var(--mono); font-size: 11px; }
+  .acct .bal { font-family: var(--mono); font-size: 11px; color: var(--muted); padding-left: 7px; border-left: 1px solid var(--border); }
+  .pill { height: 26px; padding: 0 9px; border-radius: 7px; font-size: 11px; font-weight: 600; display: flex; align-items: center; border: 1px solid var(--border); background: var(--raised); color: var(--muted); cursor: pointer; }
+  .pill.danger { border-color: rgba(194,65,58,.35); color: var(--down); background: var(--panel); }
+  .conn { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+  .conn i { width: 6px; height: 6px; border-radius: 50%; background: var(--up); }
+
+  /* 三列 */
+  .body { flex: 1; min-height: 0; display: flex; }
+
+  /* 自选列 */
+  .watch { width: 280px; flex: none; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .watch .head { padding: 10px 10px 8px; display: flex; flex-direction: column; gap: 7px; }
+  .watch .titlerow { display: flex; align-items: center; justify-content: space-between; }
+  .watch .title { font-size: 12px; font-weight: 600; }
+  .watch .title span { color: var(--faint); font: 11px var(--mono); margin-left: 5px; }
+  .iconbtn { width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 6px; background: var(--raised); color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .search { height: 28px; border: 1px solid var(--border); border-radius: 7px; background: var(--raised); display: flex; align-items: center; gap: 6px; padding: 0 8px; color: var(--faint); }
+  .search svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+  .filter { display: flex; gap: 4px; }
+  .chip { height: 22px; padding: 0 8px; border-radius: 6px; font-size: 11px; color: var(--muted); background: transparent; border: 0; cursor: pointer; }
+  .chip.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .wtable { flex: 1; min-height: 0; overflow: auto; }
+  .wrow { display: grid; grid-template-columns: 1fr 64px 64px 48px; align-items: center; height: 32px; padding: 0 10px; border-top: 1px solid rgba(227,232,238,.7); cursor: pointer; }
+  .wrow:hover { background: var(--hover); }
+  .wrow.thead { height: 24px; border-top: 0; color: var(--faint); font-size: 10px; cursor: default; position: sticky; top: 0; background: var(--panel); z-index: 2; }
+  .wrow.thead:hover { background: var(--panel); }
+  .wrow .sym { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .wrow .sym i { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+  .wrow .sym span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .wrow .px { text-align: right; font: 11px var(--mono); }
+  .wrow .chg { text-align: right; font: 11px var(--mono); }
+  .up { color: var(--up); } .down { color: var(--down); } .mut { color: var(--muted); } .faint { color: var(--faint); }
+
+  /* 图表 + 托盘 */
+  .center { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .chart { flex: 1; min-height: 0; position: relative; background: #fff; overflow: hidden; }
+  .chart .ctop { position: absolute; inset: 0 0 auto 0; height: 34px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; padding: 0 12px; background: #fff; z-index: 3; }
+  .chart .ctop .s { font-size: 12px; font-weight: 600; }
+  .chart .ctop .tf { display: flex; gap: 3px; }
+  .chart .ctop .tf b { font: 500 11px var(--mono); color: var(--muted); padding: 2px 5px; border-radius: 4px; }
+  .chart .ctop .tf b.on { color: var(--accent); background: var(--accent-soft); }
+  .chart .ctop .legend { font: 11px var(--mono); color: var(--muted); margin-left: auto; }
+  .chart canvas { position: absolute; inset: 34px 0 0 0; width: 100%; height: calc(100% - 34px); }
+  .chart .watermark { position: absolute; right: 18px; bottom: 14px; font: 600 26px var(--mono); color: rgba(100,112,127,.08); letter-spacing: .04em; }
+  /* 图上止损/止盈线 + 右缘小块（沿用 ChartChips 的样式） */
+  .chart .layers { position: absolute; inset: 34px 0 0 0; pointer-events: none; }
+  .pl { position: absolute; left: 0; right: 64px; border-top: 1px dashed; }
+  .pl.entry { border-color: rgba(194,65,58,.5); }
+  .pl.sl { border-color: rgba(169,105,26,.55); }
+  .pl.tp { border-color: rgba(77,182,172,.7); }
+  .pchip { position: absolute; right: 6px; transform: translateY(-50%); height: 20px; display: flex; align-items: center; padding: 0 6px; border-radius: 3px; color: #fff; font: 500 11px var(--mono); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  .pchip .x { margin-left: 5px; padding-left: 5px; border-left: 1px solid rgba(255,255,255,.35); color: rgba(255,255,255,.8); }
+
+  .dock { height: 208px; flex: none; background: var(--panel); border-top: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .dock .bar { height: 34px; flex: none; display: flex; align-items: stretch; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border); }
+  .dock .bar .t { padding: 0 12px; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; cursor: pointer; position: relative; }
+  .dock .bar .t.on { color: var(--text); font-weight: 600; }
+  .dock .bar .t.on::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; border-radius: 2px; background: var(--text); }
+  .dock .bar .t .n { font: 11px var(--mono); color: var(--faint); }
+  .dock .bar .right { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .dock .bar .iconbtn { width: 22px; height: 22px; }
+  .dtable { flex: 1; min-height: 0; overflow: auto; }
+  .drow { display: grid; grid-template-columns: 1.15fr 52px 60px 96px 96px 96px 96px 96px 132px; align-items: center; height: 30px; padding: 0 10px; border-top: 1px solid rgba(227,232,238,.6); font-size: 11px; }
+  .drow.thead { height: 26px; border-top: 0; color: var(--faint); font-size: 10px; position: sticky; top: 0; background: var(--panel); z-index: 2; }
+  .drow:hover:not(.thead) { background: var(--hover); }
+  .drow .c { text-align: right; font-family: var(--mono); }
+  .drow .sym { font-weight: 500; }
+  .side { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
+  .side i { width: 5px; height: 5px; border-radius: 50%; }
+  .rowbtns { display: flex; justify-content: flex-end; gap: 4px; }
+  .rowbtns button { height: 20px; padding: 0 7px; border-radius: 5px; border: 1px solid var(--border); background: var(--raised); color: var(--text); font-size: 10px; cursor: pointer; }
+  .rowbtns button:hover { background: var(--hover); }
+  .rowbtns button.primary { background: var(--text); color: var(--panel); border-color: var(--text); }
+  .dock .empty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 12px; }
+
+  /* 下单面板 */
+  .ticket { position: relative; width: 300px; flex: none; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .ticket .head { padding: 12px 12px 10px; border-bottom: 1px solid var(--border); }
+  .ticket .symrow { display: flex; align-items: baseline; gap: 6px; }
+  .ticket .symrow .name { font-size: 14px; font-weight: 650; }
+  .ticket .symrow .desc { font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ticket .quotes { margin-top: 9px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .qbox { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; background: var(--raised); }
+  .qbox .lab { font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; }
+  .qbox .v { font: 600 16px/1.25 var(--mono); margin-top: 2px; }
+  .qbox.bid .v { color: var(--down); }
+  .qbox.ask .v { color: var(--up); }
+  .spread { margin-top: 7px; display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--faint); }
+  .spread .track { flex: 1; height: 3px; border-radius: 2px; background: linear-gradient(90deg, var(--down) 0 42%, var(--up) 42% 100%); opacity: .35; }
+  .actions { padding: 10px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .bigbtn { height: 56px; border: 0; border-radius: 8px; color: #fff; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+  .bigbtn.sell { background: var(--down); }
+  .bigbtn.buy { background: var(--up); }
+  .bigbtn.sell.sel { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px var(--down); }
+  .bigbtn.buy.sel { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px var(--up); }
+  .bigbtn small { font: 600 10px/1 var(--mono); opacity: .82; }
+  .bigbtn strong { font-size: 12px; font-weight: 650; }
+  .form { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .seg { height: 30px; border: 1px solid var(--border); background: var(--raised); border-radius: 8px; padding: 2px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+  .seg button { border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+  .seg button.on { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(20,30,45,.08); }
+  .tplrow { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--raised); }
+  .tplrow.on { border-color: rgba(31,95,214,.28); background: var(--accent-soft); }
+  .tplrow .info { flex: 1; min-width: 0; }
+  .tplrow .nm { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--text); }
+  .tplrow .nm em { font-style: normal; font-size: 9px; font-weight: 500; color: var(--accent); background: #fff; border: 1px solid rgba(31,95,214,.3); border-radius: 3px; padding: 0 3px; }
+  .tplrow .sm { margin-top: 1px; font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tplrow .act { height: 22px; padding: 0 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); color: var(--text); font-size: 10px; cursor: pointer; }
+  .quick { display: flex; gap: 6px; }
+  .quick a { color: var(--accent); font-size: 10px; cursor: pointer; text-decoration: none; }
+  .quick a:hover { text-decoration: underline; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field > .lab { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+  .field > .lab a { color: var(--accent); text-decoration: none; cursor: pointer; }
+  .stepper { height: 32px; display: grid; grid-template-columns: 30px 1fr 30px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel); }
+  .stepper button { border: 0; background: var(--raised); color: var(--muted); font-size: 14px; cursor: pointer; }
+  .stepper input { border: 0; text-align: center; font: 600 13px var(--mono); color: var(--text); outline: none; width: 100%; background: var(--panel); }
+  .sltp { height: 32px; border: 1px solid var(--border); border-radius: 8px; display: flex; align-items: center; padding: 0 8px; gap: 6px; background: var(--panel); }
+  .sltp .v { flex: 1; color: var(--faint); font-family: var(--mono); font-size: 12px; }
+  .sltp .mini { width: 24px; height: 22px; border: 0; border-radius: 5px; background: var(--raised); color: var(--muted); cursor: pointer; }
+  .acc { border-top: 1px solid var(--border); padding-top: 8px; }
+  .acc summary { list-style: none; display: flex; align-items: center; color: var(--muted); font-size: 11px; cursor: pointer; padding: 2px 0; }
+  .acc summary::-webkit-details-marker { display: none; }
+  .acc summary::before { content: "▸"; margin-right: 5px; color: var(--faint); font-size: 9px; }
+  .acc[open] summary::before { content: "▾"; }
+  .acc summary .sp { margin-left: auto; font-family: var(--mono); color: var(--faint); }
+  .acc .content { padding: 6px 0 2px 12px; display: flex; flex-direction: column; gap: 5px; }
+  .kv { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+  .kv b { font-weight: 500; color: var(--text); font-family: var(--mono); }
+  .submit { height: 38px; border: 0; border-radius: 8px; color: #fff; font-size: 12px; font-weight: 650; background: var(--up); cursor: pointer; margin-top: auto; }
+  .hint { font-size: 10px; color: var(--faint); text-align: center; line-height: 1.5; }
+
+  /* 下单模式菜单 */
+  .panelbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .modebtn { height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--raised); color: var(--muted); font-size: 11px; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  .modebtn:hover { color: var(--text); }
+  .closebtn { width: 22px; height: 22px; border: 0; border-radius: 5px; background: transparent; color: var(--faint); cursor: pointer; font-size: 13px; line-height: 1; }
+  .closebtn:hover { background: var(--hover); color: var(--text); }
+  .modemenu { position: absolute; top: 40px; right: 12px; z-index: 20; width: 168px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); box-shadow: 0 12px 32px rgba(20,30,45,.14); display: none; }
+  .modemenu.open { display: block; }
+  .modemenu button { width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font-size: 12px; text-align: left; display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
+  .modemenu button:hover { background: var(--hover); }
+  .modemenu button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .ocbanner { display: none; padding: 6px 8px; border-radius: 6px; background: var(--down-soft); color: var(--down); font-size: 10px; line-height: 1.5; }
+  .ticket[data-mode="oneclick"] .ocbanner { display: block; }
+  .ticket[data-mode="oneclick"] .submit { display: none; }
+  .ticket[data-mode="oneclick"] .bigbtn { outline: 1px dashed rgba(255,255,255,.65); outline-offset: -4px; }
+  .normalblock { display: flex; flex-direction: column; gap: 10px; }
+  .riskblock { display: none; flex-direction: column; gap: 10px; }
+  .ticket[data-mode="risk"] .riskblock { display: flex; }
+  .ticket[data-mode="risk"] .normalblock { display: none; }
+  .reckv { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); padding: 6px 8px; border-radius: 6px; background: var(--raised); }
+  .reckv b { color: var(--text); font-family: var(--mono); font-weight: 500; }
+  .ticket.collapsed { width: 34px; }
+  .ticket.collapsed > *:not(.reopen) { display: none; }
+  .reopen { display: none; }
+  .ticket.collapsed .reopen { display: flex; flex: 1; align-items: center; justify-content: center; writing-mode: vertical-rl; letter-spacing: .18em; font-size: 11px; color: var(--muted); background: var(--raised); cursor: pointer; }
+  .toast { position: absolute; left: 12px; right: 12px; bottom: 72px; background: rgba(26,34,44,.92); color: #fff; font-size: 11px; padding: 7px 9px; border-radius: 6px; opacity: 0; transition: opacity .15s; pointer-events: none; z-index: 30; }
+  .toast.on { opacity: 1; }
+
+  /* 状态栏 */
+  .status { height: 28px; flex: none; background: var(--panel); border-top: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 12px; font-size: 11px; color: var(--muted); }
+  .status .sep { width: 1px; height: 12px; background: var(--border); }
+  .status .grow { flex: 1; }
+  .status .metric { display: flex; align-items: baseline; gap: 4px; }
+  .status .metric span { font-size: 10px; color: var(--faint); }
+  .status .metric b { font-weight: 500; font-size: 11px; color: var(--text); }
+  .note { position: fixed; left: 12px; bottom: 36px; background: rgba(26,34,44,.9); color: #fff; font-size: 11px; padding: 6px 9px; border-radius: 6px; z-index: 50; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- 导航图标栏 -->
+  <nav class="rail">
+    <div class="mark"><i></i><i></i><i></i><i></i><b></b></div>
+    <button title="概览"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></button>
+    <button class="active" title="交易台"><svg viewBox="0 0 24 24"><path d="M7 20V9M7 9V4M17 20v-7M17 13V4"/><rect x="4.5" y="9" width="5" height="7" rx="1"/><rect x="14.5" y="13" width="5" height="4" rx="1"/></svg><span class="badge">3</span></button>
+    <button title="历史复盘"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></button>
+    <button title="交易记录"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v18H6.5A2.5 2.5 0 0 1 4 18.5z"/><path d="M8 7h8M8 11h8"/></svg></button>
+    <button title="分析"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></button>
+    <button title="纪律"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8 4V2.5M16 4V2.5M8 11l2.5 2.5L16 8"/></svg></button>
+    <div class="spacer"></div>
+    <button title="隐私模式"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg></button>
+    <button title="设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 13.6H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.8 7L4.7 7a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10.4 3V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </nav>
+
+  <div class="main">
+    <!-- 顶栏 -->
+    <header class="topbar">
+      <button class="layoutbtn" title="图表布局"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18M12 3v18"/></svg><span>单图</span></button>
+      <div class="split"></div>
+      <div class="tabs">
+        <div class="tab"><span>XAUUSD</span><span class="x">✕</span></div>
+        <div class="tab active"><span class="dot"></span><span>USTEC</span><span class="x">✕</span></div>
+        <div class="tab"><span>BTCUSD</span><span class="x">✕</span></div>
+        <button class="addtab" title="打开品种">+</button>
+      </div>
+      <div class="topright">
+        <button class="ghost"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg>告警 <span class="num faint">3</span></button>
+        <button class="ghost"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>日历</button>
+        <div class="split"></div>
+        <div class="acct"><span class="avatar"></span><span class="login">#1012</span><span class="bal">$1,776.96</span></div>
+        <button class="pill">只读</button>
+        <button class="pill danger">急停</button>
+        <div class="conn"><i></i>已连接</div>
+      </div>
+    </header>
+
+    <div class="body">
+      <!-- 自选列 -->
+      <aside class="watch">
+        <div class="head">
+          <div class="titlerow"><div class="title">自选 <span>12</span></div><button class="iconbtn" title="添加品种">+</button></div>
+          <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg><span>搜索品种…</span></div>
+          <div class="filter"><button class="chip on">全部</button><button class="chip">持仓中</button><button class="chip">有挂单</button></div>
+        </div>
+        <div class="wtable">
+          <div class="wrow thead"><div>品种</div><div style="text-align:right">卖价</div><div style="text-align:right">买价</div><div style="text-align:right">涨跌</div></div>
+          <div class="wrow"><div class="sym"><i style="background:var(--accent)"></i><span>USTEC</span></div><div class="px down">26,139.10</div><div class="px up">26,139.40</div><div class="chg up">+0.12%</div></div>
+          <div class="wrow"><div class="sym"><i></i><span>US30</span></div><div class="px down">49,116.40</div><div class="px up">49,117.20</div><div class="chg up">+0.31%</div></div>
+          <div class="wrow"><div class="sym"><i></i><span>US500</span></div><div class="px down">7,135.30</div><div class="px up">7,135.90</div><div class="chg down">-0.18%</div></div>
+          <div class="wrow"><div class="sym"><i style="background:var(--accent)"></i><span>XAUUSD</span></div><div class="px down">2,345.12</div><div class="px up">2,345.42</div><div class="chg up">+0.42%</div></div>
+          <div class="wrow"><div class="sym"><i></i><span>BTCUSD</span></div><div class="px down">64,120.00</div><div class="px up">64,135.00</div><div class="chg down">-1.05%</div></div>
+          <div class="wrow"><div class="sym"><i></i><span>EURUSD</span></div><div class="px down">1.08412</div><div class="px up">1.08428</div><div class="chg up">+0.09%</div></div>
+          <div class="wrow"><div class="sym"><i></i><span>GBPUSD</span></div><div class="px down">1.26140</div><div class="px up">1.26158</div><div class="chg down">-0.04%</div></div>
+          <div class="wrow"><div class="sym"><i></i><span>USDJPY</span></div><div class="px down">151.284</div><div class="px up">151.298</div><div class="chg up">+0.22%</div></div>
+          <div class="wrow"><div class="sym"><i></i><span>USOIL</span></div><div class="px down">78.42</div><div class="px up">78.48</div><div class="chg down">-0.36%</div></div>
+          <div class="wrow"><div class="sym"><i></i><span>NAS100</span></div><div class="px down">18,240.2</div><div class="px up">18,242.8</div><div class="chg up">+0.55%</div></div>
+          <div class="wrow"><div class="sym"><i></i><span>GER40</span></div><div class="px down">17,905.1</div><div class="px up">17,907.3</div><div class="chg up">+0.14%</div></div>
+          <div class="wrow"><div class="sym"><i></i><span>UK100</span></div><div class="px down">7,642.3</div><div class="px up">7,645.1</div><div class="chg down">-0.07%</div></div>
+        </div>
+      </aside>
+
+      <!-- 图表 + 底部托盘 -->
+      <section class="center">
+        <div class="chart">
+          <div class="ctop">
+            <span class="s">US Tech 100 · 5 分</span>
+            <div class="tf"><b>1分</b><b>5分</b><b class="on">15分</b><b>30分</b><b>1小时</b><b>4小时</b><b>1天</b></div>
+            <span class="legend">EMA 20 close 26,203.18</span>
+          </div>
+          <canvas id="cv"></canvas>
+          <div class="layers">
+            <div class="pl entry" style="top:52%"></div>
+            <div class="pchip" style="top:52%;background:#c2413a"><span>卖出 0.05</span></div>
+            <div class="pl sl" style="top:26%"></div>
+            <div class="pchip" style="top:26%;background:#a9691a"><span>0.05 −13.59 USC</span><span class="x">✕</span></div>
+            <div class="pl tp" style="top:76%"></div>
+            <div class="pchip" style="top:76%;background:#4db6ac"><span>0.05 +14.83 USC</span><span class="x">✕</span></div>
+          </div>
+          <div class="watermark">USTEC · 5m</div>
+        </div>
+
+        <div class="dock">
+          <div class="bar">
+            <div class="t on">持仓 <span class="n">3</span></div>
+            <div class="t">挂单 <span class="n">0</span></div>
+            <div class="t">成交</div>
+            <div class="t">已平仓</div>
+            <div class="right"><button class="iconbtn" title="折叠">▾</button></div>
+          </div>
+          <div class="dtable">
+            <div class="drow thead"><div>品种</div><div style="text-align:right">方向</div><div style="text-align:right">手数</div><div style="text-align:right">开仓价</div><div style="text-align:right">现价</div><div style="text-align:right">止损</div><div style="text-align:right">止盈</div><div style="text-align:right">盈亏</div><div style="text-align:right">操作</div></div>
+            <div class="drow"><div class="sym">USTEC <span class="faint">#83121</span></div><div class="c"><span class="side" style="color:var(--up)"><i style="background:var(--up)"></i>买</span></div><div class="c">0.05</div><div class="c">26,139.20</div><div class="c">26,132.40</div><div class="c">26,203.18</div><div class="c">—</div><div class="c up">+14.56</div><div class="rowbtns"><button>平一半</button><button>保本</button><button class="primary">平仓</button></div></div>
+            <div class="drow"><div class="sym">XAUUSD <span class="faint">#83108</span></div><div class="c"><span class="side" style="color:var(--down)"><i style="background:var(--down)"></i>卖</span></div><div class="c">0.10</div><div class="c">2,347.80</div><div class="c">2,345.30</div><div class="c">2,352.00</div><div class="c">2,340.00</div><div class="c up">+25.00</div><div class="rowbtns"><button>平一半</button><button>保本</button><button class="primary">平仓</button></div></div>
+            <div class="drow"><div class="sym">US500 <span class="faint">#83099</span></div><div class="c"><span class="side" style="color:var(--up)"><i style="background:var(--up)"></i>买</span></div><div class="c">0.10</div><div class="c">7,142.10</div><div class="c">7,135.60</div><div class="c">7,128.00</div><div class="c">—</div><div class="c down">-6.50</div><div class="rowbtns"><button>平一半</button><button>保本</button><button class="primary">平仓</button></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 下单面板 -->
+      <aside class="ticket" id="ticket" data-mode="regular">
+        <div class="reopen" id="reopen" title="展开下单面板">下单</div>
+        <div class="modemenu" id="modeMenu">
+          <button data-mode="regular" class="on">常规模式 <span>✓</span></button>
+          <button data-mode="oneclick">单击模式</button>
+          <button data-mode="risk">风险计算表格</button>
+        </div>
+        <div class="head">
+          <div class="panelbar">
+            <button class="modebtn" id="modeBtn"><span id="modeLabel">常规模式</span><span>▾</span></button>
+            <button class="closebtn" id="closeTicket" title="收起下单面板">✕</button>
+          </div>
+          <div class="symrow"><span class="name">US Tech 100</span><span class="desc">USTEC · 指数 CFD</span></div>
+          <div class="quotes">
+            <div class="qbox bid"><div class="lab"><span>卖出</span><span>Bid</span></div><div class="v">26,139.20</div></div>
+            <div class="qbox ask"><div class="lab"><span>买入</span><span>Ask</span></div><div class="v">26,139.40</div></div>
+          </div>
+          <div class="spread"><span>点差 2.0</span><div class="track"></div><span>13.59% 年化成本</span></div>
+        </div>
+
+        <div class="actions">
+          <button class="bigbtn sell sel" id="sellBtn"><span>卖出</span><small>26,139.20</small></button>
+          <button class="bigbtn buy" id="buyBtn"><span>买入</span><small>26,139.40</small></button>
+        </div>
+
+        <div class="form">
+          <div class="seg"><button class="on">市价</button><button>限价</button><button>停损</button></div>
+
+          <div class="tplrow on">
+            <div class="info">
+              <div class="nm">零亏模板 <em>已启用</em></div>
+              <div class="sm">2% 风险 · 2R 止盈 · 3 段分批 · 1R 保本</div>
+            </div>
+            <button class="act">编辑</button>
+          </div>
+
+          <div class="ocbanner">单击模式：点击买/卖按钮立即按市价下单，不弹确认。模板不含止损，必须先手动设止损。</div>
+
+          <div class="normalblock">
+          <div class="field">
+            <div class="lab"><span>交易量</span><span class="faint">最小 0.01 · 最大 100</span></div>
+            <div class="stepper"><button>−</button><input value="0.05" /><button>+</button></div>
+          </div>
+
+          <div class="field">
+            <div class="lab"><span>止损</span><span class="quick"><a>保本</a><a>1R</a><a>2R</a></span></div>
+            <div class="sltp"><span class="v">未设置</span><button class="mini">−</button><button class="mini">+</button></div>
+          </div>
+
+          <div class="field">
+            <div class="lab"><span>止盈</span><span class="quick"><a>1R</a><a>2R</a><a>3R</a></span></div>
+            <div class="sltp"><span class="v">未设置</span><button class="mini">−</button><button class="mini">+</button></div>
+          </div>
+
+          <details class="acc" open>
+            <summary>仓位与风险 <span class="sp">0.05 手 · 风险 1.2%</span></summary>
+            <div class="content">
+              <div class="kv"><span>风险金额</span><b>$21.30</b></div>
+              <div class="kv"><span>止损距离</span><b>213.0 点</b></div>
+              <div class="kv"><span>预估 R:R</span><b>1 : 2.0</b></div>
+              <div class="kv"><span>模板</span><b>零亏 2% · 2R · 保本</b></div>
+            </div>
+          </details>
+
+          <details class="acc">
+            <summary>成本与保证金 <span class="sp">展开</span></summary>
+            <div class="content">
+              <div class="kv"><span>手续费</span><b>$0.06</b></div>
+              <div class="kv"><span>点差成本</span><b>$0.10</b></div>
+              <div class="kv"><span>保证金</span><b>$1,200.00</b></div>
+              <div class="kv"><span>保证金比例</span><b>—</b></div>
+            </div>
+          </details>
+          </div>
+
+          <div class="riskblock">
+            <div class="field">
+              <div class="lab"><span>风险金额</span><span class="faint">USD · 可用 1,776.96</span></div>
+              <div class="stepper"><button>−</button><input value="17.77" /><button>+</button></div>
+            </div>
+            <div class="field">
+              <div class="lab"><span>止损价</span><span class="faint">距现价 213.0 点</span></div>
+              <div class="sltp"><span class="v">26,126.20</span><button class="mini">−</button><button class="mini">+</button></div>
+            </div>
+            <div class="field">
+              <div class="lab"><span>止盈价</span><span class="faint">1 : 2.0</span></div>
+              <div class="sltp"><span class="v">26,165.60</span><button class="mini">−</button><button class="mini">+</button></div>
+            </div>
+            <div class="reckv"><span>自动手数</span><b>0.05 手</b></div>
+            <div class="reckv"><span>风险占比</span><b>1.00%</b></div>
+            <div class="reckv"><span>保证金</span><b>$1,200.00</b></div>
+            <div class="reckv"><span>R:R</span><b>1 : 2.0</b></div>
+          </div>
+
+          <button class="submit" style="background:var(--down)">确认卖出 0.05 手</button>
+          <div class="hint">订单发送到本机 MT5 · B/S 市价 · Esc 取消划线</div>
+        </div>
+        <div class="toast" id="toast"></div>
+      </aside>
+    </div>
+
+    <!-- 状态栏 -->
+    <footer class="status">
+      <span style="display:flex;align-items:center;gap:5px"><i style="width:6px;height:6px;border-radius:50%;background:var(--up);display:inline-block"></i>网关已连接</span>
+      <span class="sep"></span><span>MT5 · build 4755</span>
+      <span class="sep"></span><span class="num">1012@Exness-Live3</span>
+      <span class="sep"></span><span>交易正常</span>
+      <span style="color:var(--up);font-family:var(--mono)">今日 +12.40</span>
+      <span class="grow"></span>
+      <span class="metric"><span>净值</span><b>1,776.96</b></span>
+      <span class="metric"><span>可用保证金</span><b>1,776.96</b></span>
+      <span class="metric"><span>余额</span><b>1,776.96</b></span>
+      <span class="metric"><span>保证金</span><b>0.00</b></span>
+      <span class="metric"><span>保证金比例</span><b>—</b></span>
+      <span class="sep"></span><span class="num">延迟 12ms</span><span class="num faint">v0.7.14</span>
+    </footer>
+  </div>
+</div>
+<div class="note">布局样稿 · 假数据 · 非最终视觉</div>
+<script>
+  // 简单的蜡烛图：随机游走 + 均线，只为看比例
+  (() => {
+    const cv = document.getElementById('cv');
+    const ctx = cv.getContext('2d');
+    let seed = 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    function draw() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = cv.getBoundingClientRect();
+      cv.width = Math.max(1, Math.floor(rect.width * dpr));
+      cv.height = Math.max(1, Math.floor(rect.height * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const W = rect.width, H = rect.height;
+      ctx.clearRect(0, 0, W, H);
+      const right = 64, top = 12, bottom = 44;
+      const plotW = W - right, plotH = H - top - bottom;
+      // 网格
+      ctx.strokeStyle = '#eef2f6'; ctx.lineWidth = 1;
+      for (let i = 1; i < 8; i++) { const y = top + (plotH / 8) * i; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(plotW, y); ctx.stroke(); }
+      for (let i = 1; i < 10; i++) { const x = (plotW / 10) * i; ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + plotH); ctx.stroke(); }
+      // 价格轴
+      ctx.fillStyle = '#8b96a5'; ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'left';
+      for (let i = 0; i <= 8; i++) { const y = top + (plotH / 8) * i; ctx.fillText((26700 - i * 37).toLocaleString(), plotW + 8, y + 3); }
+      // 先跑一遍计算高低与均线
+      const n = Math.max(40, Math.floor(plotW / 9)), cw = plotW / n;
+      const closes = [];
+      let price = 26720, high = 26720, low = 26600;
+      for (let i = 0; i < n; i++) {
+        const o = price;
+        price += (rnd() - 0.52) * 34;
+        price = Math.max(26620, Math.min(26745, price));
+        const c = price;
+        const hi = Math.max(o, c) + rnd() * 10, lo = Math.min(o, c) - rnd() * 10;
+        closes.push(c); high = Math.max(high, hi); low = Math.min(low, lo);
+      }
+      const last = closes[closes.length - 1];
+      const ema = []; let e = closes[0];
+      closes.forEach((c) => { e = e + (c - e) * 0.18; ema.push(e); });
+      const scaleY = (v) => top + ((high - v) / (high - low)) * plotH;
+      const scaleX = (i) => i * cw + cw / 2;
+      // 重开随机序列画蜡烛
+      seed = 7; price = 26720;
+      for (let i = 0; i < n; i++) {
+        const o = price; price += (rnd() - 0.52) * 34; price = Math.max(26620, Math.min(26745, price));
+        const c = price; const hi = Math.max(o, c) + rnd() * 10, lo = Math.min(o, c) - rnd() * 10;
+        const up = c >= o;
+        ctx.strokeStyle = up ? '#1f9d72' : '#e05a52';
+        ctx.fillStyle = up ? '#1f9d72' : '#e05a52';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(scaleX(i), scaleY(hi)); ctx.lineTo(scaleX(i), scaleY(lo)); ctx.stroke();
+        const y = scaleY(Math.max(o, c)), h = Math.max(1, scaleY(Math.min(o, c)) - y);
+        ctx.fillRect(scaleX(i) - cw * 0.28, y, cw * 0.56, h);
+      }
+      // EMA
+      ctx.strokeStyle = '#1f5fd6'; ctx.lineWidth = 1.3; ctx.beginPath();
+      ema.forEach((v, i) => { const x = scaleX(i), y = scaleY(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke();
+      // 现价线
+      const y = scaleY(last);
+      ctx.setLineDash([4, 3]); ctx.strokeStyle = '#c2413a'; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(plotW, y); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#c2413a'; ctx.fillRect(plotW, y - 9, right, 18);
+      ctx.fillStyle = '#fff'; ctx.font = '600 10px ui-monospace, monospace'; ctx.fillText(last.toFixed(1), plotW + 6, y + 3);
+      // 成交量
+      seed = 7;
+      for (let i = 0; i < n; i++) {
+        const h = 6 + rnd() * 26;
+        ctx.fillStyle = rnd() > 0.45 ? 'rgba(31,157,114,.35)' : 'rgba(224,90,82,.35)';
+        ctx.fillRect(scaleX(i) - cw * 0.28, H - bottom - h + 10, cw * 0.56, h);
+      }
+    }
+    draw();
+    window.addEventListener('resize', draw);
+  })();
+
+  // 下单模式菜单 / 收起面板 / 单击模式提示（仅样稿交互）
+  (() => {
+    const ticket = document.getElementById('ticket');
+    const btn = document.getElementById('modeBtn');
+    const label = document.getElementById('modeLabel');
+    const menu = document.getElementById('modeMenu');
+    const toast = document.getElementById('toast');
+    const names = { regular: '常规模式', oneclick: '单击模式', risk: '风险计算表格' };
+    let timer = 0;
+
+    btn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('open'); });
+    document.addEventListener('click', () => menu.classList.remove('open'));
+
+    menu.querySelectorAll('button').forEach((item) => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const mode = item.dataset.mode;
+        ticket.dataset.mode = mode;
+        label.textContent = names[mode];
+        menu.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === item));
+        menu.classList.remove('open');
+        document.querySelector('#sellBtn span').textContent = mode === 'oneclick' ? '单击卖出' : '卖出';
+        document.querySelector('#buyBtn span').textContent = mode === 'oneclick' ? '单击买入' : '买入';
+        document.querySelector('.submit').textContent = '确认卖出 0.05 手';
+      });
+    });
+
+    const flash = (text) => {
+      toast.textContent = text;
+      toast.classList.add('on');
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => toast.classList.remove('on'), 1800);
+    };
+    document.querySelector('#sellBtn').addEventListener('click', () => {
+      if (ticket.dataset.mode === 'oneclick') flash('样稿：已单击卖出 0.05 手（不弹确认）');
+    });
+    document.querySelector('#buyBtn').addEventListener('click', () => {
+      if (ticket.dataset.mode === 'oneclick') flash('样稿：已单击买入 0.05 手（不弹确认）');
+    });
+
+    document.getElementById('closeTicket').addEventListener('click', () => {
+      ticket.classList.add('collapsed');
+      window.dispatchEvent(new Event('resize'));
+    });
+    document.getElementById('reopen').addEventListener('click', () => {
+      ticket.classList.remove('collapsed');
+      window.dispatchEvent(new Event('resize'));
+    });
+  })();
+</script>
+</body>
+</html>

@@ -3,9 +3,10 @@ import { clsx } from 'clsx';
 import { Bell, CalendarDays } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
-import { fmtMoney, fmtPrice, fmtSigned, spreadPoints } from '../lib/format';
+import { fmtMoney, fmtSigned } from '../lib/format';
 import { AccountSwitcher } from './AccountSwitcher';
 import { LayoutPickerButton } from './LayoutPicker';
+import { SymbolTabs } from './SymbolTabs';
 import type { RiskStatus, TradeMode } from '../gateway/types';
 
 /** 亏损额度使用比例 → 状态点与文字色（绿 → 琥珀 → 红） */
@@ -38,9 +39,6 @@ function riskHint(risk: RiskStatus): string {
 export function TopBar() {
   const conn = useApp((s) => s.conn);
   const health = useApp((s) => s.health);
-  const symbols = useApp((s) => s.symbols);
-  const symbol = useApp((s) => s.symbol);
-  const quote = useApp((s) => s.quote);
   const account = useApp((s) => s.account);
   const riskStatus = useApp((s) => s.riskStatus);
   const alerts = useApp((s) => s.alerts);
@@ -53,11 +51,9 @@ export function TopBar() {
   const [confirmLive, setConfirmLive] = useState(false);
   const [busy, setBusy] = useState<'mode' | 'kill' | null>(null);
 
-  const info = symbols.find((item) => item.name === symbol);
   const online = conn === 'open';
   const terminal = online && !!health?.connected;
   const mode = health?.tradeMode ?? 'readonly';
-  const spread = quote && info ? spreadPoints(quote.bid, quote.ask, info.point) : null;
   const realAccount = account?.accountType === 'real';
   const allowLive = health?.config?.allow_live ?? false;
   // 实盘账户默认锁在只读，只有配置文件显式开启 allow_live 才允许切换
@@ -154,22 +150,9 @@ export function TopBar() {
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-tv-border bg-tv-panel px-3">
       <LayoutPickerButton />
 
-      <div className="h-5 w-px bg-tv-border" />
+      <div className="h-5 w-px shrink-0 bg-tv-border" />
 
-      <div className="flex items-center gap-4 font-mono text-[12px]">
-        <span className="flex items-baseline gap-1.5">
-          <span className="font-sans text-[11px] text-tv-muted">Bid</span>
-          <span className="num">{quote ? fmtPrice(quote.bid, info?.digits ?? 5) : '—'}</span>
-        </span>
-        <span className="flex items-baseline gap-1.5">
-          <span className="font-sans text-[11px] text-tv-muted">Ask</span>
-          <span className="num">{quote ? fmtPrice(quote.ask, info?.digits ?? 5) : '—'}</span>
-        </span>
-        <span className="flex items-baseline gap-1.5">
-          <span className="font-sans text-[11px] text-tv-muted">点差</span>
-          <span className="num">{spread != null ? spread.toFixed(0) : '—'}</span>
-        </span>
-      </div>
+      <SymbolTabs />
 
       <button
         onClick={() => setAlertsOpen(!alertsOpen)}
@@ -177,7 +160,7 @@ export function TopBar() {
         data-alerts-toggle
         title="价格告警面板"
         className={clsx(
-          'flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] transition-colors',
+          'flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] transition-colors',
           alertsOpen
             ? 'bg-tv-raised text-tv-text'
             : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
@@ -195,7 +178,7 @@ export function TopBar() {
         aria-pressed={calendarOpen}
         title="财经日历"
         className={clsx(
-          'flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] transition-colors',
+          'flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] transition-colors',
           calendarOpen
             ? 'bg-tv-raised text-tv-text'
             : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
@@ -205,25 +188,17 @@ export function TopBar() {
         日历
       </button>
 
-      <div className="flex-1" />
-
       <AccountSwitcher />
 
-      <div className="flex items-baseline gap-4 border-l border-tv-border pl-4 font-mono text-[12px]">
-        <span className="flex items-baseline gap-1.5">
-          <span className="font-sans text-[11px] text-tv-muted">余额</span>
-          <span className="num">{fmtMoney(account?.balance)}</span>
-        </span>
-        <span className="flex items-baseline gap-1.5">
-          <span className="font-sans text-[11px] text-tv-muted">净值</span>
-          <span className="num text-tv-muted">{fmtMoney(account?.equity)}</span>
-        </span>
+      <div className="flex shrink-0 items-baseline gap-1.5 border-l border-tv-border pl-3 font-mono text-[12px]">
+        <span className="font-sans text-[11px] text-tv-muted">余额</span>
+        <span className="num">{fmtMoney(account?.balance)}</span>
       </div>
 
       {riskStatus && tone && (
         <div
           title={riskHint(riskStatus)}
-          className="flex items-center gap-2 border-l border-tv-border pl-4"
+          className="flex shrink-0 items-center gap-2 border-l border-tv-border pl-4"
         >
           <span className={clsx('h-1.5 w-1.5 rounded-full', tone.dot)} />
           <div className="leading-tight">

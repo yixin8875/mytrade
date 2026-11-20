@@ -6,12 +6,11 @@ import { ChartGrid } from './components/ChartGrid';
 import { CommandPalette } from './components/CommandPalette';
 import { ConsoleShell } from './components/ConsoleShell';
 import { OrderTicket } from './components/OrderTicket';
-import { OrdersPanel } from './components/OrdersPanel';
-import { PositionsPanel } from './components/PositionsPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { StatusBar } from './components/StatusBar';
 import { Toast } from './components/Toast';
 import { TopBar } from './components/TopBar';
+import { TradeDock } from './components/TradeDock';
 import { UpdatePanel } from './components/UpdatePanel';
 import { WatchlistPanel } from './components/WatchlistPanel';
 import { Overview } from './views/Overview';
@@ -29,7 +28,7 @@ import { gateway } from './gateway/client';
 import { applyAccent } from './lib/accent';
 import { beep, desktopNotify } from './lib/alert';
 import { mountBootProgress } from './lib/boot';
-import { handleGlobalShortcut, syncPageFromHash, useApp, type SidebarTab } from './store/useApp';
+import { handleGlobalShortcut, syncPageFromHash, useApp } from './store/useApp';
 import type {
   Account,
   AlertEvent,
@@ -268,22 +267,30 @@ export default function App() {
 
   const symbol = useApp((s) => s.symbol);
   const conn = useApp((s) => s.conn);
-  const sidebarTab = useApp((s) => s.sidebarTab);
-  const setSidebarTab = useApp((s) => s.setSidebarTab);
-  const positionsCount = useApp((s) => s.positions.length);
-  const ordersCount = useApp((s) => s.orders.length);
-  const watchCount = useApp((s) => s.watchlist.length);
+  const watchColumnOpen = useApp((s) => s.watchColumnOpen);
+  const setWatchColumnOpen = useApp((s) => s.setWatchColumnOpen);
+  const ticketOpen = useApp((s) => s.ticketOpen);
+  const setTicketOpen = useApp((s) => s.setTicketOpen);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const theme = useApp((s) => s.theme);
   const accentColor = useApp((s) => s.accentColor);
   const activeAccountId = useApp((s) => s.health?.activeAccountId ?? '');
   const activeLogin = useApp((s) => s.account?.login ?? 0);
   const alertsOpen = useApp((s) => s.alertsOpen);
   const calendarOpen = useApp((s) => s.calendarOpen);
+  const showWatch = watchColumnOpen && viewportWidth >= 1360;
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     applyAccent(accentColor, theme);
   }, [theme, accentColor]);
+
+  // 窄窗口时自动收起自选列，但不改写用户的手动选择
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     if (conn !== 'open' || !symbol) return;
@@ -316,47 +323,57 @@ export default function App() {
         >
           <TopBar />
           <div className="flex min-h-0 flex-1">
-            <main className="relative min-w-0 flex-1">
-              {/* 切换账户或原地改登录号后重建图表，避免沿用上一个账户的品种和历史缓存 */}
-              <ChartGrid key={`${activeAccountId}:${activeLogin}`} />
-              {/* 价格告警 / 财经日历覆盖在图表右侧，不挤压图表也不另开弹窗 */}
-              {alertsOpen && <AlertsPanel />}
-              {calendarOpen && <CalendarPanel />}
+            {showWatch ? (
+              <aside
+                className={clsx(
+                  'flex shrink-0 flex-col border-r border-tv-border bg-tv-panel',
+                  viewportWidth < 1500 ? 'w-[220px]' : 'w-[280px]',
+                )}
+              >
+                <WatchlistPanel />
+              </aside>
+            ) : (
+              <button
+                onClick={() => setWatchColumnOpen(true)}
+                title="展开行情列（Ctrl+\\）"
+                aria-label="展开行情列"
+                className="flex w-7 shrink-0 cursor-pointer items-center justify-center border-r border-tv-border bg-tv-raised text-[11px] tracking-widest text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text [writing-mode:vertical-rl]"
+              >
+                行情
+              </button>
+            )}
+
+            <main className="flex min-w-0 flex-1 flex-col">
+              <div className="relative min-h-0 flex-1">
+                {/* 切换账户或原地改登录号后重建图表，避免沿用上一个账户的品种和历史缓存 */}
+                <ChartGrid key={`${activeAccountId}:${activeLogin}`} />
+                {/* 价格告警 / 财经日历覆盖在图表右侧，不挤压图表也不另开弹窗 */}
+                {alertsOpen && <AlertsPanel />}
+                {calendarOpen && <CalendarPanel />}
+              </div>
+              <TradeDock />
             </main>
-            <aside className="flex w-[336px] shrink-0 flex-col border-l border-tv-border bg-tv-panel">
-              <OrderTicket />
-              <div className="flex h-9 shrink-0 items-stretch border-y border-tv-border bg-tv-raised px-1">
-                {(
-                  [
-                    ['positions', '持仓', positionsCount],
-                    ['orders', '挂单', ordersCount],
-                    ['watchlist', '自选', watchCount],
-                  ] as [SidebarTab, string, number][]
-                ).map(([value, label, count]) => (
-                  <button
-                    key={value}
-                    onClick={() => setSidebarTab(value)}
-                    className={clsx(
-                      'relative flex flex-1 items-center justify-center gap-1.5 text-[12px] transition-colors',
-                      sidebarTab === value
-                        ? 'font-medium text-tv-text'
-                        : 'text-tv-muted hover:text-tv-text',
-                    )}
-                  >
-                    {label}
-                    <span className="num font-mono text-[11px] text-tv-faint">{count}</span>
-                    {sidebarTab === value && (
-                      <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-tv-accent" />
-                    )}
-                  </button>
-                ))}
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto">
-                {sidebarTab === 'positions' && <PositionsPanel />}
-                {sidebarTab === 'orders' && <OrdersPanel />}
-                {sidebarTab === 'watchlist' && <WatchlistPanel />}
-              </div>
-            </aside>
+
+            {ticketOpen ? (
+              <aside
+                className={clsx(
+                  'flex shrink-0 flex-col border-l border-tv-border bg-tv-panel',
+                  viewportWidth < 1200 ? 'w-[280px]' : 'w-[300px]',
+                )}
+              >
+                <OrderTicket />
+              </aside>
+            ) : (
+              <button
+                onClick={() => setTicketOpen(true)}
+                title="展开下单面板"
+                aria-label="展开下单面板"
+                className="flex w-8 shrink-0 cursor-pointer flex-col items-center justify-center gap-2 border-l border-tv-border bg-tv-panel text-[11px] tracking-widest text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text [writing-mode:vertical-rl]"
+              >
+                <span>下单</span>
+                <span className="num font-mono text-[11px] text-tv-faint">{symbol}</span>
+              </button>
+            )}
           </div>
           <StatusBar />
         </div>

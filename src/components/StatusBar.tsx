@@ -1,5 +1,6 @@
 import { clsx } from 'clsx';
 import { useApp } from '../store/useApp';
+import { fmtMoney } from '../lib/format';
 
 export function StatusBar() {
   const conn = useApp((s) => s.conn);
@@ -76,6 +77,40 @@ export function StatusBar() {
 
       <span className="num font-mono">延迟 {latency != null ? `${latency}ms` : '—'}</span>
       <span className="num font-mono text-tv-faint">v{health?.version ?? '0.1.0'}</span>
+
+      <div className="ml-1 hidden shrink-0 items-center gap-3 border-l border-tv-border pl-3 xl:flex">
+        <StatusMetric label="净值" value={fmtMoney(account?.equity)} strong />
+        <StatusMetric label="可用保证金" value={fmtMoney(account?.freeMargin)} />
+        <StatusMetric label="余额" value={fmtMoney(account?.balance)} />
+        <StatusMetric label="保证金" value={fmtMoney(account?.margin)} />
+        <StatusMetric
+          label="保证金比例"
+          value={
+            account?.marginLevel != null && Number.isFinite(account.marginLevel)
+              ? `${account.marginLevel.toFixed(1)}%`
+              : '—'
+          }
+        />
+      </div>
     </footer>
+  );
+}
+
+function StatusMetric({
+  label,
+  value,
+  strong,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
+  return (
+    <span className="flex items-baseline gap-1" title={label}>
+      <span className="text-[10px] text-tv-faint">{label}</span>
+      <span className={clsx('num font-mono', strong ? 'text-tv-text' : 'text-tv-muted')}>
+        {value}
+      </span>
+    </span>
   );
 }

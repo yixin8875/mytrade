@@ -2003,6 +2003,12 @@ function AboutSection() {
           <span className="text-console-muted">建立卖出市价草稿</span>
           <Kbd>Esc</Kbd>
           <span className="text-console-muted">关闭弹窗 / 清除划线草稿</span>
+          <Kbd>Ctrl K</Kbd>
+          <span className="text-console-muted">打开命令面板</span>
+          <Kbd>Ctrl \</Kbd>
+          <span className="text-console-muted">折叠 / 展开交易台左侧行情列</span>
+          <Kbd>Ctrl J</Kbd>
+          <span className="text-console-muted">折叠 / 展开交易台底部订单托盘</span>
           <Kbd>Shift</Kbd>
           <span className="text-console-muted">拖动价格时吸附整数点位</span>
         </div>
