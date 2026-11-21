@@ -139,6 +139,25 @@ describe('OrderTicket 下单模式', () => {
     expect(screen.getByRole('button', { name: '买入 0.01' })).toBeEnabled();
   });
 
+  it('提交市价单先弹确认窗，取消后不发送订单', async () => {
+    const user = userEvent.setup();
+    render(<OrderTicket />);
+
+    await user.click(screen.getByTitle('以市价买入'));
+    await user.click(screen.getByRole('button', { name: '买入 0.01' }));
+
+    const dialog = document.querySelector('[data-confirm="order"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog).toHaveTextContent('确认下单');
+    expect(dialog).toHaveTextContent('市价成交');
+    expect(dialog).toHaveTextContent('USD');
+
+    await user.click(screen.getByRole('button', { name: '取消' }));
+    expect(document.querySelector('[data-confirm="order"]')).toBeNull();
+    // 取消只关弹窗，草稿保留，方便改价后再提交
+    expect(useApp.getState().draft.active).toBe(true);
+  });
+
   it('挂单按价格推导限价 / 停损，点差内价格禁止提交', async () => {
     const user = userEvent.setup();
     render(<OrderTicket />);
