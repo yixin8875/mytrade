@@ -68,4 +68,21 @@ box.new(bar_index - 1, high, bar_index, low, border_color=color.green, bgcolor=c
       'indicator()',
     );
   });
+
+  it('reports a single Piner error when the script cannot compile', async () => {
+    let message = '';
+    try {
+      await savePineScript(`//@version=6
+indicator('bad')
+plot(close +)
+`);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    expect(message).toContain('脚本无法运行：');
+    expect(message).toContain('当前引擎尚不支持的语法');
+    expect(message).not.toContain('PineTS');
+    expect(readPineScripts()).toHaveLength(0);
+  });
 });

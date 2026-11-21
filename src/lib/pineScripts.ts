@@ -1,10 +1,10 @@
 /**
  * Pine Script（实验）脚本存储与元信息解析。
  *
- * 真正的 Pine 运行由 Piner（优先）或 PineTS（回退）在本地完成，见 pineEngine.ts
- * 与 pineRunner.ts。这里只做两件事：
+ * 真正的 Pine 运行由 Piner 在本地完成，见 pineEngine.ts 与 pineRunner.ts。
+ * 这里只做两件事：
  *  1. 把用户粘贴的源码存进 localStorage；
- *  2. 用 Piner（失败时回退 PineTS）扫描 inputs，并用一小段模拟 K 线试跑一次，
+ *  2. 用 Piner 扫描 inputs，并用一小段模拟 K 线试跑一次，
  *     得到 plot 的标题/颜色/样式，供图表库生成指标元信息。
  *
  * 注意：Pine 引擎与 TradingView 无关联，脚本能力只覆盖它实现的部分；
@@ -202,10 +202,6 @@ function syntheticCandles(): {
   return candles;
 }
 
-function inputTitle(item: { title?: string; name?: string }): string {
-  return item.title?.trim() || item.name?.trim() || '参数';
-}
-
 interface PineScanResult {
   inputs: PineInputMeta[];
   plots: PinePlotMeta[];
@@ -295,71 +291,9 @@ async function scanWithPiner(source: string): Promise<PineScanResult> {
   return { inputs, plots, visuals };
 }
 
-/** PineTS 兜底预扫描。 */
-async function scanWithPineTS(source: string): Promise<PineScanResult> {
-  const { PineTS, Indicator } = await import('pinets');
-  const indicator = new Indicator(source);
-  indicator.prepare();
-  const inputs: PineInputMeta[] = indicator.getInputsMeta().map((item) => ({
-    id: item.id,
-    title: inputTitle(item),
-    type: item.type,
-    defval: item.defval,
-    minval: item.minval,
-    maxval: item.maxval,
-    step: item.step,
-    options: item.options,
-  }));
-
-  const plots: PinePlotMeta[] = [];
-  try {
-    const pine = new PineTS(syntheticCandles());
-    const ctx = await pine.run(indicator);
-    const names = Object.keys(ctx.plots).filter(
-      (key) => !key.startsWith('__') && !key.startsWith('bgcolor#'),
-    );
-    for (const name of names) {
-      if (plots.length >= 20) break;
-      const data = (ctx.plots[name]?.data ?? []) as {
-        value: unknown;
-        options?: { color?: string };
-      }[];
-      const lastValue = [...data].reverse().find((point) => point.value != null)?.value;
-      // plotshape/plotchar 是布尔序列，图表库的折线表达不了，先跳过
-      if (typeof lastValue === 'boolean') continue;
-      if (!data.some((point) => typeof point.value === 'number')) continue;
-      const color =
-        data.find((point) => point.options?.color)?.options?.color ??
-        PALETTE[plots.length % PALETTE.length];
-      const title = /^(plot|hline)#/.test(name) ? `曲线 ${plots.length + 1}` : name;
-      const options = ctx.plots[name]?.options as
-        | { style?: string; display?: string }
-        | undefined;
-      const style = String(options?.style ?? '');
-      const visible = options?.display !== 'none';
-      plots.push({
-        key: name,
-        title,
-        color,
-        ...(style ? { style } : {}),
-        ...(visible ? {} : { visible: false }),
-      });
-    }
-    return { inputs, plots, visuals: 0 };
-  } catch (error) {
-    return {
-      inputs,
-      plots,
-      visuals: 0,
-      warning: `试跑失败：${(error as Error)?.message || '未知错误'}`,
-    };
-  }
-}
-
 /**
  * 解析并保存一个 Pine 脚本。会先用 Piner 试跑 120 根模拟 K 线，确认能出图并拿到
- * 曲线标题/颜色/样式；Piner 跑不了时回退 PineTS，再不行退回源码解析并在记录里
- * 带上 warning。
+ * 曲线标题/颜色/样式；Piner 跑不了时直接报错，只有「0 曲线」才退回源码解析。
  */
 export async function savePineScript(source: string): Promise<PineScriptRecord> {
   const trimmed = source.trim();
@@ -379,18 +313,10 @@ export async function savePineScript(source: string): Promise<PineScriptRecord> 
   let scan: PineScanResult;
   try {
     scan = await scanWithPiner(trimmed);
-  } catch (pinerError) {
-    const pinerMessage = (pinerError as Error)?.message || '未知错误';
-    try {
-      scan = await scanWithPineTS(trimmed);
-      scan.warning = `Piner 预扫描失败，已回退 PineTS：${pinerMessage}`;
-    } catch (pinetsError) {
-      throw new Error(
-        `脚本无法运行。Piner：${pinerMessage}；PineTS：${
-          (pinetsError as Error)?.message || '未知错误'
-        }`,
-      );
-    }
+  } catch (error) {
+    throw new Error(
+      `脚本无法运行：${(error as Error)?.message || '未知错误'}。该脚本可能使用了当前引擎尚不支持的语法`,
+    );
   }
 
   let plots = scan.plots;

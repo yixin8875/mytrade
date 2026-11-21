@@ -17,7 +17,7 @@ import {
  * 这里负责生成指标元信息（曲线数量/颜色、输入参数），main 按 bar 时间
  * 从共享结果里取值。计算完成后由 runner 改一次 in_refresh 输入触发重算。
  *
- * PineTS 的 plot 数据是整段序列，main 只是查表，因此每次重算代价很低。
+ * Pine 引擎的 plot 数据是整段序列，main 只是查表，因此每次重算代价很低。
  */
 
 export interface PineSeriesResult {
@@ -191,7 +191,7 @@ function buildIndicator(
         if (!result) return values;
         const raw = PineJS.Std.time(ctx);
         if (!Number.isFinite(raw)) return values;
-        // 库内部时间戳可能是毫秒；PineTS 用 bar.time * 1000 作为 openTime
+        // 库内部时间戳可能是毫秒；Piner 用 bar.time * 1000 作为 openTime
         const time = raw > 1e11 ? Math.round(raw / 1000) : raw;
         const row = result.byTime.get(time);
         if (!row) return values;

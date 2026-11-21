@@ -2020,7 +2020,7 @@ function AboutSection() {
 /**
  * Pine 脚本（实验）。
  *
- * 粘贴 TradingView 的原生 indicator 源码，保存后由 Piner（失败时回退 PineTS）在本地执行。
+ * 粘贴 TradingView 的原生 indicator 源码，保存后由 Piner 在本地执行。
  * 指标元信息只在图表创建时生成，所以保存/删除脚本后要刷新一次图表。
  */
 function PineSection() {
@@ -2117,7 +2117,7 @@ function PineSection() {
           </div>
         )}
         <p className="mt-4 text-[11px] leading-relaxed text-console-faint">
-          Piner / PineTS 是独立的第三方运行时（AGPL-3.0 / 商业授权），与 TradingView 无关联；
+          Piner 是独立的第三方运行时（AGPL-3.0），与 TradingView 无关联；
           对外分发此功能前需要确认授权方式。
         </p>
       </Card>

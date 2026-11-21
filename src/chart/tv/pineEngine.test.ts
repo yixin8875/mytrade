@@ -201,4 +201,48 @@ hline(123.45, 'level')
     expect(hline?.values).toHaveLength(10);
     expect(hline?.values.every((value) => value === 123.45)).toBe(true);
   });
+
+  it('runs legacy v5 aliases that the old fallback engine rejected', async () => {
+    const result = await runPine({
+      source: `//@version=5
+indicator('legacy')
+v = security(syminfo.tickerid, '60', close)
+plot(iff(close > open, 1, 0), 'iff')
+plot(cross(close, open) ? 1 : 0, 'cross')
+plot(rising(close, 3) ? 1 : 0, 'rising')
+plot(falling(close, 3) ? 1 : 0, 'falling')
+plot(cum(1), 'cum')
+plot(v, 'sec')
+`,
+      bars: bars(40, 300),
+      symbol: 'NQ',
+      resolution: '5',
+    });
+
+    expect(result.engine).toBe('piner');
+    expect(result.series.length).toBeGreaterThanOrEqual(6);
+    expect(result.series.map((series) => series.title)).toEqual(
+      expect.arrayContaining(['iff', 'cross', 'rising', 'falling', 'cum', 'sec']),
+    );
+  });
+
+  it('reports a single Piner error when the script cannot compile', async () => {
+    let message = '';
+    try {
+      await runPine({
+        source: `//@version=6
+indicator('bad')
+plot(close +)
+`,
+        bars: bars(10, 300),
+        symbol: 'NQ',
+        resolution: '5',
+      });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    expect(message).toContain('Pine 运行失败');
+    expect(message).not.toContain('PineTS');
+  });
 });

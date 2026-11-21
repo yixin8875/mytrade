@@ -886,7 +886,7 @@ export function ChartPanel({
           ],
           intervals: ['1', '5', '15', '60', '240', '1D'] as ResolutionString[],
         },
-        // 自定义指标（JS + PineJS.Std），以及用户保存的 Pine 脚本（PineTS 本地执行）
+        // 自定义指标（JS + PineJS.Std），以及用户保存的 Pine 脚本（Piner 本地执行）
         custom_indicators_getter: (PineJS: PineJS) =>
           customIndicators(PineJS, pineContextId),
         // 画线模板由应用自己的「画线模板」面板负责（见 DrawingTemplates.tsx），

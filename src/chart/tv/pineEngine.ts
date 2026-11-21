@@ -2,14 +2,14 @@ import type { Bar } from '../../gateway/types';
 import type { PineInputMeta } from '../../lib/pineScripts';
 
 /**
- * Pine 运行时适配层：Piner 优先，PineTS 回退。
+ * Pine 运行时适配层：统一走 Piner。
  *
  * 输出统一成「按 bar 索引对齐的数值序列」，供 pineRunner 写成
  * PineSeriesResult。绘图对象/marker 的渲染是下一步（PineDrawingLayer），
- * 这里先把引擎差异和 request.security 数据注入收在一处。
+ * 这里把引擎调用和 request.security 数据注入收在一处。
  */
 
-export type PineEngineName = 'piner' | 'pinets';
+export type PineEngineName = 'piner';
 
 export interface PineSeriesOutput {
   key: string;
@@ -227,19 +227,6 @@ function toPinerBars(bars: Bar[]): PinerBar[] {
       low: Number(bar.low),
       close: Number(bar.close),
       volume: Number(bar.volume) || 0,
-    }));
-}
-
-function candlesFrom(bars: Bar[]) {
-  return bars
-    .filter((bar) => Number.isFinite(bar.time))
-    .map((bar) => ({
-      openTime: Math.round(bar.time * 1000),
-      open: bar.open,
-      high: bar.high,
-      low: bar.low,
-      close: bar.close,
-      volume: bar.volume,
     }));
 }
 
@@ -803,80 +790,10 @@ async function runPiner(options: PineRunOptions, warnings: string[]): Promise<Pi
   };
 }
 
-async function runPineTS(options: PineRunOptions, warnings: string[]): Promise<PineRunOutput> {
-  const started = Date.now();
-  const { PineTS, Indicator } = await import('pinets');
-  const pine = new PineTS(
-    candlesFrom(options.bars),
-    options.symbol,
-    normalizeResolution(options.resolution),
-  );
-  const indicator = new Indicator(options.source, options.inputs ?? {});
-  const ctx = await pine.run(indicator);
-
-  const byTime = new Map<number, number>();
-  options.bars.forEach((bar, index) => byTime.set(Math.round(bar.time), index));
-
-  const series: PineSeriesOutput[] = [];
-  const keys = Object.keys(ctx.plots).filter(
-    (key) =>
-      !key.startsWith('__') &&
-      !key.startsWith('bgcolor#') &&
-      !key.startsWith('barcolor#'),
-  );
-
-  for (const key of keys) {
-    const plot = ctx.plots[key] as
-      | {
-          data?: { time: number; value: unknown }[];
-          options?: { color?: string; style?: string; display?: string };
-        }
-      | undefined;
-    const values = new Array<number>(options.bars.length).fill(Number.NaN);
-    for (const point of plot?.data ?? []) {
-      if (!Number.isFinite(point.time)) continue;
-      const index = byTime.get(Math.round(point.time / 1000));
-      if (index == null) continue;
-      if (typeof point.value === 'number' && Number.isFinite(point.value)) {
-        values[index] = point.value;
-      }
-    }
-    series.push({
-      key,
-      title: key,
-      kind: plot?.options?.style === 'hline' ? 'hline' : 'plot',
-      values,
-      color: normalizeColor(plot?.options?.color),
-    });
-  }
-
-  const ctxWarnings = (ctx.warnings ?? []).map((warning) => {
-    if (typeof warning === 'string') return warning;
-    return warning?.message ?? String(warning);
-  });
-
-  return {
-    series,
-    visuals: emptyVisuals(),
-    warnings: [...warnings, ...ctxWarnings],
-    engine: 'pinets',
-    durationMs: Date.now() - started,
-  };
-}
-
 export async function runPine(options: PineRunOptions): Promise<PineRunOutput> {
-  const warnings: string[] = [];
-
   try {
-    return await runPiner(options, warnings);
+    return await runPiner(options, []);
   } catch (error) {
-    warnings.push(`Piner 运行失败，回退 PineTS：${errorText(error)}`);
-    try {
-      return await runPineTS(options, warnings);
-    } catch (fallbackError) {
-      throw new Error(
-        `Pine 运行失败。Piner：${errorText(error)}；PineTS：${errorText(fallbackError)}`,
-      );
-    }
+    throw new Error(`Pine 运行失败：${errorText(error)}`);
   }
 }

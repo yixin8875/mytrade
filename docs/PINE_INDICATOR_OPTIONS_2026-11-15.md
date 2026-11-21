@@ -1,5 +1,7 @@
 # Pine 指标还原：方案调研与技术选型
 
+> **2026-11-21 更新**：已决策采用单一 Piner 并删除 PineTS，见 [P4 Pine 运行时收敛](P4_PINE_RUNTIME_DECISION_2026-11-21.md)；本文以下内容作为历史调研保留。
+>
 > 日期：2026-11-15  
 > 适用版本：mytrade 0.7.12 / TradingView Charting Library 32.1.0  
 > 实测引擎：PineTS 0.13.1、Piner 0.13.0、PyneTS 0.10.0、AlphaResin 0.1.7  
