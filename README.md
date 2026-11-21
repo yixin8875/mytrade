@@ -2,7 +2,7 @@
 
 在 TradingView 风格的图表上直接画线、拖拽价格、下单，订单经本地网关推送到本机 MetaTrader 5 执行。
 
-当前为 **P0 + P1 功能版**：真实行情 + 可拖动订单线 + 下单票 + 持仓/挂单管理 + 风控/持仓管理 + 交易日志与统计 + 2×2 多图联动 + 自选表 + 价格告警，订单经本地网关推送到本机 MT5。
+当前为 **v0.7.15**：真实行情 + 可拖动订单线 + 下单票 + 持仓/挂单管理 + 风控 + 交易日志与统计 + 1–16 图多品种/多周期联动 + 历史复盘 + 纪律与评分 + 自选表 + 价格告警，订单经本地网关推送到本机 MT5。
 图表层已换成 **TradingView Advanced Charts（Charting Library v32）** 本地库，K 线、指标、绘图工具、十字光标、周期切换全部是官方实现；下单线、挂单线、持仓线与 SL/TP 线用官方绘图层（horizontal line）实现，可直接拖动改价。
 
 > 第一次使用请先读 [新用户操作指南](docs/USER_GUIDE.md)：从安装、连接 MT5、第一笔模拟交易，到复盘、统计和实盘前检查清单。
@@ -78,8 +78,8 @@ npm run check
 
 产物：
 
-- `src-tauri/target/release/bundle/msi/Tally_0.7.2_x64_en-US.msi`
-- `src-tauri/target/release/bundle/nsis/Tally_0.7.2_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/Tally_0.7.15_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/Tally_0.7.15_x64-setup.exe`
 - 同名 `.sig` 文件（Tauri 更新签名，发布到 GitHub 时使用）
 
 安装包未签名，首次运行 Windows 可能弹 SmartScreen，选「更多信息 → 仍要运行」。安装包已包含网关 sidecar，启动应用时会在后台自动拉起，退出应用时自动关闭，不需要另开终端运行 Python。
@@ -104,7 +104,7 @@ npm run check
 2. 提交源码并推上去：
 
 ```bash
-git commit -am "chore: 发布 v0.7.2"
+git commit -am "chore: 发布 v0.7.15"
 git push origin main
 ```
 
@@ -120,7 +120,7 @@ npm run release -- --notes "这一版改了什么"
 RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了什么"
 ```
 
-脚本会先构建网关 sidecar，再构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.7.2` 的 tag 与 release、上传安装包与清单。`--upload` 表示必须上传（拿不到 token 直接失败）；只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`（此时 sidecar 也必须已经构建好）。同名资产会先删除再上传，网络失败自动重试，重复执行是安全的。
+脚本会先构建网关 sidecar，再构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.7.15` 的 tag 与 release、上传安装包与清单。`--upload` 表示必须上传（拿不到 token 直接失败）；只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`（此时 sidecar 也必须已经构建好）。同名资产会先删除再上传，网络失败自动重试，重复执行是安全的。
 
 > 更新签名私钥在 `~/.tauri/mytrade.key`（已被 `.gitignore` 排除，**不要提交**），公钥写在 `tauri.conf.json` 的 `plugins.updater.pubkey`。私钥丢失后，已安装的旧版本将无法再自动更新。第一次需要手动安装一次带 updater 的版本（v0.2.0），之后才能自动更新。
 
@@ -140,7 +140,8 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
 | 画线样式模板：保存当前画线样式、应用到其他画线、设为默认样式 | ✅ |
 | 画线工具收藏，收藏项浮在图上快捷调用 | ✅ |
 | 往左滚动按区间加载更早的历史 K 线（跨周末也能继续） | ✅ |
-| 自定义指标（JS + PineJS.Std，内置 MT 双 EMA 示例） | ✅ 不支持 Pine 源码 |
+| 自定义指标（JS + PineJS.Std，内置 MT 双 EMA 示例） | ✅ |
+| Pine v5/v6 指标源码本地执行（Piner 优先，PineTS 回退） | ✅ 实验 |
 | 指标组合自动保存 + 命名指标模板：重启/换品种后保持，可一键套用 | ✅ |
 | 市价 / 限价 / 停损，手数按 tick 对齐 | ✅ |
 | 下单前预览：保证金、风险金额、风险 %、R:R、点差 | ✅ |
@@ -155,7 +156,7 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
 | 分批止盈：每笔持仓最多 4 档价格触发，图上虚线可直接拖动，按当时剩余仓位比例平仓 | ✅ 需网关运行 |
 | 图上风险区间：止损红色带 / 止盈绿色带、1R/2R… 刻度、强平价估算 | ✅ |
 | 交易日志：自动配对成交、MFE/MAE、图表截图、按品种/时段/策略统计 | ✅ |
-| 2×2 多周期同屏 + 十字线联动 | ✅ |
+| 1–16 图布局：每格独立品种/周期，十字线与时间轴可同步 | ✅ |
 | 自选表：点差、当日涨跌幅、持仓标记 | ✅ |
 | 价格告警：声音、桌面通知、Webhook/Discord/Telegram/企业微信 | ✅ |
 | 快捷键（B/S 市价、Esc 取消）与下单模板（票内模板栏/计划条、多模板、风险 % / 止盈 R / 分批阶段可自定义，挂单也支持） | ✅ |
@@ -170,6 +171,8 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
 | 断线自动重连、MT5 重启后按 clientOrderId 对账 | ✅ |
 | TradingView Charting Library 完整界面 | ✅ 本地库（v32，勿提交） |
 | 实盘交易 | ❌ 默认关闭，需改 `gateway/config.json` |
+
+> 评分页不在侧栏，可从概览卡片或命令面板进入；审计日志在「设置 → 诊断」。
 
 ---
 
@@ -197,17 +200,17 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
 
 ### 交易日志与统计
 
-- 顶部「日志」打开。每次平仓后，网关按 `position_id` 把进出场成交配对成一笔交易，记录方向、手数、开/平价、盈亏（含隔夜利息与手续费）、持仓时长、MFE/MAE（用持仓期间 M1 高低点折算成账户货币）和出场方式（手动 / 止盈 / 止损 / 强平）。
-- 可切换最近 7 / 30 / 90 天，查看胜率、净盈亏、盈亏比、期望、最大回撤，并按 **品种 / 时段（开仓小时）/ 策略标签** 分组。
+- 左侧「记录 → 交易列表」打开。每次平仓后，网关按 `position_id` 把进出场成交配对成一笔交易，记录方向、手数、开/平价、盈亏（含隔夜利息与手续费）、持仓时长、MFE/MAE（用持仓期间 M1 高低点折算成账户货币）和出场方式（手动 / 止盈 / 止损 / 强平）。
+- 可切换最近 7 / 30 / 90 天，查看胜率、净盈亏、盈亏比、期望、最大回撤，并按 **品种 / 时段（平仓时间）/ 策略标签** 分组；时段换算到复盘时区后按整点归桶。
 - 下单票里的「策略标签」会随订单写进日志，之后也能在日志表格里直接改。
-- 成交后前端自动截取当前图表（JPEG，≤3MB，存 `gateway/data/shots/<positionId>.jpg`），表格里点「图」查看。截图只存本机，不会上传。
+- 成交后前端自动截取当前操作的图表格子（JPEG，≤3MB，存 `gateway/data/shots/<positionId>.jpg`），表格里点「图」查看。截图只存本机，不会上传。
 - R 用初始止损距离折算：优先取成交订单历史里的止损（手动单、成交后再补的止损都能找到），其次用持仓期间记录的止损，最后用下单意图里的止损；算出来的风险会写回交易日志，下次统计直接复用。统计报表页会显示「R 覆盖」和各类风险来源的笔数。
 
 ### 多图联动与自选表
 
-- 顶部「四图 / 单图」切换。四图是同一品种的 2×2 布局，每格左上角可单独切换周期，默认 5m / 15m / 1h / 4h，选择记在 localStorage。
-- 鼠标在任一图的十字线上移动，其余图会用虚线同步价格线与时间线，方便多周期对照。
-- 左栏「自选」标签最多放 10 个品种，每 3 秒刷新点差、买价与当日涨跌幅；有持仓的品种带圆点，点一行即可切到当前操作的图表（多图时先点一下目标格子）。
+- 顶部布局选择器支持单图到 16 图（2×2、三列、上下分割、左大右小等）；每格可单独选品种和周期，选择记在 localStorage。「设置 → 图表 → 默认周期」始终作用于主图。
+- 多图之间可以分别同步品种、周期、十字线和时间轴；关掉同步后各格独立。
+- 左栏「自选」列出常用品种，每 3 秒刷新点差、买价与当日涨跌幅；有持仓的品种带圆点，点一行即可切到当前操作的图表（多图时先点一下目标格子）。
 
 ### 价格告警
 
@@ -250,7 +253,7 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
 
 ### 指标自动保存与指标模板
 
-- 每张图表加的指标会自动保存（约 1.5 秒内落盘），重启应用、切换品种或账户后自动恢复；按图表格子分别保存，单图和四图互不覆盖。
+- 每张图表加的指标会自动保存（约 1.5 秒内落盘），重启应用、切换品种或账户后自动恢复；按图表格子分别保存，单图和多图互不覆盖。
 - 自动保存存在本机 `mytrade.chartStates`，只保存指标和图表样式，不保存品种/周期，避免恢复时把当前选中的品种改掉。
 - 图表左下角「指标模板」可以把当前指标组合存成命名模板，例如「趋势组合」「震荡组合」；点模板名即可套用到当前图表，换品种也能继续用。
 - 命名模板存在本机 `mytrade.studyTemplates`，不上传；删除模板只影响模板本身，不影响图表当前指标。
@@ -268,13 +271,13 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
 
 ### 自定义指标
 
-- Charting Library **不能直接运行 Pine Script 源码**（Pine 是 TradingView 网站端的功能）。库提供的是用 JS + `PineJS.Std` 写自定义指标：`sma / ema / rsi / atr / stdev / highest / lowest` 等函数和 Pine 基本一一对应。
-- 本项目已接好 `custom_indicators_getter`，示例在 `src/chart/tv/studies.ts`：内置 **MT 双 EMA**（快线/慢线周期可调），在「指标」里搜索「MT 双 EMA」即可添加。
-- 需要把你的 Pine 指标搬过来时，把 Pine 源码发给我，我按 `studies.ts` 的结构转成 JS（plots、inputs、颜色都可以保留）。
+- 内置指标走 Charting Library 的 `custom_indicators_getter`，用 JS + `PineJS.Std` 编写：`sma / ema / rsi / atr / stdev / highest / lowest` 等函数和 Pine 基本一一对应。示例在 `src/chart/tv/studies.ts`：内置 **MT 双 EMA**（快线/慢线周期可调），在「指标」里搜索「MT 双 EMA」即可添加。
+- 也可以直接运行 Pine v5/v6 指标源码：在「设置 → Pine 脚本」粘贴原生 `indicator` 源码，保存后由 Piner（失败时回退 PineTS）在本地执行，不上传。该功能仍属实验，保存/删除脚本后需要刷新一次图表。
+- TradingView 的 Charting Library 本身不执行 Pine；这里是通过本地运行时解释脚本，绘图能力以运行时支持的范围为准。
 
 ### 执行质量
 
-- 左侧「记录 → 执行质量」独立页面，统计最近 7 / 30 / 90 天实际发往 MT5 的下单请求：
+- 「分析 → 执行质量」页签，统计最近 7 / 30 / 90 天实际发往 MT5 的下单请求：
   - 平均点差、平均滑点（正数 = 对你不利）、滑点为不利方向的占比、最大滑点；
   - 成交延迟 P50 / P90 / 最慢；
   - 按品种的请求数、拒单数、平均点差/滑点/延迟；
@@ -299,7 +302,7 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
 - 前端 WebSocket 断开后自动重连（最长 5 秒间隔），状态栏显示「自动重连中」；重连成功会重新拉取账户、持仓、挂单、风控与告警。
 - 网关启动时在后台检查一次 SQLite 完整性，结果在 `/health` 的 `database` 字段；前端渲染异常会被 ErrorBoundary 兜住，可重新加载或导出诊断包。
 - 网关与 MT5 断开后每 3 秒重连；连上时把 `sending/unknown` 的意图按 `clientOrderId` 与挂单、持仓、最近 7 天成交重新对账，并写审计。
-- 左侧「记录 → 审计日志」独立页面，可按 UTC 日期、类型前缀、文本查询 `gateway/audit/YYYY-MM-DD.jsonl`，展开看完整 payload；「立即对账」手动触发一次对账，显示检查/找到/未找到数量。
+- 「设置 → 诊断 → 审计日志」，可按 UTC 日期、类型前缀、文本查询 `gateway/audit/YYYY-MM-DD.jsonl`，展开看完整 payload；「立即对账」手动触发一次对账，显示检查/找到/未找到数量。
 - 同一价格附近的多笔持仓/挂单，右边缘小块会竖直错行（每行 18px），不会叠在一起。
 - 窗口位置、大小与最大化状态记在应用配置目录的 `window-state.json`，下次打开回到上次的窗口；超出屏幕的旧坐标会自动回到默认大小。
 
@@ -359,6 +362,7 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
 前后端共用同一套判定（`gateway/metrics.py` 与 `src/lib/metrics.ts`，`WIN_EPSILON = 0.005`）：
 
 - 盈亏 > 0.005 记胜，< -0.005 记负；两者之间（含 0 与手续费造成的毛刺）不计入胜/负。
+- 统计窗口按复盘时区的自然日计算；时段按平仓时间换算到同一时区后归桶，报表、分析、复盘与评分共用这一口径。
 - 前端 `winRate` 是 0–1 的比例，网关 `journal.stats` 返回 0–100 的百分数。
 - `journal.stats` 最多统计最近 5000 笔；被截断时 `summary.truncated = true`，交易日志页提示「仅统计最近 5000 笔」。
 - `testdata/stats_golden.json` 是两端共用的黄金样本，pytest 与 vitest 都会读取，口径漂移会直接测试失败。
@@ -452,8 +456,8 @@ mytrade/
 │  ├─ chart/tv/            TradingView 适配：datafeed.ts（行情）、priceLines.ts（下单线/持仓线）、sync.ts（十字线联动）、registry.ts
 │  ├─ gateway/             WebSocket 客户端与类型
 │  ├─ lib/updater.ts       GitHub Releases 自动更新：检查、下载进度、安装重启
-│  ├─ views/               概览、交易日志、统计报表、执行质量、审计日志、设置
-│  ├─ components/          顶栏、图表、下单票、持仓、挂单、自选、告警面板、更新提示、状态栏
+│  ├─ views/               概览、交易记录、分析、纪律、历史复盘、设置
+│  ├─ components/          顶栏、图表、下单票、交易托盘、自选、告警面板、更新提示、状态栏
 │  └─ store/               Zustand 状态
 ├─ gateway/                Python MT5 网关
 │  ├─ app.py               FastAPI + WebSocket、来源白名单、命令超时
@@ -522,7 +526,6 @@ mytrade/
 
 ## 下一步
 
-- P1：布局保存、日志收益曲线图。**TradingView 库不得提交到公开仓库**，授权边界见 [docs/TRADINGVIEW_LIBRARY.md](docs/TRADINGVIEW_LIBRARY.md)
-- P2：若拿到 Trading Platform（Broker API）授权，把 `priceLines.ts` 换成官方 `createOrderLine`/`createPositionLine`，并加成交箭头
-- P3：完善对账、崩溃恢复、日亏基准、EA 执行通道
-- P4：DOM、更多图表布局、执行质量趋势图
+- 近期：布局保存、日志收益曲线图、执行质量趋势图。
+- 若拿到 Trading Platform（Broker API）授权，把 `priceLines.ts` 换成官方 `createOrderLine`/`createPositionLine`，并加成交箭头。**TradingView 库不得提交到公开仓库**，授权边界见 [docs/TRADINGVIEW_LIBRARY.md](docs/TRADINGVIEW_LIBRARY.md)。
+- 后续：完善对账与崩溃恢复、日亏基准、EA 执行通道、DOM。

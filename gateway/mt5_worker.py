@@ -400,10 +400,6 @@ class Mt5Worker(
         handlers: dict[str, Callable[[dict], Any]] = {
             "ping": lambda _: {"pong": time.time()},
             "system.health": lambda _: self.health(),
-            "system.getConfig": lambda _: {
-                "config": self.cfg.public(),
-                "tradeMode": self._trade_mode,
-            },
             "system.setConfig": self._set_config,
             "system.setAccountRisk": self._set_account_risk,
             "system.setAccountDiscipline": self._set_account_discipline,
@@ -421,11 +417,6 @@ class Mt5Worker(
             "bars.subscribe": self._bars_subscribe,
             "bars.unsubscribe": self._bars_unsubscribe,
             "account.get": lambda _: self._require_account(),
-            "accounts.list": lambda _: {
-                "activeId": self._account_id,
-                "accounts": self._accounts_payload(),
-                "lastError": self._last_error,
-            },
             "accounts.create": self._create_account,
             "accounts.update": self._update_account,
             "accounts.delete": self._delete_account,
@@ -447,8 +438,6 @@ class Mt5Worker(
             "order.place": self._place,
             "discipline.start": self._discipline_start,
             "discipline.check": self._discipline_check,
-            "discipline.state": self._discipline_state,
-            "discipline.reset": self._discipline_reset,
             "order.modify": self._modify_order,
             "order.cancel": self._cancel_order,
             "order.cancelAll": self._cancel_all_orders,
@@ -494,14 +483,8 @@ class Mt5Worker(
             "diary.note.save": lambda p: self._review_call(
                 lambda: self._review.note_save(p, self._login())
             ),
-            "diary.templates": lambda p: self._review_call(
-                lambda: self._review.templates(p, self._login())
-            ),
             "diary.template.save": lambda p: self._review_call(
                 lambda: self._review.template_save(p, self._login())
-            ),
-            "diary.template.delete": lambda p: self._review_call(
-                lambda: self._review.template_delete(p, self._login())
             ),
             "strategy.list": lambda p: self._review_call(
                 lambda: self._review.strategy_list(p, self._login())
@@ -526,12 +509,6 @@ class Mt5Worker(
             ),
             "strategy.adherence": lambda p: self._review_call(
                 lambda: self._review.adherence(p, self._login(), self._server_offset)
-            ),
-            "review.settings": lambda p: self._review_call(
-                lambda: self._review.settings(p, self._login())
-            ),
-            "review.settings.save": lambda p: self._review_call(
-                lambda: self._review.settings_save(p, self._login())
             ),
             "routine.list": lambda p: self._routine_call(
                 lambda: self._routines.list(p, self._login())
@@ -579,9 +556,6 @@ class Mt5Worker(
             "ai.review": lambda p: self._ai_call(
                 lambda: self._ai.review(p, self._login(), self._server_offset)
             ),
-            "ai.cache.clear": lambda p: self._ai_call(
-                lambda: self._ai.cache_clear(p, self._login(), self._server_offset)
-            ),
             "calendar.week": lambda _: week_payload(),
             "data.export": self._data_export,
             "data.info": lambda _: {
@@ -598,10 +572,6 @@ class Mt5Worker(
             "alerts.test": self._alert_test,
             "watchlist.get": self._watchlist,
             "watchlist.set": self._watchlist_set,
-            "intents.list": lambda p: self.store.recent_intents(
-                int(p.get("limit") or 50), self._login()
-            ),
-            "audit.tail": lambda p: self.store.audit_tail(int(p.get("limit") or 50)),
             "diagnostics.get": self._diagnostics,
         }
         handler = handlers.get(method)

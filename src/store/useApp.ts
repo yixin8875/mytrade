@@ -22,7 +22,6 @@ import type {
   WatchlistRow,
 } from '../gateway/types';
 
-export type SidebarTab = 'positions' | 'orders' | 'watchlist';
 /** 底部订单托盘页签：持仓 / 挂单 / 成交 / 已平仓 */
 export type DockTab = 'positions' | 'orders' | 'deals' | 'closed';
 /** 下单模式：常规确认 / 风险计算表格 */
@@ -235,7 +234,6 @@ interface AppStore {
   watchRows: WatchlistRow[];
   /** 下单时填的策略标签 */
   orderTag: string;
-  sidebarTab: SidebarTab;
   /** 交易台顶部的品种标签（最近打开的品种，当前品种在 setSymbol 时自动加入） */
   openSymbols: string[];
   /** 底部订单托盘高度（px）与是否收起 */
@@ -295,7 +293,6 @@ interface AppStore {
   setWatchlist: (watchlist: string[]) => void;
   setWatchRows: (rows: WatchlistRow[]) => void;
   setOrderTag: (tag: string) => void;
-  setSidebarTab: (tab: SidebarTab) => void;
   /** 打开/关闭顶部品种标签；关掉当前品种时切到相邻标签 */
   toggleOpenSymbol: (symbol: string) => void;
   closeOpenSymbol: (symbol: string) => void;
@@ -643,7 +640,6 @@ export const useApp = create<AppStore>((set, get) => ({
   watchlist: loadWatchlist(),
   watchRows: [],
   orderTag: loadTag(),
-  sidebarTab: 'positions',
   openSymbols: loadOpenSymbols(),
   dockHeight: loadDockHeight(),
   dockCollapsed: loadDockCollapsed(),
@@ -870,7 +866,6 @@ export const useApp = create<AppStore>((set, get) => ({
     }
     set({ orderTag });
   },
-  setSidebarTab: (sidebarTab) => set({ sidebarTab }),
   toggleOpenSymbol: (symbol) => {
     const state = get();
     if (state.openSymbols.includes(symbol)) {

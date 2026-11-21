@@ -663,18 +663,10 @@ def test_只读查询方法(worker):
     assert worker._dispatch("executions.stats", {"days": 0}) == {"days": 0}
     assert ("execution_stats", (0, 111)) in worker.store.calls
 
-    accounts = worker._dispatch("accounts.list", {})
-    assert accounts["activeId"] == "a"
-    assert accounts["lastError"] is None
-
     assert worker._dispatch("journal.stats", {}) == {"days": 30}
     assert worker._dispatch("journal.sync", {}) == {"written": 3}
     assert ("sync", 111, True, None) in worker._journal.calls
 
-    assert worker._dispatch("intents.list", {}) == []
-    assert ("recent_intents", (50, 111)) in worker.store.calls
-    assert worker._dispatch("audit.tail", {"limit": 5}) == []
-    assert ("audit_tail", (5,)) in worker.store.calls
     assert worker._dispatch("alerts.list", {}) == []
     assert ("alerts_list", (111,)) in worker.store.calls
 
@@ -712,11 +704,7 @@ def test_风控状态未计算时会补算(worker):
     assert worker._dispatch("risk.status", {}) == {"cached": True}
 
 
-def test_系统配置与健康方法(worker):
-    config = worker._dispatch("system.getConfig", {})
-    assert config["tradeMode"] == "demo"
-    assert config["config"] == worker.cfg.public()
-
+def test_健康方法(worker):
     health = worker._dispatch("system.health", {})
     assert health["connected"] is True
 
