@@ -226,6 +226,30 @@ plot(v, 'sec')
     );
   });
 
+  it('applies overrides by Piner input key when titles repeat', async () => {
+    const result = await runPine({
+      source: `//@version=6
+indicator('dup inputs')
+a = input.int(1, 'Len')
+b = input.int(2, 'Len')
+plot(a, 'a')
+plot(b, 'b')
+`,
+      bars: bars(10, 300),
+      symbol: 'NQ',
+      resolution: '5',
+      inputs: { Len: 10, 'Len (2)': 20 },
+      inputMeta: [
+        { id: 'Len', title: 'Len', type: 'int', defval: 1 },
+        // 重名输入的 key 带 " (2)" 后缀，按 title 映射会让两条输入互相覆盖
+        { id: 'Len (2)', title: 'Len', type: 'int', defval: 2 },
+      ],
+    });
+
+    expect(result.series.find((series) => series.title === 'a')?.values.at(-1)).toBe(10);
+    expect(result.series.find((series) => series.title === 'b')?.values.at(-1)).toBe(20);
+  });
+
   it('reports a single Piner error when the script cannot compile', async () => {
     let message = '';
     try {

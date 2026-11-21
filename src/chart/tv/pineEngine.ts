@@ -259,7 +259,13 @@ function coerceInput(meta: PineInputMeta, value: unknown): unknown {
   }
 }
 
-/** 图表库输入 id -> Piner 需要的 input title */
+/**
+ * 图表库输入 id -> Piner 的 input key。
+ *
+ * Piner 的 Engine 按 metadata.key 读取覆盖值，而 key 在重名时带 `" (2)"` 后缀
+ * （多个 inline 输入常把 title 留空或写成“名称/时间/颜色”）。若按 title 映射，
+ * 同名输入会全部落到同一个 title 上、互相覆盖，脚本就会用错输入值。
+ */
 function pinerInputs(
   meta: PineInputMeta[] | undefined,
   inputs: Record<string, unknown> | undefined,
@@ -269,7 +275,7 @@ function pinerInputs(
   const out: Record<string, unknown> = {};
   for (const item of meta) {
     if (!(item.id in values)) continue;
-    out[item.title || item.id] = coerceInput(item, values[item.id]);
+    out[item.id] = coerceInput(item, values[item.id]);
   }
   return out;
 }
