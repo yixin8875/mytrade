@@ -92,13 +92,31 @@ export function ChartGrid() {
   // 启动时格子会恢复上次的品种，全局品种却会被重置成默认值（通常按字母序第一个）。
   // 两者不一致时，下单区按 A 品种算价、图表画的却是 B 品种，画线下单的线会落在
   // 可视区间外，看起来像“点了没反应”。这里让下单品种跟随当前操作的格子。
+  // 之后全局品种也可能被顶部标签、关闭标签后的回退等外部入口改动，方向相反：
+  // 这时要把新品种写进当前格子，否则会被格子里的旧品种立刻拽回去，表现为
+  // “点了没反应”。用上一次的全局品种分辨是启动恢复还是外部切换。
+  const bootedSymbolSyncRef = useRef(false);
+  const lastGlobalSymbolRef = useRef<string | null>(null);
   useEffect(() => {
     if (sync.symbol || !symbol || available.length === 0) return;
     const index = indexForSlot(currentSlot(), preset.count);
     const cell = symbols[index];
-    if (!cell || cell === symbol) return;
-    if (!available.some((item) => item.name === cell)) return;
-    setSymbol(cell);
+    const last = lastGlobalSymbolRef.current;
+    lastGlobalSymbolRef.current = symbol;
+    if (!bootedSymbolSyncRef.current) {
+      bootedSymbolSyncRef.current = true;
+      if (!cell || cell === symbol) return;
+      if (!available.some((item) => item.name === cell)) return;
+      setSymbol(cell);
+      return;
+    }
+    if (last === symbol || !cell || cell === symbol) return;
+    setSymbols((prev) => {
+      const values = [...prev];
+      values[index] = symbol;
+      persist(SYMBOLS_KEY, values);
+      return values;
+    });
   }, [symbol, symbols, available, sync.symbol, preset.count, setSymbol]);
 
   // 周期同步同理：同步期间把全局周期记到每一格，关掉同步时不跳回旧周期。

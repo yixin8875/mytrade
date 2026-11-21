@@ -52,7 +52,7 @@ function reset(tradeMode: 'readonly' | 'demo' = 'demo') {
 describe('OrderTicket 下单模式', () => {
   beforeEach(() => reset());
 
-  it('默认常规模式，菜单可切到单击模式并显示直发提示', async () => {
+  it('默认常规模式，菜单只提供常规与风险计算表格', async () => {
     const user = userEvent.setup();
     render(<OrderTicket />);
 
@@ -60,13 +60,11 @@ describe('OrderTicket 下单模式', () => {
     expect(trigger).toHaveTextContent('常规模式');
 
     await user.click(trigger);
-    await user.click(screen.getByRole('menuitemradio', { name: /单击模式/ }));
-
-    expect(screen.getByRole('button', { name: /下单模式/ })).toHaveTextContent('单击模式');
-    expect(screen.getByText(/单击直发已开启/)).toBeInTheDocument();
-    expect(screen.getByText('发送前必须先设置止损')).toBeInTheDocument();
-    // 单击模式不跨启动持久化
-    expect(window.localStorage.getItem('mytrade.orderEntryMode')).toBe('"regular"');
+    const items = screen.getAllByRole('menuitemradio').map((item) => item.textContent ?? '');
+    expect(items).toHaveLength(2);
+    expect(items[0]).toContain('常规模式');
+    expect(items[1]).toContain('风险计算表格');
+    expect(screen.queryByText(/单击模式/)).not.toBeInTheDocument();
   });
 
   it('切到风险计算表格时显示自动手数', async () => {
@@ -79,16 +77,6 @@ describe('OrderTicket 下单模式', () => {
     expect(screen.getAllByText('风险计算表格').length).toBeGreaterThan(0);
     expect(screen.getByText('自动手数')).toBeInTheDocument();
     expect(window.localStorage.getItem('mytrade.orderEntryMode')).toBe('"risk"');
-  });
-
-  it('只读模式下不能开启单击模式', async () => {
-    reset('readonly');
-    const user = userEvent.setup();
-    render(<OrderTicket />);
-
-    await user.click(screen.getByRole('button', { name: /下单模式/ }));
-
-    expect(screen.getByRole('menuitemradio', { name: /单击模式/ })).toBeDisabled();
   });
 
   it('止损快捷按钮按现价偏移', async () => {

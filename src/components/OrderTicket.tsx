@@ -74,11 +74,8 @@ export function OrderTicket() {
   const setTicketOpen = useApp((s) => s.setTicketOpen);
 
   const [modeMenu, setModeMenu] = useState(false);
-  const [liveAsk, setLiveAsk] = useState<Side | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const modeWrapRef = useRef<HTMLDivElement>(null);
-  const oneClickLiveRef = useRef(false);
-  const lastClickRef = useRef(0);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [sizing, setSizing] = useState<TradeSizing | null>(null);
   const [confirm, setConfirm] = useState(false);
@@ -565,48 +562,10 @@ export function OrderTicket() {
     patchOrder({ tp: Number(tp.toFixed(digits)) });
   };
 
-  /** 单击模式：跳过确认窗，但仍要求先设止损、遵守 800ms 防抖和实盘首次确认 */
-  const instantOrder = (side: Side, liveAcked = false) => {
-    if (!ready || !info) return;
-    if (mode === 'readonly') {
-      notify('info', '只读模式：请先在顶部切换到「模拟可交易」');
-      return;
-    }
-    const next: DraftOrder = {
-      ...draft,
-      active: true,
-      side,
-      type: 'market',
-      price: defaultPrice(side, 'market', quote, info),
-    };
-    if (!next.sl) {
-      notify('error', '单击模式必须先设置止损，模板不会代填止损');
-      return;
-    }
-    if (disciplineEnabled) {
-      // 有开仓清单时退回常规确认窗，避免绕过纪律检查
-      patchDraft(next);
-      setConfirm(true);
-      return;
-    }
-    if (mode === 'live' && !oneClickLiveRef.current && !liveAcked) {
-      setLiveAsk(side);
-      return;
-    }
-    const now = Date.now();
-    if (now - lastClickRef.current < 800) return;
-    lastClickRef.current = now;
-    patchDraft(next);
-    void send(next);
-  };
-
   const chooseMode = (next: OrderEntryMode) => {
     setModeMenu(false);
     setEntryMode(next);
     if (next === 'risk') patchRisk({ auto: true });
-    if (next === 'oneclick' && !draft.sl) {
-      notify('info', '单击模式需要先设置止损，否则不会发单');
-    }
   };
 
   const handlePlace = () => {
@@ -704,8 +663,7 @@ export function OrderTicket() {
             ? '设定止损与风险值'
             : `${draft.side === 'buy' ? '买入' : '卖出'} ${fmtVolume(draft.volume, step)}`;
 
-  const entryModeLabel =
-    entryMode === 'oneclick' ? '单击模式' : entryMode === 'risk' ? '风险计算表格' : '常规模式';
+  const entryModeLabel = entryMode === 'risk' ? '风险计算表格' : '常规模式';
   const ask = quote?.ask ?? null;
   const bid = quote?.bid ?? null;
 
@@ -824,12 +782,7 @@ export function OrderTicket() {
             onClick={() => setModeMenu(!modeMenu)}
             aria-haspopup="menu"
             aria-expanded={modeMenu}
-            className={clsx(
-              'flex h-8 w-full items-center justify-between rounded-lg border px-2.5 text-[12px] transition-colors',
-              entryMode === 'oneclick'
-                ? 'border-tv-down/40 bg-tv-down-soft text-tv-down'
-                : 'border-tv-border bg-tv-panel text-tv-text hover:bg-tv-hover',
-            )}
+            className="flex h-8 w-full items-center justify-between rounded-lg border border-tv-border bg-tv-panel px-2.5 text-[12px] text-tv-text transition-colors hover:bg-tv-hover"
           >
             <span className="flex items-center gap-1.5">
               <span className="text-tv-muted">下单模式</span>
@@ -845,7 +798,6 @@ export function OrderTicket() {
               {(
                 [
                   ['regular', '常规模式', '每次下单都弹出确认窗，最稳妥'],
-                  ['oneclick', '单击模式', '点买/卖立即发单；必须先设止损'],
                   ['risk', '风险计算表格', '按风险金额与止损自动算手数'],
                 ] as const
               ).map(([value, label, hint]) => (
@@ -854,13 +806,7 @@ export function OrderTicket() {
                   role="menuitemradio"
                   aria-checked={entryMode === value}
                   onClick={() => chooseMode(value)}
-                  disabled={value === 'oneclick' && mode === 'readonly'}
-                  title={
-                    value === 'oneclick' && mode === 'readonly'
-                      ? '只读模式下不能开启单击下单'
-                      : undefined
-                  }
-                  className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left hover:bg-tv-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                  className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left hover:bg-tv-hover"
                 >
                   <Check
                     size={13}
@@ -880,37 +826,29 @@ export function OrderTicket() {
           )}
         </div>
 
-        {entryMode === 'oneclick' && (
-          <div className="rounded-lg border border-tv-down/30 bg-tv-down-soft px-2.5 py-1.5 text-[10px] leading-relaxed text-tv-down">
-            单击直发已开启：买/卖按钮会立即下单，不再弹确认窗。
-            {mode === 'live' ? ' 实盘首次下单仍需确认一次。' : ''}
-            {disciplineEnabled ? ' 有开仓清单时自动退回确认窗。' : ''}
-          </div>
-        )}
-
         <div className="grid grid-cols-2 gap-2">
           <button
-            onClick={() => (entryMode === 'oneclick' ? instantOrder('sell') : startMarket('sell'))}
+            onClick={() => startMarket('sell')}
             className={clsx(
               'flex h-14 flex-col items-center justify-center rounded-lg text-white transition-colors',
               'bg-tv-down hover:bg-[#a93831]',
-              draft.side === 'sell' && entryMode !== 'oneclick' && 'ring-2 ring-tv-down/40 ring-offset-1',
+              draft.side === 'sell' && 'ring-2 ring-tv-down/40 ring-offset-1',
               mode === 'readonly' && 'opacity-60',
             )}
-            title={entryMode === 'oneclick' ? '单击立即卖出' : '以市价卖出'}
+            title="以市价卖出"
           >
             <span className="text-[13px] font-medium">卖出</span>
             <span className="num font-mono text-[12px] opacity-90">{fmtPrice(bid, digits)}</span>
           </button>
           <button
-            onClick={() => (entryMode === 'oneclick' ? instantOrder('buy') : startMarket('buy'))}
+            onClick={() => startMarket('buy')}
             className={clsx(
               'flex h-14 flex-col items-center justify-center rounded-lg text-white transition-colors',
               'bg-tv-up hover:bg-[#0c6a49]',
-              draft.side === 'buy' && entryMode !== 'oneclick' && 'ring-2 ring-tv-up/40 ring-offset-1',
+              draft.side === 'buy' && 'ring-2 ring-tv-up/40 ring-offset-1',
               mode === 'readonly' && 'opacity-60',
             )}
-            title={entryMode === 'oneclick' ? '单击立即买入' : '以市价买入'}
+            title="以市价买入"
           >
             <span className="text-[13px] font-medium">买入</span>
             <span className="num font-mono text-[12px] opacity-90">{fmtPrice(ask, digits)}</span>
@@ -1646,28 +1584,19 @@ export function OrderTicket() {
           active={draft.active}
         />
 
-        {entryMode !== 'oneclick' ? (
-          <button
-            onClick={handlePlace}
-            disabled={!ready || !info || pendingBlocked || riskNeedsSl}
-            title={riskNeedsSl ? '先填写止损价，手数会按风险金额自动算' : undefined}
-            className={clsx(
-              'mt-auto h-10 w-full rounded-lg text-[13px] font-medium text-white transition-colors',
-              draft.side === 'buy'
-                ? 'bg-tv-up hover:bg-[#0c6a49]'
-                : 'bg-tv-down hover:bg-[#a93831]',
-              (!ready || !info || pendingBlocked || riskNeedsSl) &&
-                'cursor-not-allowed opacity-40',
-            )}
-          >
-            {buttonText}
-          </button>
-        ) : (
-          <div className="mt-auto rounded-lg border border-tv-border bg-tv-raised px-3 py-2 text-center text-[11px] text-tv-muted">
-            单击模式：点上方买 / 卖按钮立即发单
-            {!draft.sl && <span className="mt-0.5 block text-tv-warn">发送前必须先设置止损</span>}
-          </div>
-        )}
+        <button
+          onClick={handlePlace}
+          disabled={!ready || !info || pendingBlocked || riskNeedsSl}
+          title={riskNeedsSl ? '先填写止损价，手数会按风险金额自动算' : undefined}
+          className={clsx(
+            'mt-auto h-10 w-full rounded-lg text-[13px] font-medium text-white transition-colors',
+            draft.side === 'buy' ? 'bg-tv-up hover:bg-[#0c6a49]' : 'bg-tv-down hover:bg-[#a93831]',
+            (!ready || !info || pendingBlocked || riskNeedsSl) &&
+              'cursor-not-allowed opacity-40',
+          )}
+        >
+          {buttonText}
+        </button>
 
         <div className="text-center text-[11px] leading-relaxed text-tv-muted">
           {mode === 'readonly' ? '只读模式不会发送任何订单' : '订单发送到本机 MT5，确认后成交'}
@@ -1685,43 +1614,6 @@ export function OrderTicket() {
           </div>
         </div>
       </div>
-
-      {liveAsk && (
-        <div
-          data-confirm="oneclick-live"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6"
-        >
-          <div className="w-[380px] max-w-[92vw] rounded-xl border border-tv-border bg-tv-panel p-5 shadow-[0_16px_48px_rgba(20,30,45,0.18)]">
-            <div className="text-[14px] font-semibold text-tv-text">实盘单击下单确认</div>
-            <p className="mt-2 text-[12px] leading-relaxed text-tv-muted">
-              当前是实盘账户。单击模式会跳过每笔确认窗，点击买 / 卖即按市价真实成交。
-              本次启动只需确认一次，止损仍必须手动设置。
-            </p>
-            <div className="mt-4 flex gap-2">
-              <button
-                onClick={() => setLiveAsk(null)}
-                className="h-9 flex-1 rounded-lg border border-tv-border text-[12px] text-tv-text hover:bg-tv-hover"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => {
-                  const side = liveAsk;
-                  oneClickLiveRef.current = true;
-                  setLiveAsk(null);
-                  if (side) instantOrder(side, true);
-                }}
-                className={clsx(
-                  'h-9 flex-1 rounded-lg text-[12px] font-medium text-white',
-                  liveAsk === 'buy' ? 'bg-tv-up' : 'bg-tv-down',
-                )}
-              >
-                我知道，继续{liveAsk === 'buy' ? '买入' : '卖出'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {confirm && (
         <div

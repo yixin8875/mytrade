@@ -25,8 +25,8 @@ import type {
 export type SidebarTab = 'positions' | 'orders' | 'watchlist';
 /** 底部订单托盘页签：持仓 / 挂单 / 成交 / 已平仓 */
 export type DockTab = 'positions' | 'orders' | 'deals' | 'closed';
-/** 下单模式：常规确认 / 单击直发 / 风险计算表格 */
-export type OrderEntryMode = 'regular' | 'oneclick' | 'risk';
+/** 下单模式：常规确认 / 风险计算表格 */
+export type OrderEntryMode = 'regular' | 'risk';
 /** 布局预设 id，见 chart/layouts.ts */
 export type ChartLayout = string;
 
@@ -248,7 +248,7 @@ interface AppStore {
   watchColumnOpen: boolean;
   /** 左侧图标栏是否钉住（展开成完整导航） */
   railPinned: boolean;
-  /** 下单面板模式；单击模式不持久化，每次启动回到常规 */
+  /** 下单面板模式：常规模式 / 风险计算表格 */
   orderEntryMode: OrderEntryMode;
   /** 下单面板是否展开（收起后留下窄条） */
   ticketOpen: boolean;
@@ -591,7 +591,7 @@ function loadRailPinned(): boolean {
   return window.localStorage.getItem(RAIL_PINNED_KEY) === '1';
 }
 
-/** 单击模式涉及实盘直发，按方案不跨启动保留 */
+/** 历史版本存过 oneclick，读取时归一到常规模式 */
 function loadOrderEntryMode(): OrderEntryMode {
   const raw = readJson<unknown>(ENTRY_MODE_KEY, 'regular');
   return raw === 'risk' ? 'risk' : 'regular';
@@ -917,8 +917,7 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ railPinned });
   },
   setOrderEntryMode: (orderEntryMode) => {
-    // 单击模式只在本轮有效，写盘时按常规模式记
-    writeJson(ENTRY_MODE_KEY, orderEntryMode === 'oneclick' ? 'regular' : orderEntryMode);
+    writeJson(ENTRY_MODE_KEY, orderEntryMode);
     set({ orderEntryMode, ticketOpen: true });
   },
   setTicketOpen: (ticketOpen) => set({ ticketOpen }),
