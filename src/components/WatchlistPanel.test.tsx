@@ -10,6 +10,7 @@ import { WatchlistPanel } from './WatchlistPanel';
 const SYMBOLS: SymbolInfo[] = [
   { ...GOLD_INFO, name: 'XAUUSD', description: 'Gold' },
   { ...GOLD_INFO, name: 'EURUSD', description: 'Euro vs US Dollar' },
+  { ...GOLD_INFO, name: 'GBPUSD', description: 'Pound vs US Dollar' },
 ] as SymbolInfo[];
 
 const ROWS: WatchlistRow[] = [
@@ -96,6 +97,34 @@ describe('WatchlistPanel', () => {
     await user.click(screen.getByText('EURUSD'));
 
     expect(useApp.getState().symbol).toBe('EURUSD');
+  });
+
+  it('添加菜单可按代码或名称筛选后加入自选', async () => {
+    const user = userEvent.setup();
+    render(<WatchlistPanel />);
+
+    await user.click(screen.getByRole('button', { name: '添加自选品种' }));
+    const input = screen.getByLabelText('搜索可添加品种');
+
+    // 已在自选里的品种不出现（行上的「从自选移除」按钮不算候选）
+    expect(screen.queryByRole('button', { name: /^XAUUSD/ })).not.toBeInTheDocument();
+    // 按代码筛选，名称也能看到，方便确认
+    await user.type(input, 'gbp');
+    expect(screen.getByText('Pound vs US Dollar')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^GBPUSD/ }));
+
+    expect(useApp.getState().watchlist).toContain('GBPUSD');
+    expect(screen.queryByLabelText('搜索可添加品种')).not.toBeInTheDocument();
+  });
+
+  it('添加菜单没有匹配项时给出提示', async () => {
+    const user = userEvent.setup();
+    render(<WatchlistPanel />);
+
+    await user.click(screen.getByRole('button', { name: '添加自选品种' }));
+    await user.type(screen.getByLabelText('搜索可添加品种'), 'ZZZ');
+
+    expect(screen.getByText('没有匹配的品种')).toBeInTheDocument();
   });
 
   it('可以收起行情列', async () => {

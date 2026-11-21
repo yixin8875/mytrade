@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
-import { PanelLeftClose, Search, X } from 'lucide-react';
+import { PanelLeftClose, Plus, Search, X } from 'lucide-react';
 import { requestSymbol } from '../chart/tv/registry';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
@@ -21,9 +21,11 @@ export function WatchlistPanel() {
   const setWatchRows = useApp((s) => s.setWatchRows);
   const orders = useApp((s) => s.orders);
   const setWatchColumnOpen = useApp((s) => s.setWatchColumnOpen);
-  const [pick, setPick] = useState('');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [addOpen, setAddOpen] = useState(false);
+  const [addQuery, setAddQuery] = useState('');
+  const addInputRef = useRef<HTMLInputElement>(null);
 
   const save = (names: string[]) => {
     setWatchlist(names);
@@ -71,7 +73,30 @@ export function WatchlistPanel() {
     };
   }, [conn, watchlist, setWatchRows]);
 
-  const candidates = symbols.filter((item) => !watchlist.includes(item.name)).slice(0, 300);
+  // 添加菜单只列还没在自选里的品种，按代码/名称过滤，免得在几百个品种里翻下拉框
+  const candidates = useMemo(() => {
+    const needle = addQuery.trim().toUpperCase();
+    return symbols
+      .filter((item) => !watchlist.includes(item.name))
+      .filter(
+        (item) =>
+          !needle ||
+          item.name.toUpperCase().includes(needle) ||
+          item.description.toUpperCase().includes(needle),
+      )
+      .slice(0, 60);
+  }, [symbols, watchlist, addQuery]);
+
+  const openAdd = () => {
+    setAddOpen(true);
+    setAddQuery('');
+    window.setTimeout(() => addInputRef.current?.focus(), 0);
+  };
+
+  const addSymbol = (name: string) => {
+    save([...watchlist, name]);
+    setAddOpen(false);
+  };
 
   const orderSymbols = useMemo(() => new Set(orders.map((item) => item.symbol)), [orders]);
   const rowOf = (name: string) => rows.find((item) => item.symbol === name);
@@ -99,24 +124,66 @@ export function WatchlistPanel() {
           </span>
         </span>
         <div className="ml-auto flex items-center gap-1">
-          <select
-            value={pick}
-            onChange={(event) => {
-              const name = event.target.value;
-              setPick('');
-              if (name) save([...watchlist, name]);
-            }}
-            title="添加自选品种"
-            aria-label="添加自选品种"
-            className="h-6 w-[76px] rounded border border-tv-border bg-tv-raised px-1 text-[11px] text-tv-muted outline-none hover:text-tv-text focus:border-tv-accent"
-          >
-            <option value="">＋ 添加</option>
-            {candidates.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.name}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <button
+              onClick={() => (addOpen ? setAddOpen(false) : openAdd())}
+              title="添加自选品种"
+              aria-label="添加自选品种"
+              aria-expanded={addOpen}
+              className="flex h-6 items-center gap-1 rounded border border-tv-border bg-tv-raised px-1.5 text-[11px] text-tv-muted outline-none hover:text-tv-text focus:border-tv-accent"
+            >
+              <Plus size={12} strokeWidth={1.5} />
+              添加
+            </button>
+            {addOpen && (
+              <>
+                <button
+                  className="fixed inset-0 z-40 cursor-default"
+                  onClick={() => setAddOpen(false)}
+                  aria-label="关闭添加菜单"
+                  tabIndex={-1}
+                />
+                <div className="absolute right-0 top-7 z-50 w-[260px] overflow-hidden rounded-lg border border-tv-border bg-tv-panel shadow-[0_12px_32px_rgba(0,0,0,0.14)]">
+                  <div className="flex items-center gap-2 border-b border-tv-border px-2.5 py-1.5">
+                    <Search size={13} strokeWidth={1.5} className="text-tv-faint" />
+                    <input
+                      ref={addInputRef}
+                      value={addQuery}
+                      onChange={(event) => setAddQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') setAddOpen(false);
+                        if (event.key === 'Enter' && candidates[0]) addSymbol(candidates[0].name);
+                      }}
+                      placeholder="搜索品种 / 名称"
+                      aria-label="搜索可添加品种"
+                      className="h-6 min-w-0 flex-1 bg-transparent text-[12px] text-tv-text outline-none placeholder:text-tv-faint"
+                    />
+                  </div>
+                  <div className="max-h-64 overflow-y-auto py-1">
+                    {candidates.length === 0 && (
+                      <div className="px-3 py-4 text-center text-[12px] text-tv-muted">
+                        没有匹配的品种
+                      </div>
+                    )}
+                    {candidates.map((item) => (
+                      <button
+                        key={item.name}
+                        onClick={() => addSymbol(item.name)}
+                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-tv-hover"
+                      >
+                        <span className="w-[72px] shrink-0 text-[12px] font-medium text-tv-text">
+                          {item.name}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[11px] text-tv-muted">
+                          {item.description}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={() => setWatchColumnOpen(false)}
             title="收起行情列"
