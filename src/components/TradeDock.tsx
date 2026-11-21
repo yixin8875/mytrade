@@ -452,25 +452,37 @@ export function TradeDock() {
               <button
                 onClick={() => void flatten()}
                 disabled={!symbol}
+                title={
+                  symbol
+                    ? `平掉 ${symbol} 的全部持仓，并撤销该品种挂单`
+                    : '平掉当前品种的全部持仓，并撤销挂单'
+                }
                 className={clsx(
-                  'h-6 rounded px-2 text-[11px] transition-colors',
+                  'h-6 whitespace-nowrap rounded px-2 text-[11px] transition-colors',
                   confirmFlatten
                     ? 'bg-tv-down text-white'
                     : 'text-tv-down hover:bg-tv-down-soft',
                 )}
               >
-                {confirmFlatten ? '确认全清？' : '全清'}
+                {confirmFlatten
+                  ? symbol
+                    ? `确认平掉 ${symbol} 全部？`
+                    : '确认平掉当前品种全部？'
+                  : symbol
+                    ? `平掉 ${symbol} 全部`
+                    : '平掉当前品种全部'}
               </button>
               <button
                 onClick={() => void closeAll()}
+                title="平掉账户里所有品种的持仓"
                 className={clsx(
-                  'h-6 rounded px-2 text-[11px] transition-colors',
+                  'h-6 whitespace-nowrap rounded px-2 text-[11px] transition-colors',
                   confirmAll
                     ? 'bg-tv-down text-white'
                     : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
                 )}
               >
-                {confirmAll ? '确认全平？' : '全部平仓'}
+                {confirmAll ? '确认平掉所有品种？' : '平掉账户全部'}
               </button>
             </>
           )}
@@ -604,7 +616,7 @@ export function TradeDock() {
                               : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
                           )}
                         >
-                          {confirmHalf === position.ticket ? '确认？' : '平一半'}
+                          {confirmHalf === position.ticket ? '确认？' : '平掉一半'}
                         </button>
                         <button
                           onClick={() => void close(position.ticket)}

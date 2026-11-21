@@ -66,12 +66,27 @@ describe('TradeDock', () => {
 
     expect(screen.getByText('XAUUSD')).toBeInTheDocument();
     expect(screen.getByText('+12.50')).toBeInTheDocument();
-    expect(screen.getByText('平一半')).toBeInTheDocument();
+    expect(screen.getByText('平掉一半')).toBeInTheDocument();
 
     await user.click(screen.getByText('XAUUSD'));
 
     expect(screen.getByLabelText('XAUUSD 止损价')).toHaveValue('1990.00000');
     expect(screen.getByLabelText('XAUUSD 止盈价')).toHaveValue('2020.00000');
+  });
+
+  it('清仓按钮写清作用域，二次点击才确认', async () => {
+    const user = userEvent.setup();
+    render(<TradeDock />);
+
+    const flatten = screen.getByRole('button', { name: '平掉 XAUUSD 全部' });
+    const closeAll = screen.getByRole('button', { name: '平掉账户全部' });
+    expect(flatten).toHaveAttribute('title', '平掉 XAUUSD 的全部持仓，并撤销该品种挂单');
+
+    await user.click(flatten);
+    expect(screen.getByRole('button', { name: '确认平掉 XAUUSD 全部？' })).toBeInTheDocument();
+
+    await user.click(closeAll);
+    expect(screen.getByRole('button', { name: '确认平掉所有品种？' })).toBeInTheDocument();
   });
 
   it('收起后只留一条摘要，展开恢复原高度', async () => {

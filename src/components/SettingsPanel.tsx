@@ -1583,7 +1583,7 @@ function RiskSection() {
         </Row>
         <Row
           label="适用范围"
-          hint="「保本」「平一半」立即使用；分批档位的「移保本」在添加档位时记录，之后新增的档位使用新值。"
+          hint="「保本」「平掉一半」立即使用；分批档位的「移保本」在添加档位时记录，之后新增的档位使用新值。"
         >
           <span className="text-[12px] text-console-muted">多单加在开仓价上方，空单减在下方</span>
         </Row>

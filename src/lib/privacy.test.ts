@@ -1,10 +1,9 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { useApp } from '../store/useApp';
-import { MONEY_MASK, maskMoneyText, privacyMasked, setPrivacyMask, usePrivacyMask } from './privacy';
+import { MONEY_MASK, maskMoneyText, privacyMasked, usePrivacyMask } from './privacy';
 
 afterEach(() => {
-  setPrivacyMask(false);
   useApp.setState({ privacy: false, page: 'overview' });
 });
 
@@ -36,5 +35,14 @@ describe('隐私模式遮罩', () => {
 
     expect(result.current).toBe(false);
     expect(maskMoneyText('88.00')).toBe('88.00');
+  });
+
+  it('遮罩从 store 派生，不依赖页面先渲染', () => {
+    // 没有任何组件渲染过 usePrivacyMask，格式化函数也要立即读到最新状态
+    useApp.setState({ privacy: true, page: 'journal' });
+    expect(privacyMasked()).toBe(true);
+
+    useApp.setState({ page: 'trade' });
+    expect(privacyMasked()).toBe(false);
   });
 });

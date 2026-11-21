@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { useApp } from '../store/useApp';
 import { fmtMoney, fmtSigned } from './format';
-import { MONEY_MASK, maskMoneyText, privacyMasked, setPrivacyMask } from './privacy';
+import { MONEY_MASK, maskMoneyText, privacyMasked } from './privacy';
 import { cardHeadline, reviewCardFileName, wrapText, type ReviewCardData } from './reviewCard';
 
-afterEach(() => setPrivacyMask(false));
+const mask = (on: boolean) => useApp.setState({ privacy: on, page: 'overview' });
+
+afterEach(() => mask(false));
 
 describe('隐私模式', () => {
   it('默认不遮金额', () => {
@@ -13,7 +16,7 @@ describe('隐私模式', () => {
   });
 
   it('开启后金额与带符号数字都变成占位符', () => {
-    setPrivacyMask(true);
+    mask(true);
     expect(privacyMasked()).toBe(true);
     expect(fmtMoney(1234.5)).toBe(MONEY_MASK);
     expect(fmtSigned(20)).toBe(MONEY_MASK);
@@ -21,14 +24,14 @@ describe('隐私模式', () => {
   });
 
   it('空值仍然是 —，不因为遮金额变成占位符', () => {
-    setPrivacyMask(true);
+    mask(true);
     expect(fmtMoney(null)).toBe('—');
     expect(fmtSigned(undefined)).toBe('—');
   });
 
   it('关闭后恢复原样', () => {
-    setPrivacyMask(true);
-    setPrivacyMask(false);
+    mask(true);
+    mask(false);
     expect(fmtMoney(10)).toBe('10.00');
   });
 });
