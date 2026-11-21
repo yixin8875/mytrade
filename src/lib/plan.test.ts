@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GOLD_INFO } from '../replay/testUtils';
 import type { Position, PositionPlan, PositionPlanStep } from '../gateway/types';
 import {
+  MAX_PLAN_STEPS,
   estimateStepLots,
   nextStepPrice,
   planSummary,
@@ -52,6 +53,12 @@ function makePlan(steps: PositionPlanStep[], overrides: Partial<PositionPlan> = 
     ...overrides,
   };
 }
+
+describe('MAX_PLAN_STEPS', () => {
+  it('与模板阶段、网关共用 8 档上限', () => {
+    expect(MAX_PLAN_STEPS).toBe(8);
+  });
+});
 
 describe('nextStepPrice', () => {
   it('没有档位时放在 1R', () => {

@@ -1,7 +1,8 @@
 import type { RiskSettings, Side, TemplateStep, TradeTemplate } from '../gateway/types';
+import { MAX_STEP_COUNT, normalizeClosePercent } from './planStep';
 
-/** 模板最多带多少个阶段，与网关的清洗上限一致 */
-export const MAX_TEMPLATE_STEPS = 8;
+/** 模板最多带多少个阶段，与网关和持仓分批共用同一个上限 */
+export const MAX_TEMPLATE_STEPS = MAX_STEP_COUNT;
 
 /** 全新安装的默认模板：0.5% 风险 + 2R 止盈 + 1R 移到保本 */
 export const DEFAULT_TEMPLATE: TradeTemplate = {
@@ -50,9 +51,7 @@ export function normalizeTemplateSteps(raw: unknown): TemplateStep[] {
       const source = (item ?? {}) as Record<string, unknown>;
       const atR = Number(source.atR);
       if (!Number.isFinite(atR) || atR <= 0 || atR > 100) return null;
-      const close = source.closePercent == null ? null : Number(source.closePercent);
-      const closePercent =
-        close != null && Number.isFinite(close) && close > 0 && close < 100 ? close : null;
+      const closePercent = normalizeClosePercent(source.closePercent);
       return { atR, closePercent, moveBreakeven: source.moveBreakeven === true };
     })
     .filter((item): item is TemplateStep => item !== null)

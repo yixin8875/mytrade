@@ -5,14 +5,15 @@ import type {
   Side,
   SymbolInfo,
 } from '../gateway/types';
+import { MAX_STEP_COUNT, isValidPlanPercent } from './planStep';
 
 /**
  * 分批止盈的纯函数：默认价、校验、手数预估。
  * 不依赖图表和网关，服务端仍会再校验一遍。
  */
 
-/** UI 最多 4 档，避免图表挤满；服务端允许 8 档 */
-export const MAX_PLAN_STEPS = 4;
+/** 与模板阶段、服务端共用 8 档上限 */
+export const MAX_PLAN_STEPS = MAX_STEP_COUNT;
 
 export interface PlanStepInput {
   price: number;
@@ -125,7 +126,7 @@ export function validatePlanStep(
 ): string | null {
   if (!Number.isFinite(input.price) || input.price <= 0) return '触发价无效';
   const percent = input.closePercent;
-  if (percent == null || !Number.isFinite(percent) || percent < 1 || percent > 99) {
+  if (percent == null || !isValidPlanPercent(percent)) {
     return '平仓比例需在 1–99% 之间';
   }
   const side = planSide(position, plan);

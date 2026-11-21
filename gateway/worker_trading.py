@@ -5,7 +5,7 @@ import uuid
 from worker_base import *  # noqa: F401,F403
 from worker_base import _num  # noqa: F401
 
-# 服务端最多存 8 档；UI 只放 4 档，多余档位留给脚本/旧模板
+# 模板阶段、持仓分批与 UI 共用 8 档上限
 MAX_PLAN_STEPS = 8
 
 
