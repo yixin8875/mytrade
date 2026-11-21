@@ -921,7 +921,7 @@ function ChartSection() {
     <>
       <Card
         title="图表布局"
-        description="单图到 16 图都可选；多图时可让品种、周期、十字线和可视区间在所有图表间同步。"
+        description="单图到 6 图都可选；多图时可让品种、周期、十字线和可视区间在所有图表间同步。"
       >
         <div className="rounded-lg border border-console-line bg-console-canvas/60 p-3">
           <LayoutGallery value={layout} onChange={setLayout} />

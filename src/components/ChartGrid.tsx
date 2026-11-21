@@ -4,7 +4,7 @@ import { cellResolution, DEFAULT_FRAMES, layoutById } from '../chart/layouts';
 import { currentSlot, setActiveSlot, subscribeSymbolRequest } from '../chart/tv/registry';
 import { useApp } from '../store/useApp';
 
-/** 最多 16 格；不足的布局只使用前面的格子 */
+/** 最多 6 格；不足的布局只使用前面的格子 */
 const CELLS = DEFAULT_FRAMES.length;
 const FRAMES_KEY = 'mytrade.cellFrames';
 const LEGACY_FRAMES_KEY = 'mytrade.quadFrames';

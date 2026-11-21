@@ -494,7 +494,11 @@ function writeJson(key: string, value: unknown): void {
 }
 
 function loadLayout(): ChartLayout {
-  return normalizeLayoutId(readJson<unknown>(LAYOUT_KEY, '1'));
+  const raw = readJson<unknown>(LAYOUT_KEY, '1');
+  const next = normalizeLayoutId(raw);
+  // 已下线的多图布局迁移后写回，避免每次启动都重新归一化
+  if (next !== raw) writeJson(LAYOUT_KEY, next);
+  return next;
 }
 
 function loadTheme(): Theme {

@@ -94,56 +94,33 @@ export const LAYOUTS: LayoutPreset[] = [
   make('4t', '上大下三', [[0, 0, 0], [1, 2, 3]]),
   make('4b', '上三下大', [[0, 1, 2], [3, 3, 3]]),
 
-  make('5h', '五列', column(5)),
-  make('5v', '五行', stack(5)),
-  make('5l', '左大右四', [[0, 1, 2], [0, 3, 4]]),
-  make('5t', '上大下四', [[0, 0, 0, 0], [1, 2, 3, 4]]),
-  make('5b', '上四下大', [[0, 1, 2, 3], [4, 4, 4, 4]]),
-
   make('6', '3×2', [[0, 1, 2], [3, 4, 5]]),
   make('6v', '2×3', [[0, 1], [2, 3], [4, 5]]),
   make('6h', '六列', column(6)),
   make('6r', '六行', stack(6)),
   make('6l', '左大右五', [[0, 1, 2], [0, 3, 4], [0, 5, 5]]),
   make('6t', '上大下五', [[0, 0, 0, 0], [1, 2, 3, 4], [5, 5, 5, 5]]),
-
-  make('7h', '七列', column(7)),
-  make('7v', '七行', stack(7)),
-  make('7l', '左大右六', [[0, 1, 2, 3], [0, 4, 5, 6]]),
-
-  make('8', '4×2', [[0, 1, 2, 3], [4, 5, 6, 7]]),
-  make('8v', '2×4', [[0, 1], [2, 3], [4, 5], [6, 7]]),
-  make('8h', '八列', column(8)),
-  make('8r', '八行', stack(8)),
-
-  make('9', '3×3', [[0, 1, 2], [3, 4, 5], [6, 7, 8]]),
-  make('9h', '九列', column(9)),
-  make('9v', '九行', stack(9)),
-
-  make('10', '5×2', [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]),
-  make('10h', '十列', column(10)),
-  make('10v', '十行', stack(10)),
-
-  make('12', '4×3', [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]]),
-  make('12v', '2×6', [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]]),
-  make('12h', '十二列', column(12)),
-
-  make('14', '7×2', [[0, 1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12, 13]]),
-  make('14v', '2×7', [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12, 13]]),
-  make('14h', '十四列', column(14)),
-
-  make('16', '4×4', [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]]),
-  make('16v', '8×2', [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12, 13], [14, 15]]),
-  make('16h', '十六列', column(16)),
 ];
 
 const BY_ID = new Map(LAYOUTS.map((preset) => [preset.id, preset]));
 
-/** 旧版本只存 single / quad 两个值 */
+/**
+ * 旧版本只存 single / quad；更早的多图布局（5–16 图）已下线，
+ * 按格子数量迁移到形状最接近的 4 图或 6 图，找不到同形状变体就退回基础布局。
+ */
 export function normalizeLayoutId(value: unknown): string {
   if (value === 'single') return '1';
   if (value === 'quad') return '4';
-  return typeof value === 'string' && BY_ID.has(value) ? value : '1';
+  if (typeof value !== 'string') return '1';
+  if (BY_ID.has(value)) return value;
+
+  const match = /^(\d+)([a-z]*)$/.exec(value);
+  if (!match) return '1';
+  const count = Number(match[1]);
+  const suffix = match[2];
+  const target = count <= 5 ? '4' : '6';
+  if (BY_ID.has(`${target}${suffix}`)) return `${target}${suffix}`;
+  return BY_ID.has(target) ? target : '1';
 }
 
 export function layoutById(id: string): LayoutPreset {
@@ -176,21 +153,4 @@ export function cellResolution(
 }
 
 /** 单元格数组固定长度的默认周期，超出布局数量的部分留着备用 */
-export const DEFAULT_FRAMES = [
-  '5',
-  '15',
-  '60',
-  '240',
-  '1',
-  '30',
-  '120',
-  '1D',
-  '1W',
-  '4',
-  '12',
-  '2',
-  '3',
-  '6',
-  '10',
-  '20',
-];
+export const DEFAULT_FRAMES = ['5', '15', '60', '240', '1', '30'];

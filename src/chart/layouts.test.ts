@@ -60,14 +60,23 @@ describe('normalizeLayoutId', () => {
 
   it('合法 id 原样返回，其余回退到单图', () => {
     expect(normalizeLayoutId('2h')).toBe('2h');
-    expect(normalizeLayoutId('16h')).toBe('16h');
+    expect(normalizeLayoutId('6h')).toBe('6h');
     expect(normalizeLayoutId('unknown')).toBe('1');
     expect(normalizeLayoutId(null)).toBe('1');
     expect(normalizeLayoutId(4)).toBe('1');
   });
 
+  it('已下线的 5–16 图布局迁移到形状最接近的 4/6 图', () => {
+    expect(normalizeLayoutId('5l')).toBe('4l');
+    expect(normalizeLayoutId('8')).toBe('6');
+    expect(normalizeLayoutId('8r')).toBe('6r');
+    expect(normalizeLayoutId('16v')).toBe('6v');
+    expect(normalizeLayoutId('12x')).toBe('6');
+  });
+
   it('isLayoutId 只认预设 id', () => {
     expect(isLayoutId('3l')).toBe(true);
+    expect(isLayoutId('8h')).toBe(false);
     expect(isLayoutId('single')).toBe(false);
     expect(isLayoutId(undefined)).toBe(false);
   });

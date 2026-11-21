@@ -9,7 +9,7 @@ const COMMON_LABELS = [
   '2 图 左右两图',
   '4 图 2×2',
   '6 图 3×2',
-  '8 图 4×2',
+  '6 图 六列',
 ];
 
 describe('LayoutGallery', () => {
@@ -29,7 +29,7 @@ describe('LayoutGallery', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '更多布局' }));
     expect(screen.getByRole('button', { name: '3 图 三列' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '12 图 4×3' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '6 图 六行' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '收起更多布局' })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: '收起更多布局' }));

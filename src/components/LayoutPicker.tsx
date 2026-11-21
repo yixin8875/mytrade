@@ -32,8 +32,8 @@ export function LayoutIcon({
   );
 }
 
-/** 常用布局：覆盖单图到八图最常见的排法，其余收进「更多」 */
-const COMMON_LAYOUTS = ['1', '2v', '2h', '4', '6', '8'];
+/** 常用布局：覆盖单图到六图最常见的排法，其余收进「更多」 */
+const COMMON_LAYOUTS = ['1', '2v', '2h', '4', '6', '6h'];
 
 /** 按图表数量分行列出布局：默认只显示常用 6 个，展开后看全部 */
 export function LayoutGallery({
