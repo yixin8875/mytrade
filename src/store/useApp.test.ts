@@ -145,7 +145,7 @@ describe('setPage', () => {
 
     useApp.getState().setPage('trends');
     expect(useApp.getState().page).toBe('insights');
-    expect(useApp.getState().insightsTab).toBe('trends');
+    expect(useApp.getState().insightsTab).toBe('review');
     expect(window.location.hash).toBe('#/insights');
   });
 
@@ -506,13 +506,13 @@ describe('容器页与设置返回', () => {
   it('页签 setter 只改页签，不动当前页面', () => {
     useApp.getState().setPage('overview');
     useApp.getState().setRecordsTab('calendar');
-    useApp.getState().setInsightsTab('executions');
+    useApp.getState().setInsightsTab('review');
     useApp.getState().setDisciplineTab('routines');
 
     const state = useApp.getState();
     expect(state.page).toBe('overview');
     expect(state.recordsTab).toBe('calendar');
-    expect(state.insightsTab).toBe('executions');
+    expect(state.insightsTab).toBe('review');
     expect(state.disciplineTab).toBe('routines');
   });
 

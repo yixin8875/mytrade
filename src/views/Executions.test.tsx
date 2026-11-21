@@ -5,7 +5,7 @@ import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { GOLD_INFO } from '../replay/testUtils';
 import type { ExecutionStats } from '../gateway/types';
-import { ExecutionsView } from './Executions';
+import { ExecutionsSection } from './Executions';
 
 /** 合成执行统计：时间为 2026-11-15，金额/点差为合成数字 */
 const STATS: ExecutionStats = {
@@ -100,30 +100,25 @@ beforeEach(() => {
   resetStore();
 });
 
-describe('ExecutionsView', () => {
-  it('切换区间会按天数重新请求；选「全部」时 days 为 0', async () => {
+describe('ExecutionsSection', () => {
+  it('按外层传入的区间请求，区间变化时重新请求', async () => {
     const call = mockStats();
-    render(<ExecutionsView />);
+    const { rerender } = render(<ExecutionsSection days={30} />);
 
     await waitFor(() => {
       expect(call).toHaveBeenCalledWith('executions.stats', { days: 30 });
     });
     call.mockClear();
 
-    await userEvent.click(screen.getByRole('button', { name: '7 天' }));
+    rerender(<ExecutionsSection days={7} />);
     await waitFor(() => {
       expect(call).toHaveBeenCalledWith('executions.stats', { days: 7 });
-    });
-
-    await userEvent.click(screen.getByRole('button', { name: '全部' }));
-    await waitFor(() => {
-      expect(call).toHaveBeenCalledWith('executions.stats', { days: 0 });
     });
   });
 
   it('点击品种行把品种和区间带进交易日志', async () => {
     mockStats();
-    render(<ExecutionsView />);
+    render(<ExecutionsSection days={30} />);
 
     const row = await screen.findByTitle('在交易日志中查看 XAUUSD');
     await userEvent.click(row);
@@ -136,7 +131,7 @@ describe('ExecutionsView', () => {
 
   it('最近请求表展示成交状态与延迟', async () => {
     mockStats();
-    render(<ExecutionsView />);
+    render(<ExecutionsSection days={30} />);
 
     expect(await screen.findByText('市价')).toBeInTheDocument();
     expect(screen.getByText('成交')).toBeInTheDocument();

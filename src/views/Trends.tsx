@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { clsx } from 'clsx';
-import { RefreshCw } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { fmtR } from '../lib/review';
 import { fmtSigned, signedClass } from '../lib/format';
-import { usePrivacyMask } from '../lib/privacy';
 import {
   ROLLING_WINDOW,
   durationScale,
@@ -18,34 +16,17 @@ import { useApp } from '../store/useApp';
 import { useTradeReplay } from '../replay/useTradeReplay';
 import type { JournalRecord, TrendSeries, TrendTrade } from '../gateway/types';
 
-const RANGES = [90, 180, 365];
-
 /** 绩效趋势与交易散点：20 笔滚动胜率 / 期望，以及持仓时长 × R 的分布 */
-export function TrendsView() {
+export function TrendsSection({
+  series,
+  loading,
+  days,
+}: {
+  series: TrendSeries | null;
+  loading: boolean;
+  days: number;
+}) {
   const activeLogin = useApp((s) => s.account?.login ?? 0);
-  usePrivacyMask();
-
-  const [days, setDays] = useState(180);
-  const [series, setSeries] = useState<TrendSeries | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await gateway.call<TrendSeries>('review.trades', { days });
-      setSeries(data);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [days]);
-
-  useEffect(() => {
-    void load();
-  }, [load, activeLogin]);
 
   const trades = useMemo(() => series?.trades ?? [], [series]);
   const rTrades = useMemo(() => trades.filter((trade) => trade.r != null), [trades]);
@@ -69,46 +50,18 @@ export function TrendsView() {
   const scatterNotice = sampleNotice(scatter.length, 'scatter');
 
   return (
-    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
-      <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-[24px] font-medium tracking-[-0.01em]">绩效趋势</h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">
-              最近 {days} 天 · {trades.length} 笔 · 其中 {rTrades.length} 笔有止损可折算 R
-              {activeLogin ? ` · 账户 ${activeLogin}` : ''}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              {RANGES.map((value) => (
-                <button
-                  key={value}
-                  onClick={() => setDays(value)}
-                  className={clsx('console-chip', days === value && 'console-chip-active')}
-                >
-                  {value} 天
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => void load()}
-              disabled={loading}
-              className="console-btn console-btn-secondary"
-            >
-              <RefreshCw size={14} strokeWidth={1.5} className={clsx(loading && 'animate-spin')} />
-              {loading ? '读取中…' : '刷新'}
-            </button>
-          </div>
-        </header>
+    <section className="mt-8">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="text-[16px] font-medium tracking-[-0.01em]">绩效趋势</h2>
+          <p className="mt-1.5 text-[13px] text-console-muted">
+            最近 {days} 天 · {trades.length} 笔 · 其中 {rTrades.length} 笔有止损可折算 R
+            {activeLogin ? ` · 账户 ${activeLogin}` : ''}
+          </p>
+        </div>
+      </header>
 
-        {error && (
-          <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
-            读取失败：{error}
-          </div>
-        )}
-
-        <section className="mt-6 grid gap-4 lg:grid-cols-3">
+      <div className="mt-6 grid gap-4 lg:grid-cols-3">
           <RollCard
             title="滚动胜率"
             hint={`最近 ${ROLLING_WINDOW} 笔`}
@@ -137,16 +90,15 @@ export function TrendsView() {
             loading={loading}
             tone="signed"
           />
-        </section>
-
-        <ScatterCard trades={trades} points={scatter} notice={scatterNotice} loading={loading} />
-
-        <p className="mt-4 text-[11px] leading-relaxed text-console-faint">
-          滚动窗口按平仓时间排序；胜率以盈亏 ±0.005 为分界，期望是窗口内平均每笔盈亏。
-          R 只用带止损的交易折算，没有止损的交易不参与 R 曲线与散点。
-        </p>
       </div>
-    </div>
+
+      <ScatterCard trades={trades} points={scatter} notice={scatterNotice} loading={loading} />
+
+      <p className="mt-4 text-[11px] leading-relaxed text-console-faint">
+        滚动窗口按平仓时间排序；胜率以盈亏 ±0.005 为分界，期望是窗口内平均每笔盈亏。
+        R 只用带止损的交易折算，没有止损的交易不参与 R 曲线与散点。
+      </p>
+    </section>
   );
 }
 

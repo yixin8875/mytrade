@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { clsx } from 'clsx';
-import { ShieldCheck } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { RangeChips } from '../components/RangeChips';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtSigned, signedClass } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
 import { fmtLocalDay } from '../lib/time';
+import { ExecutionsSection } from './Executions';
 import type {
   JournalBreakdown,
   JournalExecutionCross,
@@ -41,8 +41,32 @@ function fmtPoints(value: number | null | undefined): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)} 点`;
 }
 
-/** 统计报表页：区间汇总、盈亏 / R 曲线、模板执行与分组表现 */
-export function ReportsView() {
+/** 报表页签：统计报表与执行质量共用一套区间 */
+export function ReportsTab() {
+  const [days, setDays] = useState(30);
+
+  return (
+    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
+      <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-[24px] font-medium tracking-[-0.01em]">报表</h1>
+            <p className="mt-1.5 text-[13px] text-console-muted">
+              统计报表与执行质量共用同一区间
+            </p>
+          </div>
+          <RangeChips value={days} onChange={setDays} />
+        </header>
+
+        <ReportsSection days={days} />
+        <ExecutionsSection days={days} />
+      </div>
+    </div>
+  );
+}
+
+/** 统计报表：区间汇总、盈亏 / R 曲线、模板执行与分组表现 */
+export function ReportsSection({ days }: { days: number }) {
   const setPage = useApp((s) => s.setPage);
   const setJournalFilter = useApp((s) => s.setJournalFilter);
   const setJournalDays = useApp((s) => s.setJournalDays);
@@ -50,7 +74,6 @@ export function ReportsView() {
   const serverOffset = useApp((s) => s.health?.serverOffset ?? 0);
   usePrivacyMask();
 
-  const [days, setDays] = useState(30);
   const [mode, setMode] = useState<CurveMode>('pnl');
   const [stats, setStats] = useState<JournalStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -109,34 +132,26 @@ export function ReportsView() {
     : '—';
 
   return (
-    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
-      <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-[24px] font-medium tracking-[-0.01em]">统计报表</h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">
-              以已平仓交易为准，按区间汇总胜率、盈亏、R 与模板执行
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <RangeChips value={days} onChange={setDays} />
-            <button
-              onClick={() => setPage('executions')}
-              className="console-btn console-btn-secondary"
-            >
-              <ShieldCheck size={14} strokeWidth={1.5} />
-              执行质量
-            </button>
-          </div>
-        </header>
+    <section className="mt-8">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="text-[16px] font-medium tracking-[-0.01em]">统计报表</h2>
+          <p className="mt-1.5 text-[13px] text-console-muted">
+            以已平仓交易为准，按区间汇总胜率、盈亏、R 与模板执行
+          </p>
+        </div>
+        <span className="text-[12px] text-console-faint">
+          {days > 0 ? `最近 ${days} 天` : '全部历史'}
+        </span>
+      </header>
 
-        {error && (
-          <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
-            读取统计失败：{error}
-          </div>
-        )}
+      {error && (
+        <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
+          读取统计失败：{error}
+        </div>
+      )}
 
-        <div className="readout mt-6 grid-cols-2 lg:grid-cols-4">
+      <div className="readout mt-6 grid-cols-2 lg:grid-cols-4">
           <Metric
             label="净盈亏"
             value={summary ? fmtSigned(summary.netPnl) : '—'}
@@ -329,12 +344,6 @@ export function ReportsView() {
               />
               <InfoRow label="风险来源" value={sourceText} />
             </div>
-            <button
-              onClick={() => setPage('executions')}
-              className="m-3 flex items-center justify-center gap-1.5 rounded-lg border border-console-line bg-console-card py-2 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
-            >
-              查看执行质量（点差 / 滑点 / 延迟）
-            </button>
           </section>
         </div>
 
@@ -360,14 +369,13 @@ export function ReportsView() {
           <BreakdownCard title="按持仓时长" rows={stats?.byDuration ?? []} loading={loading} />
         </div>
 
-        <p className="mt-4 text-[11px] text-console-faint">
-          统计区间按平仓时间、以复盘时区的自然日计算；时段按平仓时间换算到同一时区后的整点归桶。
-          未标记策略的交易归入「未标记」。R 用初始止损距离折算：
-          优先取成交订单的止损，其次持仓期记录的止损，最后用下单意图里的止损；
-          三者都没有的交易不计入 R 与模板执行统计。
-        </p>
-      </div>
-    </div>
+      <p className="mt-4 text-[11px] text-console-faint">
+        统计区间按平仓时间、以复盘时区的自然日计算；时段按平仓时间换算到同一时区后的整点归桶。
+        未标记策略的交易归入「未标记」。R 用初始止损距离折算：
+        优先取成交订单的止损，其次持仓期记录的止损，最后用下单意图里的止损；
+        三者都没有的交易不计入 R 与模板执行统计。
+      </p>
+    </section>
   );
 }
 

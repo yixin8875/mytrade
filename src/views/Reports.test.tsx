@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import type { JournalStats } from '../gateway/types';
-import { ReportsView } from './Reports';
+import { ReportsTab } from './Reports';
 
 /** 合成统计：时间为 2026-11-15 附近，金额为合成数字 */
 function makeStats(overrides: Partial<JournalStats> = {}): JournalStats {
@@ -145,6 +145,7 @@ const EMPTY_STATS = makeStats({
 function mockStats(stats: JournalStats) {
   return vi.spyOn(gateway, 'call').mockImplementation((async (method: string) => {
     if (method === 'journal.stats') return stats;
+    if (method === 'executions.stats') return null;
     throw new Error(`未预置的方法：${method}`);
   }) as typeof gateway.call);
 }
@@ -152,6 +153,7 @@ function mockStats(stats: JournalStats) {
 function resetStore() {
   useApp.setState({
     page: 'overview',
+    conn: 'open',
     recordsTab: 'list',
     insightsTab: 'reports',
     privacy: false,
@@ -171,7 +173,7 @@ beforeEach(() => {
 describe('ReportsView', () => {
   it('点击「按品种」某一行，把品种、当前区间和容器页签写进 store', async () => {
     const call = mockStats(makeStats());
-    render(<ReportsView />);
+    render(<ReportsTab />);
 
     const row = await screen.findByTitle('在交易日志中查看 XAUUSD');
     await userEvent.click(row);
@@ -185,7 +187,7 @@ describe('ReportsView', () => {
 
   it('点击「按策略标签」某一行，把标签写进 journalFilter.tag', async () => {
     mockStats(makeStats());
-    render(<ReportsView />);
+    render(<ReportsTab />);
 
     const row = await screen.findByTitle('在交易日志中查看 突破');
     await userEvent.click(row);
@@ -196,12 +198,13 @@ describe('ReportsView', () => {
     expect(useApp.getState().recordsTab).toBe('list');
   });
 
-  it('切换区间按钮会请求对应天数的统计', async () => {
+  it('切换区间按钮会按同一区间请求统计与执行质量', async () => {
     const call = mockStats(makeStats());
-    render(<ReportsView />);
+    render(<ReportsTab />);
 
     await waitFor(() => {
       expect(call).toHaveBeenCalledWith('journal.stats', { days: 30 });
+      expect(call).toHaveBeenCalledWith('executions.stats', { days: 30 });
     });
     call.mockClear();
 
@@ -209,12 +212,13 @@ describe('ReportsView', () => {
 
     await waitFor(() => {
       expect(call).toHaveBeenCalledWith('journal.stats', { days: 7 });
+      expect(call).toHaveBeenCalledWith('executions.stats', { days: 7 });
     });
   });
 
   it('没有交易时显示曲线与分组的空态', async () => {
     mockStats(EMPTY_STATS);
-    render(<ReportsView />);
+    render(<ReportsTab />);
 
     expect(await screen.findByText('这段时间还没有已平仓交易')).toBeInTheDocument();
     expect(screen.getAllByText('暂无数据')).toHaveLength(4);

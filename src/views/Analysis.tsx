@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { clsx } from 'clsx';
-import { FilterX, RefreshCw, SlidersHorizontal } from 'lucide-react';
-import { gateway } from '../gateway/client';
+import { FilterX, SlidersHorizontal } from 'lucide-react';
 import { fmtPct, fmtR, sampleHint } from '../lib/review';
 import { fmtSigned, signedClass } from '../lib/format';
-import { usePrivacyMask } from '../lib/privacy';
 import {
   CROSS_METRICS,
   DURATION_BUCKETS,
@@ -27,8 +25,6 @@ import {
 import { useApp } from '../store/useApp';
 import type { Side, TrendSeries } from '../gateway/types';
 
-const RANGES = [90, 180, 365];
-
 const DIMENSIONS: { key: string; label: string }[] = [
   { key: 'symbol', label: '品种' },
   { key: 'side', label: '方向' },
@@ -39,37 +35,23 @@ const DIMENSIONS: { key: string; label: string }[] = [
 ];
 
 /** 深度筛选与交叉分析：先筛交易，再按维度看汇总和二维矩阵 */
-export function AnalysisView() {
+export function AnalysisSection({
+  series,
+  loading,
+  days,
+}: {
+  series: TrendSeries | null;
+  loading: boolean;
+  days: number;
+}) {
   const activeLogin = useApp((s) => s.account?.login ?? 0);
   const serverOffset = useApp((s) => s.health?.serverOffset ?? 0);
-  usePrivacyMask();
 
-  const [days, setDays] = useState(180);
-  const [series, setSeries] = useState<TrendSeries | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>({ ...EMPTY_FILTERS });
   const [dimension, setDimension] = useState('symbol');
   const [rowDim, setRowDim] = useState('symbol');
   const [colDim, setColDim] = useState('hour');
   const [metric, setMetric] = useState<CrossMetric>('net');
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await gateway.call<TrendSeries>('review.trades', { days });
-      setSeries(data);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [days]);
-
-  useEffect(() => {
-    void load();
-  }, [load, activeLogin]);
 
   const ctx: FilterCtx = useMemo(
     () => ({
@@ -113,46 +95,18 @@ export function AnalysisView() {
   };
 
   return (
-    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
-      <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-[24px] font-medium tracking-[-0.01em]">深度分析</h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">
-              先筛出想看的交易，再按品种、时段、星期等维度拆开对比
-              {activeLogin ? ` · 账户 ${activeLogin}` : ''}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              {RANGES.map((value) => (
-                <button
-                  key={value}
-                  onClick={() => setDays(value)}
-                  className={clsx('console-chip', days === value && 'console-chip-active')}
-                >
-                  {value} 天
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => void load()}
-              disabled={loading}
-              className="console-btn console-btn-secondary"
-            >
-              <RefreshCw size={14} strokeWidth={1.5} className={clsx(loading && 'animate-spin')} />
-              {loading ? '读取中…' : '刷新'}
-            </button>
-          </div>
-        </header>
+    <section className="mt-8">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="text-[16px] font-medium tracking-[-0.01em]">深度分析</h2>
+          <p className="mt-1.5 text-[13px] text-console-muted">
+            最近 {days} 天 · 先筛出想看的交易，再按品种、时段、星期等维度拆开对比
+            {activeLogin ? ` · 账户 ${activeLogin}` : ''}
+          </p>
+        </div>
+      </header>
 
-        {error && (
-          <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
-            读取失败：{error}
-          </div>
-        )}
-
-        <section className="console-card mt-6 p-4">
+      <section className="console-card mt-6 p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-[13px] font-medium">
               <SlidersHorizontal size={14} strokeWidth={1.6} />
@@ -329,12 +283,11 @@ export function AnalysisView() {
           </div>
         </section>
 
-        <p className="mt-4 text-[11px] leading-relaxed text-console-faint">
-          所有筛选与分组都只作用于当前区间的平仓记录；格子里的数字是所选指标，括号内是笔数。
-          少于 3 笔的格子会淡显，避免把噪声当结论。
-        </p>
-      </div>
-    </div>
+      <p className="mt-4 text-[11px] leading-relaxed text-console-faint">
+        所有筛选与分组都只作用于当前区间的平仓记录；格子里的数字是所选指标，括号内是笔数。
+        少于 3 笔的格子会淡显，避免把噪声当结论。
+      </p>
+    </section>
   );
 }
 

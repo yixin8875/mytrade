@@ -96,23 +96,24 @@ describe('RecordsView', () => {
 describe('InsightsView', () => {
   beforeEach(resetApp);
 
-  it('默认挂载统计报表，点绩效趋势切换页签', async () => {
-    mockGateway();
+  it('默认挂载报表，切到复盘后两个页签都保留且只取一次 review.trades', async () => {
+    const call = mockGateway();
     const user = userEvent.setup();
     render(<InsightsView />);
 
     expect(useApp.getState().insightsTab).toBe('reports');
-    expect(screen.getByRole('tab', { name: '统计报表' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    expect(screen.getByRole('tab', { name: '报表' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('heading', { name: '统计报表' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('tab', { name: '绩效趋势' }));
+    await user.click(screen.getByRole('tab', { name: '复盘' }));
 
-    expect(useApp.getState().insightsTab).toBe('trends');
+    expect(useApp.getState().insightsTab).toBe('review');
     expect(screen.getByRole('heading', { name: '绩效趋势' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '深度分析' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '统计报表' })).toBeInTheDocument();
+
+    const reviews = call.mock.calls.filter(([method]) => method === 'review.trades');
+    expect(reviews).toHaveLength(1);
   });
 });
 

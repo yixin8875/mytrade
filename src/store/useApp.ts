@@ -78,7 +78,7 @@ export const PAGES: Page[] = [
 ];
 
 export type RecordsTab = 'list' | 'calendar';
-export type InsightsTab = 'reports' | 'trends' | 'deep' | 'executions';
+export type InsightsTab = 'reports' | 'review';
 export type DisciplineTab = 'strategy' | 'routines' | 'missed';
 
 interface LegacyRoute {
@@ -93,9 +93,9 @@ export const LEGACY_PAGES: Record<string, LegacyRoute> = {
   journal: { page: 'records', recordsTab: 'list' },
   diary: { page: 'records', recordsTab: 'calendar' },
   reports: { page: 'insights', insightsTab: 'reports' },
-  trends: { page: 'insights', insightsTab: 'trends' },
-  analysis: { page: 'insights', insightsTab: 'deep' },
-  executions: { page: 'insights', insightsTab: 'executions' },
+  executions: { page: 'insights', insightsTab: 'reports' },
+  trends: { page: 'insights', insightsTab: 'review' },
+  analysis: { page: 'insights', insightsTab: 'review' },
   strategy: { page: 'discipline', disciplineTab: 'strategy' },
   routines: { page: 'discipline', disciplineTab: 'routines' },
   missed: { page: 'discipline', disciplineTab: 'missed' },

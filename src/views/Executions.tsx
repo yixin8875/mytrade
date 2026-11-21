@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { gateway } from '../gateway/client';
-import { RangeChips } from '../components/RangeChips';
 import { useApp } from '../store/useApp';
 import { fmtPrice, fmtVolume } from '../lib/format';
 import type { ExecutionRow, ExecutionStats } from '../gateway/types';
@@ -28,8 +27,8 @@ function fmtNumber(value: number | null | undefined, digits = 1, suffix = ''): s
   return value == null || !Number.isFinite(value) ? '—' : `${value.toFixed(digits)}${suffix}`;
 }
 
-/** 执行质量页：点差、滑点、成交延迟与拒单原因 */
-export function ExecutionsView() {
+/** 执行质量：点差、滑点、成交延迟与拒单原因，区间由报表页统一提供 */
+export function ExecutionsSection({ days }: { days: number }) {
   const conn = useApp((s) => s.conn);
   const symbolList = useApp((s) => s.symbols);
   const activeLogin = useApp((s) => s.account?.login ?? 0);
@@ -37,7 +36,6 @@ export function ExecutionsView() {
   const setJournalFilter = useApp((s) => s.setJournalFilter);
   const setJournalDays = useApp((s) => s.setJournalDays);
 
-  const [days, setDays] = useState(30);
   const [stats, setStats] = useState<ExecutionStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,23 +67,19 @@ export function ExecutionsView() {
     symbolList.find((item) => item.name === symbol)?.digits ?? 5;
 
   return (
-    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
-      <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-[24px] font-medium tracking-[-0.01em]">执行质量</h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">
-              只统计实际发往 MT5 的下单请求
-              {activeLogin ? ` · 当前账户 ${activeLogin}` : ''}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {loading && <span className="text-[12px] text-console-faint">读取中…</span>}
-            <RangeChips value={days} onChange={setDays} />
-          </div>
-        </header>
+    <section className="mt-8">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="text-[16px] font-medium tracking-[-0.01em]">执行质量</h2>
+          <p className="mt-1.5 text-[13px] text-console-muted">
+            只统计实际发往 MT5 的下单请求
+            {activeLogin ? ` · 当前账户 ${activeLogin}` : ''}
+          </p>
+        </div>
+        {loading && <span className="text-[12px] text-console-faint">读取中…</span>}
+      </header>
 
-        {error && (
+      {error && (
           <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
             读取执行质量失败：{error}
           </div>
@@ -338,12 +332,11 @@ export function ExecutionsView() {
           </div>
         </section>
 
-        <p className="mt-4 text-[11px] leading-relaxed text-console-faint">
-          滑点 = 市价成交价相对下单瞬间报价的偏移，正数表示对你不利；延迟是网关发出 order_send
-          到拿到券商回执的时间，不含前端和网络往返。
-        </p>
-      </div>
-    </div>
+      <p className="mt-4 text-[11px] leading-relaxed text-console-faint">
+        滑点 = 市价成交价相对下单瞬间报价的偏移，正数表示对你不利；延迟是网关发出 order_send
+        到拿到券商回执的时间，不含前端和网络往返。
+      </p>
+    </section>
   );
 }
 
