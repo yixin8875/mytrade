@@ -25,6 +25,7 @@ const QUOTE: Quote = {
 function draft(overrides: Partial<DraftOrder> = {}): DraftOrder {
   return {
     active: false,
+    symbol: '',
     side: 'buy',
     type: 'limit',
     price: 0,
@@ -64,7 +65,7 @@ function resetStore(): void {
     theme: 'light',
     breakevenOffset: 0,
     layout: '1',
-    layoutSync: { symbol: false, interval: false, crosshair: true, time: false, dateRange: false },
+    layoutSync: { symbol: false, interval: false, crosshair: true, time: false },
     accentColor: DEFAULT_ACCENT,
     alertSound: true,
     alertDesktop: false,
@@ -257,6 +258,19 @@ describe('下单模板', () => {
   });
 });
 
+describe('patchDraft', () => {
+  it('激活草稿时记住当前品种，之后拖动止损不会丢', () => {
+    useApp.getState().patchDraft({ active: true, type: 'market' });
+    expect(useApp.getState().draft.symbol).toBe('XAUUSD');
+
+    useApp.getState().patchDraft({ sl: 3900 });
+    expect(useApp.getState().draft.symbol).toBe('XAUUSD');
+
+    useApp.getState().resetDraft();
+    expect(useApp.getState().draft.symbol).toBe('');
+  });
+});
+
 describe('setSymbol', () => {
   it('切换品种会清空报价、止盈止损和已启用的模板', () => {
     useApp.setState({
@@ -336,7 +350,6 @@ describe('设置项', () => {
       interval: false,
       crosshair: false,
       time: false,
-      dateRange: false,
     });
   });
 });
@@ -427,7 +440,7 @@ describe('handleGlobalShortcut', () => {
 
     handleGlobalShortcut(new KeyboardEvent('keydown', { key: 'b' }));
     expect(useApp.getState().draft).toEqual(
-      draft({ active: true, side: 'buy', type: 'market', price: 3980.2 }),
+      draft({ active: true, symbol: 'XAUUSD', side: 'buy', type: 'market', price: 3980.2 }),
     );
     expect(useApp.getState().toast).toMatchObject({ kind: 'info' });
     useApp.getState().clearToast();
@@ -435,7 +448,7 @@ describe('handleGlobalShortcut', () => {
     useApp.getState().resetDraft();
     handleGlobalShortcut(new KeyboardEvent('keydown', { key: 'S' }));
     expect(useApp.getState().draft).toEqual(
-      draft({ active: true, side: 'sell', type: 'market', price: 3980 }),
+      draft({ active: true, symbol: 'XAUUSD', side: 'sell', type: 'market', price: 3980 }),
     );
     useApp.getState().clearToast();
   });

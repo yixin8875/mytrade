@@ -1016,14 +1016,14 @@ function TemplateSection() {
 
       <Card
         title={`编辑「${template.name}」`}
-        description="风险按余额百分比算手数；止盈按 R 倍数放置；阶段在浮盈到达对应 R 时依次执行。"
+        description="风险按账户净值百分比算手数；止盈按 R 倍数放置；阶段在浮盈到达对应 R 时依次执行。"
       >
         <TemplateEditor templateId={template.id} />
       </Card>
 
       <Card title="模板怎么执行" description="点「启用」后带入这一单；成交后的阶段由网关管理。">
         <ul className="space-y-2 text-[12px] leading-relaxed text-console-muted">
-          <li>· 风险改为余额百分比，并打开自动手数；设好止损后手数自动算。</li>
+          <li>· 风险改为净值百分比，并打开自动手数；设好止损后手数自动算。</li>
           <li>
             · 已有委托价时保留限价/停损，否则准备市价草稿；图纸上拖出止损后，止盈按 R 倍数自动放置。
           </li>

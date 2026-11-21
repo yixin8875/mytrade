@@ -37,7 +37,6 @@ describe('useApp 启动读取 localStorage', () => {
       interval: false,
       crosshair: true,
       time: false,
-      dateRange: false,
     });
     expect(state.alertSound).toBe(true);
     expect(state.alertDesktop).toBe(false);
@@ -47,6 +46,18 @@ describe('useApp 启动读取 localStorage', () => {
     expect(state.watchlist).toEqual([]);
     expect(state.resolution).toBe('5');
     expect(state.risk).toEqual({ mode: 'percent', value: 1, auto: true });
+  });
+
+  it('旧的「日期范围」同步开关迁移到「时间」', async () => {
+    window.localStorage.setItem(
+      'mytrade.layoutSync',
+      JSON.stringify({ dateRange: true, time: false }),
+    );
+
+    const state = await boot();
+
+    expect(state.layoutSync.time).toBe(true);
+    expect('dateRange' in state.layoutSync).toBe(false);
   });
 
   it('旧版单模板会迁移成带阶段的模板', async () => {

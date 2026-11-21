@@ -96,6 +96,8 @@ class Score:
             start, today + timedelta(days=1), server_offset
         )
         rows = self.store.journal_between(raw_start, raw_end, login)
+        # 与复盘页同一套风险回填，避免评分里 R 样本无故偏少
+        self.review.ensure_risks(rows, login)
         rows.sort(key=lambda row: int(row["close_time"]))
 
         trades = len(rows)

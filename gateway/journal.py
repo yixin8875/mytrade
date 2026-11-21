@@ -79,6 +79,13 @@ def _row_offset(row: dict, fallback: int) -> int:
     return int(value) if value is not None else int(fallback)
 
 
+def _local_offset_min() -> int:
+    """本机时区相对 UTC 的分钟数（东八区 = 480），与复盘层同一口径。"""
+    dst = time.daylight and time.localtime().tm_isdst
+    seconds = time.altzone if dst else time.timezone
+    return int(-seconds // 60)
+
+
 def _duration_bucket(seconds: int) -> str:
     if seconds < 15 * 60:
         return "15 分内"
@@ -409,6 +416,14 @@ class TradeJournal:
 
         return pnl(best), pnl(worst)
 
+    def _review_timezone(self) -> int:
+        """复盘时区与复盘页共用一份设置，报表的时段分桶才对得上。"""
+        getter = getattr(self.store, "review_setting_get", None)
+        value = getter("timezone_offset_min") if getter is not None else None
+        if isinstance(value, (int, float)) and -12 * 60 <= int(value) <= 14 * 60:
+            return int(value)
+        return _local_offset_min()
+
     # ---------- 统计 ----------
 
     def stats(
@@ -417,13 +432,32 @@ class TradeJournal:
         login: int = 0,
         server_offset: int = 0,
         filters: dict | None = None,
+        since: int | None = None,
+        timezone_offset_min: int | None = None,
     ) -> dict:
         # journal 里存的是券商服务器时间；窗口边界要按本机「现在」加回偏移
         offset = int(server_offset or 0)
-        # days <= 0 表示全部历史（报表的「全部」区间）
-        since = 0 if days <= 0 else int(time.time()) - max(1, days) * 86400 + offset
+        tz = (
+            int(timezone_offset_min)
+            if timezone_offset_min is not None
+            else self._review_timezone()
+        )
+        if since is not None:
+            # 调用方给了明确起点（例如「今天」按券商日切分），优先用它
+            start = max(0, int(since))
+        elif days <= 0:
+            # 「全部」= 不设时间下限
+            start = 0
+        else:
+            # 与复盘层一致：最近 N 个本地自然日（含今天），不是滚动 N×24 小时
+            now = int(time.time())
+            local_midnight = ((now + tz * 60) // 86400) * 86400
+            start = max(
+                0,
+                local_midnight - (max(1, days) - 1) * 86400 - tz * 60 + offset,
+            )
         # 多取一条用来判断是否截断；journal_list 按平仓时间倒序，保留最新的 5000 笔
-        rows = self.store.journal_list(limit=5001, since=since, login=login, filters=filters)
+        rows = self.store.journal_list(limit=5001, since=start, login=login, filters=filters)
         truncated = len(rows) > 5000
         if truncated:
             rows = rows[:5000]
@@ -490,10 +524,11 @@ class TradeJournal:
                 rows, self.store.execution_entry_map(login, since)
             ),
             "bySymbol": self._breakdown(rows, lambda r: r["symbol"], risks),
+            # 与复盘/分析页同口径：平仓时间换算到复盘时区后的整点
             "byHour": self._breakdown(
                 rows,
                 lambda r: (
-                    f"{datetime.fromtimestamp(int(r['open_time']) - _row_offset(r, offset), timezone.utc).hour:02d}:00"
+                    f"{datetime.fromtimestamp(int(r['close_time']) - _row_offset(r, offset) + tz * 60, timezone.utc).hour:02d}:00"
                 ),
                 risks,
             ),
@@ -653,6 +688,17 @@ class TradeJournal:
         if persist:
             self.store.journal_set_risks(login, persist)
         return out, sources
+
+    def ensure_risks(self, rows: list[dict], login: int) -> dict[int, float]:
+        """补齐传入行的 risk，供复盘/评分复用同一套风险推导。"""
+        risks, _ = self._risk_detail(rows, login)
+        for row in rows:
+            if not row.get("risk"):
+                risk = risks.get(int(row["position_id"]))
+                if risk is not None and risk > 0:
+                    row["risk"] = risk
+                    row["risk_source"] = row.get("risk_source") or "derived"
+        return risks
 
     def _risk_money(
         self, symbol: str, side: str, volume: float, entry: float, sl: float

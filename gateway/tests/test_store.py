@@ -1,6 +1,7 @@
 """存储层新增查询：初始止损映射与入场执行成本。"""
 
 import time
+from datetime import datetime, timezone
 
 from store import Store
 
@@ -211,6 +212,31 @@ def test_execution_stats_zero_days_means_all_history(tmp_path):
 
     assert store.execution_stats(0, 1)["summary"]["total"] == 2
     assert store.execution_stats(30, 1)["summary"]["total"] == 1
+
+
+def test_execution_stats_hour_uses_review_timezone(tmp_path):
+    store = Store(tmp_path)
+    store.review_setting_set("timezone_offset_min", 480)
+    now = int(time.time())
+    store.record_execution(
+        {
+            "client_id": "tz",
+            "login": 1,
+            "symbol": "EURUSD",
+            "side": "buy",
+            "type": "market",
+            "volume": 0.1,
+            "state": "filled",
+            "spread_points": 1.0,
+            "slippage_points": 0.0,
+            "created_at": now,
+        }
+    )
+
+    expected = datetime.fromtimestamp(now + 480 * 60, timezone.utc).strftime("%H:00")
+    stats = store.execution_stats(1, 1)
+    assert stats["summary"]["total"] == 1
+    assert stats["byHour"] == [{"key": expected, "count": 1, "rejected": 0}]
 
 
 def test_journal_server_offset_persists_and_backfill_is_idempotent(tmp_path):

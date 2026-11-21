@@ -53,6 +53,32 @@ def store(tmp_path):
     return instance
 
 
+class _RiskJournal:
+    """替身：只验证 Review 会把缺失风险交给台账补齐。"""
+
+    def ensure_risks(self, rows, login):
+        for row in rows:
+            if not row.get("risk"):
+                row["risk"] = 50.0
+
+
+def test_trades_backfills_missing_risk_from_journal(store: Store):
+    add_trade(store, 1, epoch(2026, 11, 3, 10), 100.0, risk=None)
+
+    payload = Review(store, _RiskJournal()).trades({"days": 30}, 1, 0)
+
+    assert payload["trades"][0]["r"] == 2.0
+    assert payload["trades"][0]["risk"] == 50.0
+
+
+def test_trades_without_journal_keeps_r_empty(store: Store):
+    add_trade(store, 1, epoch(2026, 11, 3, 10), 100.0, risk=None)
+
+    payload = Review(store).trades({"days": 30}, 1, 0)
+
+    assert payload["trades"][0]["r"] is None
+
+
 def test_calendar_groups_days_and_weeks(store: Store):
     add_trade(store, 1, epoch(2026, 11, 3, 10), 100.0)
     add_trade(store, 2, epoch(2026, 11, 3, 12), -40.0)

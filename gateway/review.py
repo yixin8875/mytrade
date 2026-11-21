@@ -61,8 +61,20 @@ def _int_or_none(value: Any) -> int | None:
 
 
 class Review:
-    def __init__(self, store: Store) -> None:
+    def __init__(self, store: Store, journal: Any | None = None) -> None:
         self.store = store
+        # 有 journal 时复用它的风险推导（订单/持仓/意图止损），R 才有值
+        self._journal = journal
+
+    def _rows(self, raw_start: int, raw_end: int, login: int) -> list[dict[str, Any]]:
+        rows = self.store.journal_between(raw_start, raw_end, login)
+        self.ensure_risks(rows, login)
+        return rows
+
+    def ensure_risks(self, rows: list[dict[str, Any]], login: int) -> None:
+        """补齐缺失的 risk；交易台账是唯一实现，避免两边算出不同的 R。"""
+        if self._journal is not None:
+            self._journal.ensure_risks(rows, login)
 
     # ---------- 时间口径 ----------
 
@@ -160,7 +172,7 @@ class Review:
         raw_start, raw_end = self._raw_range(
             start, today + timedelta(days=1), server_offset
         )
-        rows = self.store.journal_between(raw_start, raw_end, login)
+        rows = self._rows(raw_start, raw_end, login)
         rows.sort(key=lambda row: int(row["close_time"]))
         trades: list[dict[str, Any]] = []
         for row in rows:
@@ -211,7 +223,7 @@ class Review:
         raw_start, raw_end = self._raw_range(
             grid_start, grid_end + timedelta(days=1), server_offset
         )
-        rows = self.store.journal_between(raw_start, raw_end, login)
+        rows = self._rows(raw_start, raw_end, login)
         by_day: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             key = self._day_key(int(row["close_time"]), server_offset)
@@ -275,7 +287,7 @@ class Review:
         except ValueError as exc:
             raise ReviewError("BAD_DATE", "日期格式应为 YYYY-MM-DD") from exc
         raw_start, raw_end = self._raw_range(anchor, anchor + timedelta(days=1), server_offset)
-        rows = self.store.journal_between(raw_start, raw_end, login)
+        rows = self._rows(raw_start, raw_end, login)
 
         books = self.store.playbooks_list(login)
         book_map = {book["id"]: book for book in books}
@@ -588,12 +600,16 @@ class Review:
     ) -> dict[str, Any]:
         days = _int_or_none(params.get("days")) or 90
         days = max(1, min(3650, days))
-        now_raw = int(time.time()) + int(server_offset)
-        since_raw = now_raw - days * 86400
-        rows = self.store.journal_between(since_raw, now_raw + 86400, login)
+        # 与 Review.trades / Score 一致：最近 N 个本地自然日（含今天）
+        today = datetime.strptime(self._today(), DAY_FMT).date()
+        start = today - timedelta(days=days - 1)
+        since_raw, until_raw = self._raw_range(
+            start, today + timedelta(days=1), server_offset
+        )
+        rows = self._rows(since_raw, until_raw, login)
         notes = self.store.trade_notes_all(login, since_raw)
         checks = self.store.playbook_checks_all(login, since_raw)
-        gates = self.store.pre_trade_gates_between(login, since_raw, now_raw + 86400)
+        gates = self.store.pre_trade_gates_between(login, since_raw, until_raw)
         books = self.store.playbooks_list(login, include_archived=True)
         playbook_filter = _clean_text(params.get("playbookId"), 40)
 

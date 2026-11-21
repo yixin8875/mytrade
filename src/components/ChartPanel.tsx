@@ -365,6 +365,8 @@ export function ChartPanel({
   const info = useApp((s) => s.symbols.find((item) => item.name === symbol));
   const quote = useApp((s) => s.quote);
   const draft = useApp((s) => s.draft);
+  // 草稿只属于下单时的品种；多图里其他格子不画它的线
+  const draftHere = !draft.symbol || draft.symbol === symbol;
   const preview = useApp((s) => s.preview);
   const allPositions = useApp((s) => s.positions);
   const allOrders = useApp((s) => s.orders);
@@ -498,7 +500,7 @@ export function ChartPanel({
   const draftRiskApprox = !previewMatched || preview?.riskAmount == null;
   const draftRewardApprox = !previewMatched || preview?.rewardAmount == null;
 
-  if (draft.active && draftAnchor > 0) {
+  if (draftHere && draft.active && draftAnchor > 0) {
     // 挂单：入场线落在委托价上；市价：一条跟着现价走的虚线
     if (draft.type !== 'market') {
       const invalid = !pendingInfo.type;
@@ -631,7 +633,7 @@ export function ChartPanel({
     }
   };
 
-  if (draft.active && draftAnchor > 0) {
+  if (draftHere && draft.active && draftAnchor > 0) {
     // 区间从计价基准画起：挂单用委托价，市价用现价；拖动时加深对应一侧
     addBands('draft', draftAnchor, draft.sl, draft.tp, {
       riskFill: DRAFT_RISK_FILL,
@@ -924,6 +926,8 @@ export function ChartPanel({
         });
         widget.subscribe('mouse_up', (params) => {
           const current = useApp.getState();
+          // 草稿属于别的品种时，这张图的十字光标不能改它的价格
+          if (current.draft.symbol && current.draft.symbol !== symbolRef.current) return;
           const price = crosshairPrice.current;
           if (
             !shouldPlacePrice({
@@ -1190,7 +1194,7 @@ export function ChartPanel({
     // 线本身不写字：文字/金额由右边缘的 ChartChips 显示
     const specs = new Map<string, PriceLineSpec>();
 
-    if (draft.active && draftAnchor > 0) {
+    if (draftHere && draft.active && draftAnchor > 0) {
       // 市价单没有可落的入场点：不画入场线，也不允许拖动它
       if (draft.type !== 'market') {
         specs.set('draft:entry', {
@@ -1346,7 +1350,7 @@ export function ChartPanel({
     layer.sync(specs);
     // draftAnchor 不放进依赖：市价草稿每跳都变，会把价格线同步刷爆。
     // 止损/止盈引导线只在开启划线时按当时报价定位，用户拖动后以拖动结果为准。
-  }, [chart, draft, orders, positions, notify]);
+  }, [chart, draft, draftHere, orders, positions, symbol, notify]);
 
   const waiting = conn !== 'open' || !health?.connected || !symbol;
 
@@ -1395,7 +1399,7 @@ export function ChartPanel({
           </div>
         </div>
       )}
-      {draft.active && (
+      {draftHere && draft.active && (
         <button
           onClick={() => patchDraft({ active: false })}
           className="absolute right-3 top-14 z-30 rounded-lg border border-tv-border bg-tv-panel/95 px-2.5 py-1.5 text-[11px] text-tv-text shadow-[0_6px_16px_-8px_rgba(0,0,0,0.3)] transition-colors hover:bg-tv-hover"

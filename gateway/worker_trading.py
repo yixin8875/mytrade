@@ -198,7 +198,7 @@ class WorkerTrading:
         }
 
     def _size(self, p: dict) -> dict:
-        """按目标风险（固定金额或余额百分比）反推手数。
+        """按目标风险（固定金额或净值百分比）反推手数。
 
         用券商自己的 order_calc_profit 算「1 手打到止损亏多少」，再缩放，
         避免自己用 tick_value 近似算错交叉盘/黄金的合约价值。
@@ -228,7 +228,10 @@ class WorkerTrading:
         risk_value = _num(p.get("riskValue"), 1.0 if mode == "percent" else 100.0)
         if risk_value <= 0:
             raise GatewayError("BAD_RISK", "风险值必须大于 0")
-        target = balance * risk_value / 100.0 if mode == "percent" else risk_value
+        # 百分比模式必须和开仓闸门同口径：闸门按净值算风险占比，
+        # 这里若按余额算，浮亏时算出的手数会被闸门以“超过上限”拒掉。
+        basis = equity if equity > 0 else balance
+        target = basis * risk_value / 100.0 if mode == "percent" else risk_value
         if target <= 0:
             raise GatewayError("BAD_RISK", "目标风险金额必须大于 0")
 

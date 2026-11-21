@@ -19,7 +19,7 @@ import { useApp, type Page } from '../store/useApp';
 import { fmtMoney, fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
 import { scoreTone, scoreWords } from '../lib/score';
-import { fmtLocalTime, rowOffset } from '../lib/time';
+import { fmtLocalTime, rowOffset, serverDayStart } from '../lib/time';
 import type {
   DisciplineMode,
   JournalRecord,
@@ -122,7 +122,7 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
             label="今日盈亏"
             value={fmtSigned(today)}
             tone={today > 0 ? 'gain' : today < 0 ? 'loss' : 'flat'}
-            hint={stats ? `近 30 天 ${fmtSigned(stats.summary.netPnl)}` : '—'}
+            hint={stats ? `含浮动 · 近 30 天 ${fmtSigned(stats.summary.netPnl)}` : '含浮动'}
           />
           <Metric
             label="浮动盈亏"
@@ -409,11 +409,11 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
   const setJournalFilter = useApp((s) => s.setJournalFilter);
   const setJournalDays = useApp((s) => s.setJournalDays);
   const sessions = useReplay((s) => s.sessions);
+  const risk = useApp((s) => s.riskStatus);
+  const serverOffset = useApp((s) => s.health?.serverOffset ?? 0);
 
   const [routine, setRoutine] = useState<RoutineDay | null>(null);
-  const [today, setToday] = useState<{ trades: number; net: number; unreviewed: number } | null>(
-    null,
-  );
+  const [today, setToday] = useState<{ trades: number; unreviewed: number } | null>(null);
   const [books, setBooks] = useState<Playbook[]>([]);
   const [seeding, setSeeding] = useState(false);
 
@@ -433,10 +433,13 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
       .catch(() => {
         /* 例行还没准备好时留空态 */
       });
+    // 「今天」与顶部今日盈亏同口径：按券商服务器日切分，不用滚动的 24 小时
+    const dayStart = serverDayStart(serverOffset);
     Promise.all([
-      gateway.call<JournalStats>('journal.stats', { days: 1 }),
+      gateway.call<JournalStats>('journal.stats', { days: 1, since: dayStart }),
       gateway.call<JournalRecord[]>('journal.list', {
         days: 1,
+        since: dayStart,
         limit: 300,
         filters: { reviewed: 0 },
       }),
@@ -445,7 +448,6 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
         if (!alive) return;
         setToday({
           trades: stats.summary.trades,
-          net: stats.summary.netPnl,
           unreviewed: unreviewed.length,
         });
       })
@@ -455,7 +457,7 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
     return () => {
       alive = false;
     };
-  }, [activeLogin]);
+  }, [activeLogin, serverOffset]);
 
   useEffect(() => {
     if (mode === 'off' && !playbookId) {
@@ -497,6 +499,7 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .find((item) => !['finished', 'archived', 'error'].includes(item.status));
   const unreviewed = today?.unreviewed ?? 0;
+  const todayPnl = risk?.dayPnl ?? 0;
 
   const openJournal = () => {
     setJournalFilter(unreviewed > 0 ? { reviewed: 0 } : {});
@@ -598,16 +601,14 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
         >
           {today == null ? (
             <p className="text-[12px] text-console-faint">读取中…</p>
-          ) : today.trades === 0 ? (
-            <p className="text-[12px] leading-relaxed text-console-muted">
-              今天还没有已平仓交易。开仓前先过一遍门禁清单。
-            </p>
           ) : (
             <div className="space-y-1">
               <div className="flex items-baseline justify-between text-[12px]">
-                <span className="text-console-muted">净盈亏</span>
-                <span className={clsx('num font-mono font-medium', signedClass(today.net))}>
-                  {fmtSigned(today.net)}
+                <span className="text-console-muted">今日盈亏（含浮动）</span>
+                <span
+                  className={clsx('num font-mono font-medium', signedClass(todayPnl))}
+                >
+                  {fmtSigned(todayPnl)}
                 </span>
               </div>
               <div className="flex items-baseline justify-between text-[12px]">
@@ -621,6 +622,11 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
                   {unreviewed > 0 ? `${unreviewed} 笔` : '都写完了'}
                 </span>
               </div>
+              {today.trades === 0 && (
+                <p className="text-[11px] leading-relaxed text-console-faint">
+                  今天还没有已平仓交易。开仓前先过一遍门禁清单。
+                </p>
+              )}
             </div>
           )}
           <TodayAction onClick={openJournal}>

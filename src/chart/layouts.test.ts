@@ -3,6 +3,7 @@ import {
   DEFAULT_FRAMES,
   LAYOUTS,
   LAYOUT_GROUPS,
+  cellResolution,
   isLayoutId,
   layoutById,
   normalizeLayoutId,
@@ -76,6 +77,24 @@ describe('layoutById', () => {
   it('未知 id 回退到单图', () => {
     expect(layoutById('6r').count).toBe(6);
     expect(layoutById('missing').id).toBe('1');
+  });
+});
+
+describe('cellResolution', () => {
+  it('主图始终使用全局默认周期', () => {
+    expect(cellResolution(0, false, ['5', '15'], '60')).toBe('60');
+  });
+
+  it('关闭周期同步时其他格子各用各的周期', () => {
+    expect(cellResolution(1, false, ['5', '15'], '60')).toBe('15');
+  });
+
+  it('开启同步时所有格子跟随全局', () => {
+    expect(cellResolution(1, true, ['5', '15'], '60')).toBe('60');
+  });
+
+  it('格子没有周期时回退到全局', () => {
+    expect(cellResolution(2, false, [], '60')).toBe('60');
   });
 });
 

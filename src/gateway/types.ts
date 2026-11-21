@@ -392,6 +392,8 @@ export interface TradePreview {
 
 export interface DraftOrder {
   active: boolean;
+  /** 草稿所属品种；多图时只在实际品种的格子里画线 */
+  symbol: string;
   side: Side;
   type: OrderType;
   price: number;
@@ -414,7 +416,7 @@ export interface TemplateStep {
 export interface TradeTemplate {
   id: string;
   name: string;
-  /** 单笔风险占余额的百分比 */
+  /** 单笔风险占账户净值的百分比 */
   riskPercent: number;
   /** 最终止盈放在入场价外的 R 倍数；0 = 模板不自动设止盈 */
   rewardR: number;
@@ -424,7 +426,7 @@ export interface TradeTemplate {
 
 /** 按风险算手数的设置 */
 export interface RiskSettings {
-  /** amount = 固定亏损金额，percent = 余额百分比 */
+  /** amount = 固定亏损金额，percent = 账户净值百分比 */
   mode: 'amount' | 'percent';
   value: number;
   /** 打开后，拖动止损会自动重算手数 */

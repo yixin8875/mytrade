@@ -33,6 +33,7 @@ function reset(tradeMode: 'readonly' | 'demo' = 'demo') {
     quote: QUOTE,
     draft: {
       active: false,
+      symbol: '',
       side: 'buy',
       type: 'market',
       price: 0,

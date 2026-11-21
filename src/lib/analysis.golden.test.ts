@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import golden from '../../testdata/stats_golden.json';
 import type { TrendTrade } from '../gateway/types';
-import { groupTrades, summarize } from './analysis';
+import { groupTrades, localHour, summarize } from './analysis';
 
 const TRADES = golden.trades as unknown as TrendTrade[];
 const EXPECTED = golden.expected;
 
-/** 与 journal.stats 的 byHour 口径一致：开仓时间减服务器偏移后的 UTC 整点 */
-function openHourKey(trade: TrendTrade): string {
-  const seconds = (((trade.openTime - golden.serverOffset) % 86400) + 86400) % 86400;
-  return `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:00`;
+/** 与 journal.stats 的 byHour 口径一致：平仓时间换算到复盘时区后的整点 */
+function closeHourKey(trade: TrendTrade): string {
+  const hour = localHour(trade.closeTime, {
+    serverOffset: golden.serverOffset,
+    timezoneOffsetMin: 0,
+  });
+  return `${String(hour).padStart(2, '0')}:00`;
 }
 
 function groupsBy(dimension: 'tag' | 'duration'): Record<string, ReturnType<typeof summarize>> {
@@ -23,7 +26,7 @@ function groupsBy(dimension: 'tag' | 'duration'): Record<string, ReturnType<type
 function groupsByHour(): Record<string, ReturnType<typeof summarize>> {
   const buckets = new Map<string, TrendTrade[]>();
   for (const trade of TRADES) {
-    const key = openHourKey(trade);
+    const key = closeHourKey(trade);
     const bucket = buckets.get(key);
     if (bucket) bucket.push(trade);
     else buckets.set(key, [trade]);

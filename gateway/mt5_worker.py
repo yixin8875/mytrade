@@ -107,7 +107,7 @@ class Mt5Worker(
         self._risk_tracked: dict[int, float] = {}
         # 交易日志（成交配对 + MFE/MAE + 统计）与第三方告警通道
         self._journal = TradeJournal(store)
-        self._review = Review(store)
+        self._review = Review(store, self._journal)
         self._routines = Routines(store)
         self._missed = Missed(store)
         self._score = Score(store, self._review)
@@ -470,6 +470,7 @@ class Mt5Worker(
                 self._login(),
                 int(self._server_offset or 0),
                 self._journal_filters(p),
+                since=(int(p["since"]) if p.get("since") is not None else None),
             ),
             "journal.tag": self._journal_tag,
             "journal.sync": lambda _: {

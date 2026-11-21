@@ -207,7 +207,15 @@ class FakeJournal:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    def stats(self, days: int, login: int, server_offset: int = 0, filters=None):
+    def stats(
+        self,
+        days: int,
+        login: int,
+        server_offset: int = 0,
+        filters=None,
+        since: int | None = None,
+        timezone_offset_min: int | None = None,
+    ):
         self.calls.append(("stats", days, login, server_offset))
         return {"days": days}
 
@@ -566,8 +574,19 @@ def test_journal_list_all_history_and_offset(worker):
 
     worker._journal_list({"days": 30})
     _, window = worker.store.calls[-1]
-    expected = int(time.time()) - 30 * 86400 + 3600
+    # 与报表一致：最近 30 个本地自然日（含今天）
+    now = int(time.time())
+    local_midnight = (now // 86400) * 86400
+    expected = local_midnight - 29 * 86400 + 3600
     assert abs(window["since"] - expected) <= 5
+
+    # 复盘时区不为 0 时，窗口按该时区的自然日切分
+    worker._journal = types.SimpleNamespace(sync=lambda *a, **k: 0, _review_timezone=lambda: 480)
+    worker._journal_list({"days": 30})
+    _, shifted = worker.store.calls[-1]
+    shifted_midnight = ((now + 480 * 60) // 86400) * 86400
+    shifted_expected = shifted_midnight - 29 * 86400 - 480 * 60 + 3600
+    assert abs(shifted["since"] - shifted_expected) <= 5
 
 
 def test_server_offset_value_unknown_until_known(worker):

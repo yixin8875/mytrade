@@ -165,6 +165,16 @@ export const LAYOUT_GROUPS: { count: number; presets: LayoutPreset[] }[] = (() =
   return Array.from(groups, ([count, presets]) => ({ count, presets }));
 })();
 
+/** 主图跟随全局「默认周期」；关掉周期同步后，其余格子各用各的 */
+export function cellResolution(
+  index: number,
+  syncInterval: boolean,
+  frames: readonly string[],
+  resolution: string,
+): string {
+  return syncInterval || index === 0 ? resolution : frames[index] || resolution;
+}
+
 /** 单元格数组固定长度的默认周期，超出布局数量的部分留着备用 */
 export const DEFAULT_FRAMES = [
   '5',

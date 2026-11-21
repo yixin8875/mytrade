@@ -3,6 +3,15 @@
  * 展示给用户时统一先减去 `serverOffset`（服务器时间 - UTC，秒），再按本机时区格式化。
  */
 
+/**
+ * 券商服务器当天 00:00 的时间戳。
+ * 当日盈亏、开仓次数都按服务器日切分，日志窗口要和它们对齐。
+ */
+export function serverDayStart(serverOffset = 0): number {
+  const now = Math.floor(Date.now() / 1000) + (Number.isFinite(serverOffset) ? serverOffset : 0);
+  return now - (now % 86400);
+}
+
 export function toUtcSeconds(raw: number, serverOffset: number): number {
   if (!Number.isFinite(raw)) return 0;
   return raw - (Number.isFinite(serverOffset) ? serverOffset : 0);

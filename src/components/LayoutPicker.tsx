@@ -100,8 +100,11 @@ const SYNC_ITEMS: { key: keyof ChartSync; label: string; hint: string }[] = [
   { key: 'symbol', label: '商品代码', hint: '在一个图表里切换品种时，其他图表一起切换' },
   { key: 'interval', label: '周期', hint: '在一个图表里切换周期时，其他图表一起切换' },
   { key: 'crosshair', label: '十字线', hint: '鼠标在图表上移动时，其他图表显示同一位置的十字线' },
-  { key: 'time', label: '时间', hint: '滚动或缩放图表时，其他图表保持同一可视时间区间' },
-  { key: 'dateRange', label: '日期范围', hint: '调整日期范围时，其他图表保持同一区间（与「时间」一致）' },
+  {
+    key: 'time',
+    label: '时间',
+    hint: '滚动、缩放或选择日期范围时，其他图表保持同一可视时间区间',
+  },
 ];
 
 export function SyncToggles({ className }: { className?: string }) {

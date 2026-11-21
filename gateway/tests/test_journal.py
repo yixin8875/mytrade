@@ -213,25 +213,60 @@ def test_stats_by_hour_uses_row_server_offset(tmp_path):
     store = _StatsStore(tmp_path, [_row(server_offset=None)])
     journal = TradeJournal(store)
 
-    fallback_zero = journal.stats(days=30, login=1, server_offset=0)
-    fallback_known = journal.stats(days=30, login=1, server_offset=3600)
+    fallback_zero = journal.stats(days=30, login=1, server_offset=0, timezone_offset_min=0)
+    fallback_known = journal.stats(days=30, login=1, server_offset=3600, timezone_offset_min=0)
 
     # 单笔记录自己带偏移时，优先用它，而不是账户当前偏移
     store.rows = [_row(server_offset=3600)]
-    row_offset = journal.stats(days=30, login=1, server_offset=0)
+    row_offset = journal.stats(days=30, login=1, server_offset=0, timezone_offset_min=0)
 
     assert _hour_key(fallback_known) == (_hour_key(fallback_zero) - 1) % 24
     assert _hour_key(row_offset) == _hour_key(fallback_known)
 
 
-def test_stats_window_shifts_since_by_server_offset(tmp_path):
+def test_stats_by_hour_uses_close_time_in_review_timezone(tmp_path):
+    # 开仓 23:50、平仓次日 00:10：应归入平仓后的本地小时
+    open_time = 1_700_000_000
+    row = _row(open_time=open_time)
+    row["close_time"] = open_time + 20 * 60
+    store = _StatsStore(tmp_path, [row])
+    journal = TradeJournal(store)
+
+    stats = journal.stats(days=30, login=1, server_offset=0, timezone_offset_min=480)
+
+    expected_hour = ((open_time + 20 * 60 + 480 * 60) % 86400) // 3600
+    assert _hour_key(stats) == expected_hour
+
+
+def test_stats_window_is_local_calendar_days(tmp_path):
     store = _StatsStore(tmp_path, [_row()])
     journal = TradeJournal(store)
 
-    journal.stats(days=2, login=1, server_offset=3600)
+    journal.stats(days=2, login=1, server_offset=3600, timezone_offset_min=480)
 
-    expected = int(time.time()) - 2 * 86400 + 3600
+    now = int(time.time())
+    local_midnight = ((now + 480 * 60) // 86400) * 86400
+    expected = local_midnight - 86400 - 480 * 60 + 3600
     assert abs(store.since - expected) <= 2
+
+
+def test_stats_explicit_since_overrides_days(tmp_path):
+    store = _StatsStore(tmp_path, [_row()])
+    journal = TradeJournal(store)
+
+    journal.stats(days=30, login=1, server_offset=3600, since=1_700_000_000)
+
+    # 调用方指定「今天」的起点时，不再用 days 回推滚动窗口
+    assert store.since == 1_700_000_000
+
+
+def test_stats_explicit_since_never_negative(tmp_path):
+    store = _StatsStore(tmp_path, [_row()])
+    journal = TradeJournal(store)
+
+    journal.stats(days=30, login=1, server_offset=3600, since=-100)
+
+    assert store.since == 0
 
 
 def test_stats_all_range_passes_filters_through(tmp_path):

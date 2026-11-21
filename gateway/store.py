@@ -1015,9 +1015,23 @@ class Store:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def _review_tz(self) -> int:
+        """复盘时区，和报表/分析页共用一份设置。"""
+        value = self.review_setting_get("timezone_offset_min")
+        if isinstance(value, (int, float)) and -12 * 60 <= int(value) <= 14 * 60:
+            return int(value)
+        dst = time.daylight and time.localtime().tm_isdst
+        return int(-(time.altzone if dst else time.timezone) // 60)
+
     def execution_stats(self, days: int = 30, login: int = 0) -> dict[str, Any]:
-        # days<=0 表示全部历史，与 journal.stats 的区间语义保持一致
-        since = 0 if days <= 0 else int(time.time()) - days * 86400
+        # days<=0 表示全部历史；其余按复盘时区的自然日，与 journal.stats 一致
+        tz = self._review_tz()
+        if days <= 0:
+            since = 0
+        else:
+            now = int(time.time())
+            local_midnight = ((now + tz * 60) // 86400) * 86400
+            since = max(0, local_midnight - (days - 1) * 86400 - tz * 60)
         with self._lock:
             rows = [
                 dict(r)
@@ -1104,7 +1118,9 @@ class Store:
 
         by_hour: dict[str, dict[str, Any]] = {}
         for row in rows:
-            hour = datetime.fromtimestamp(int(row["created_at"])).strftime("%H:00")
+            hour = datetime.fromtimestamp(
+                int(row["created_at"]) + tz * 60, timezone.utc
+            ).strftime("%H:00")
             item = by_hour.setdefault(hour, {"key": hour, "count": 0, "rejected": 0})
             item["count"] += 1
             if row["state"] in ("rejected", "unknown"):

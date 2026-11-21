@@ -80,7 +80,9 @@ def test_golden_stats_match_shared_expectations(tmp_path):
     expected, rows, server_offset = load_rows()
     journal = TradeJournal(FakeStore(tmp_path, rows))
 
-    stats = journal.stats(days=30, login=1, server_offset=server_offset)
+    stats = journal.stats(
+        days=30, login=1, server_offset=server_offset, timezone_offset_min=0
+    )
     summary = stats["summary"]
 
     assert summary["trades"] == expected["trades"]
@@ -105,7 +107,12 @@ def test_golden_by_hour_follows_server_offset(tmp_path):
     expected, rows, server_offset = load_rows()
     journal = TradeJournal(FakeStore(tmp_path, rows))
 
-    shifted = journal.stats(days=30, login=1, server_offset=server_offset + 3600)
+    shifted = journal.stats(
+        days=30,
+        login=1,
+        server_offset=server_offset + 3600,
+        timezone_offset_min=0,
+    )
 
     # 偏移 +1 小时后每个开仓小时桶整体前移一小时，笔数不变
     assert {key: item["trades"] for key, item in _by_key(shifted["byHour"]).items()} == {

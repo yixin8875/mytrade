@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChartPanel } from './ChartPanel';
-import { DEFAULT_FRAMES, layoutById } from '../chart/layouts';
+import { cellResolution, DEFAULT_FRAMES, layoutById } from '../chart/layouts';
 import { currentSlot, setActiveSlot, subscribeSymbolRequest } from '../chart/tv/registry';
 import { useApp } from '../store/useApp';
 
@@ -149,7 +149,8 @@ export function ChartGrid() {
 
   const changeInterval = (index: number, next: string) => {
     setActiveSlot(slotFor(index));
-    if (sync.interval) {
+    // 主图的周期就是全局「默认周期」；其他格子关掉同步后各自独立
+    if (sync.interval || index === 0) {
       if (useApp.getState().resolution !== next) setResolution(next);
       return;
     }
@@ -195,9 +196,9 @@ export function ChartGrid() {
           <ChartPanel
             slot={index === 0 ? 'main' : `c${index}`}
             symbol={sync.symbol ? symbol : symbols[index] || symbol}
-            resolution={sync.interval ? resolution : frames[index]}
+            resolution={cellResolution(index, sync.interval, frames, resolution)}
             syncCrosshair={sync.crosshair}
-            syncRange={sync.time || sync.dateRange}
+            syncRange={sync.time}
             onSymbolChange={(next) => changeSymbol(index, next)}
             onIntervalChange={(next) => changeInterval(index, next)}
           />

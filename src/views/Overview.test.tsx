@@ -12,6 +12,7 @@ import type {
   JournalRecord,
   JournalStats,
   ProcessScore,
+  RiskStatus,
   RoutineDay,
   RoutineItem,
 } from '../gateway/types';
@@ -75,6 +76,24 @@ function makeRecord(positionId: number, symbol: string, profit: number): Journal
     recorded_at: 1763203600,
   };
 }
+
+const RISK: RiskStatus = {
+  dayStartBalance: 10_000,
+  dayPnl: 12.5,
+  dailyLoss: 0,
+  dailyLossLimit: 0,
+  remaining: 0,
+  tradesToday: 2,
+  maxTrades: 0,
+  consecutiveLosses: 0,
+  maxConsecutiveLosses: 0,
+  cooldownUntil: 0,
+  cooldownRemainingSec: 0,
+  halted: false,
+  haltReason: '',
+  canTrade: true,
+  blockReason: '',
+};
 
 const TODAY_RECORDS = [makeRecord(101, 'XAUUSD', -8.5), makeRecord(102, 'EURUSD', -4)];
 const RECENT_RECORDS = [makeRecord(101, 'XAUUSD', -8.5)];
@@ -313,6 +332,20 @@ describe('Overview · TodayBoard', () => {
     expect(useApp.getState().journalDays).toBe(1);
     expect(useApp.getState().page).toBe('records');
     expect(useApp.getState().recordsTab).toBe('list');
+  });
+
+  it('今日交易卡与顶部共用含浮动的今日盈亏，并按券商日取数', async () => {
+    const call = mockGateway();
+    useApp.setState({ riskStatus: RISK });
+    render(<Overview onNavigate={navigate} />);
+
+    expect(await screen.findByText('今日盈亏（含浮动）')).toBeInTheDocument();
+    // 顶部指标卡与今日交易卡显示同一个数
+    expect(screen.getAllByText('+12.50')).toHaveLength(2);
+    expect(call).toHaveBeenCalledWith(
+      'journal.stats',
+      expect.objectContaining({ days: 1, since: expect.any(Number) }),
+    );
   });
 
   it('继续复盘卡列出未结束会话并跳到 replay 子路由', async () => {

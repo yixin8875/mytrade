@@ -69,7 +69,19 @@ describe('SymbolTabs', () => {
     await user.click(screen.getByRole('button', { name: /^EURUSD/ }));
 
     expect(useApp.getState().symbol).toBe('EURUSD');
-    expect(useApp.getState().openSymbols[0]).toBe('EURUSD');
+    // 选中只改状态，标签保持原位
+    expect(useApp.getState().openSymbols).toEqual(['XAUUSD', 'EURUSD']);
+  });
+
+  it('切换品种不会把标签挪到最前', async () => {
+    useApp.setState({ openSymbols: ['XAUUSD', 'EURUSD', 'GBPUSD'], symbol: 'XAUUSD' });
+    const user = userEvent.setup();
+    render(<SymbolTabs />);
+
+    await user.click(screen.getByRole('button', { name: /^GBPUSD/ }));
+
+    expect(useApp.getState().symbol).toBe('GBPUSD');
+    expect(useApp.getState().openSymbols).toEqual(['XAUUSD', 'EURUSD', 'GBPUSD']);
   });
 
   it('关闭当前标签后切到相邻品种并持久化', async () => {
@@ -94,6 +106,7 @@ describe('SymbolTabs', () => {
     await user.click(screen.getByRole('button', { name: /GBPUSD/ }));
 
     expect(useApp.getState().symbol).toBe('GBPUSD');
-    expect(useApp.getState().openSymbols).toContain('GBPUSD');
+    // 新品种追加到末尾，已有标签顺序不变
+    expect(useApp.getState().openSymbols).toEqual(['XAUUSD', 'EURUSD', 'GBPUSD']);
   });
 });

@@ -1,5 +1,5 @@
 {
-  "_comment": "交易统计口径的跨端黄金样本：gateway/tests/test_stats_golden.py 与 src/lib/analysis.golden.test.ts 共用。时间为 2100-01-01 附近的合成值，避免样本随时间过期。分组规则（两端必须一致）：byTag 用标签或「未标记」；byDuration 用 15 分内 / 15 分–1 时 / 1–4 时 / 4–24 时 / 1 天以上；byHour 取开仓时间减去 serverOffset 后的 UTC 整点（HH:00）。新增统计指标必须先写进 expected 再改实现。",
+  "_comment": "跨端统计口径的黄金样本，供 gateway/tests/test_stats_golden.py 与 src/lib/analysis.golden.test.ts 使用。时间为 2100-01-01 前后的合成值，不依赖本机时钟或时区。汇总字段两边必须一致：byTag 用标签、未标记归“未标记”；byDuration 按 15 分内 / 15 分–1 时 / 1–4 时 / 4–24 时 / 1 天以上；byHour 取平仓时间，先减 serverOffset 换到 UTC，再按复盘时区（样本为 0）取整点（HH:00）。",
   "trades": [
     {
       "positionId": 1,
@@ -142,20 +142,80 @@
     "profitFactor": 2.09,
     "expectancy": 8.19,
     "byTag": {
-      "突破": { "trades": 3, "wins": 2, "pnl": 75.5, "winRate": 66.7, "avgR": 0.67 },
-      "未标记": { "trades": 3, "wins": 0, "pnl": 0.0, "winRate": 0.0, "avgR": 0.0 },
-      "回调": { "trades": 2, "wins": 1, "pnl": -9.99, "winRate": 50.0, "avgR": -0.25 }
+      "突破": {
+        "trades": 3,
+        "wins": 2,
+        "pnl": 75.5,
+        "winRate": 66.7,
+        "avgR": 0.67
+      },
+      "未标记": {
+        "trades": 3,
+        "wins": 0,
+        "pnl": 0.0,
+        "winRate": 0.0,
+        "avgR": 0.0
+      },
+      "回调": {
+        "trades": 2,
+        "wins": 1,
+        "pnl": -9.99,
+        "winRate": 50.0,
+        "avgR": -0.25
+      }
     },
     "byDuration": {
-      "15 分内": { "trades": 2, "wins": 0, "pnl": 0.0, "winRate": 0.0, "avgR": 0.0 },
-      "15 分–1 时": { "trades": 4, "wins": 2, "pnl": -24.5, "winRate": 50.0, "avgR": 0.0 },
-      "1–4 时": { "trades": 2, "wins": 1, "pnl": 90.0, "winRate": 50.0, "avgR": 0.75 }
+      "15 分内": {
+        "trades": 2,
+        "wins": 0,
+        "pnl": 0.0,
+        "winRate": 0.0,
+        "avgR": 0.0
+      },
+      "15 分–1 时": {
+        "trades": 4,
+        "wins": 2,
+        "pnl": -24.5,
+        "winRate": 50.0,
+        "avgR": 0.0
+      },
+      "1–4 时": {
+        "trades": 2,
+        "wins": 1,
+        "pnl": 90.0,
+        "winRate": 50.0,
+        "avgR": 0.75
+      }
     },
     "byHour": {
-      "23:00": { "trades": 1, "wins": 1, "pnl": 100.0, "winRate": 100.0, "avgR": 2.0 },
-      "00:00": { "trades": 4, "wins": 1, "pnl": -50.0, "winRate": 25.0, "avgR": -0.5 },
-      "01:00": { "trades": 1, "wins": 0, "pnl": -10.0, "winRate": 0.0, "avgR": -0.5 },
-      "03:00": { "trades": 2, "wins": 1, "pnl": 25.5, "winRate": 50.0, "avgR": 0.5 }
+      "00:00": {
+        "trades": 4,
+        "wins": 1,
+        "pnl": 50.0,
+        "winRate": 25.0,
+        "avgR": 0.5
+      },
+      "01:00": {
+        "trades": 1,
+        "wins": 1,
+        "pnl": 0.01,
+        "winRate": 100.0,
+        "avgR": 0.0
+      },
+      "03:00": {
+        "trades": 2,
+        "wins": 1,
+        "pnl": 15.5,
+        "winRate": 50.0,
+        "avgR": 0.25
+      },
+      "04:00": {
+        "trades": 1,
+        "wins": 0,
+        "pnl": 0.0,
+        "winRate": 0.0,
+        "avgR": 0.0
+      }
     }
   },
   "serverOffset": 0

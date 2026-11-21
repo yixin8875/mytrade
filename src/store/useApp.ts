@@ -35,10 +35,8 @@ export interface ChartSync {
   symbol: boolean;
   interval: boolean;
   crosshair: boolean;
-  /** 可视时间区间（滚动/缩放） */
+  /** 可视时间区间（滚动/缩放/日期范围选择） */
   time: boolean;
-  /** 日期范围选择器 */
-  dateRange: boolean;
 }
 
 /** 浅色 = 冷灰仪器台，白色 = 纯白底材，深色 = 墨色阶梯 */
@@ -328,6 +326,7 @@ interface AppStore {
 
 const emptyDraft: DraftOrder = {
   active: false,
+  symbol: '',
   side: 'buy',
   type: 'limit',
   price: 0,
@@ -515,19 +514,21 @@ const defaultLayoutSync: ChartSync = {
   interval: false,
   crosshair: true,
   time: false,
-  dateRange: false,
 };
 
 function loadLayoutSync(): ChartSync {
-  const raw = readJson<Partial<ChartSync> | null>(LAYOUT_SYNC_KEY, null);
+  // 旧版本把「时间」和「日期范围」拆成两个开关，实际效果相同；启动时合并
+  const raw = readJson<(Partial<ChartSync> & { dateRange?: boolean }) | null>(
+    LAYOUT_SYNC_KEY,
+    null,
+  );
   const flag = (key: keyof ChartSync) =>
     typeof raw?.[key] === 'boolean' ? (raw[key] as boolean) : defaultLayoutSync[key];
   return {
     symbol: flag('symbol'),
     interval: flag('interval'),
     crosshair: flag('crosshair'),
-    time: flag('time'),
-    dateRange: flag('dateRange'),
+    time: flag('time') || raw?.dateRange === true,
   };
 }
 
@@ -682,9 +683,12 @@ export const useApp = create<AppStore>((set, get) => ({
       const base = state.openSymbols.length
         ? state.openSymbols
         : state.watchlist.filter((item) => item !== symbol).slice(0, 2);
-      const openSymbols = symbol
-        ? [symbol, ...base.filter((item) => item !== symbol)].slice(0, 12)
-        : base;
+      // 选中只改状态，不挪动标签位置；新品种追加到末尾，超出上限时挤掉最早的
+      const openSymbols = !symbol
+        ? base
+        : base.includes(symbol)
+          ? base
+          : [...base, symbol].slice(-12);
       writeJson(OPEN_SYMBOLS_KEY, openSymbols);
       return {
         symbol,
@@ -708,7 +712,13 @@ export const useApp = create<AppStore>((set, get) => ({
   setPositions: (positions) => set({ positions }),
   setOrders: (orders) => set({ orders }),
 
-  patchDraft: (patch) => set((state) => ({ draft: { ...state.draft, ...patch } })),
+  patchDraft: (patch) =>
+    set((state) => {
+      const draft = { ...state.draft, ...patch };
+      // 激活时记住当前品种：多图布局里其他格子不该画出这条草稿
+      if (patch.active === true && !patch.symbol) draft.symbol = state.symbol || draft.symbol;
+      return { draft };
+    }),
   resetDraft: () => set({ draft: { ...emptyDraft }, preview: null, templateArmed: false }),
   setPreview: (preview) => set({ preview }),
   patchRisk: (patch) =>

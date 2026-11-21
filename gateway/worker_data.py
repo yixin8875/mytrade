@@ -22,8 +22,25 @@ class WorkerData:
         login = self._login()
         if login:
             self._journal.sync(login, server_offset=self._server_offset_value())
-        # 库里是服务器时间：窗口起点按本机时间加回偏移；days=0 表示全部历史
-        since = int(time.time()) - days * 86400 + int(self._server_offset or 0) if days > 0 else 0
+        # 库里是服务器时间：窗口按复盘时区的本地自然日切分；days=0 表示全部历史。
+        # 调用方也可以直接给 since（例如「今天」按券商日切分），与 journal.stats 保持一致。
+        explicit = p.get("since")
+        if explicit is not None:
+            since = max(0, int(explicit))
+        elif days > 0:
+            resolver = getattr(self._journal, "_review_timezone", None)
+            tz = int(resolver()) if callable(resolver) else 0
+            now = int(time.time())
+            local_midnight = ((now + tz * 60) // 86400) * 86400
+            since = max(
+                0,
+                local_midnight
+                - (days - 1) * 86400
+                - tz * 60
+                + int(self._server_offset or 0),
+            )
+        else:
+            since = 0
         return self.store.journal_list(
             limit=limit,
             since=since,

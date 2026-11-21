@@ -818,7 +818,7 @@ def test_预览在没有风险时不给警告(monkeypatch):
 # ---------- 按风险反推手数 ----------
 
 
-def test_按余额百分比反推手数(monkeypatch):
+def test_按净值百分比反推手数(monkeypatch):
     worker, _, _ = make_worker(monkeypatch)
 
     result = worker._size(
@@ -834,6 +834,27 @@ def test_按余额百分比反推手数(monkeypatch):
     assert result["rr"] == pytest.approx(3.0)
     assert result["capped"] == []
     assert result["warnings"] == []
+
+
+def test_百分比模式按净值计算_与开仓闸门同口径(monkeypatch):
+    # 浮亏时 equity < balance：手数必须按净值算，否则算出来的单会被闸门拒绝
+    worker, _, _ = make_worker(monkeypatch, balance=10_000.0, equity=8_000.0)
+
+    result = worker._size(order(sl=1999.7, riskMode="percent", riskValue=1))
+
+    assert result["targetRisk"] == pytest.approx(80.0)
+    assert result["volume"] == pytest.approx(8.0)
+    assert result["riskAmount"] == pytest.approx(80.0)
+    assert result["riskPct"] == pytest.approx(1.0)
+
+
+def test_净值为零时百分比模式回退到余额(monkeypatch):
+    worker, _, _ = make_worker(monkeypatch, balance=10_000.0, equity=0.0)
+
+    result = worker._size(order(sl=1999.7, riskMode="percent", riskValue=1))
+
+    assert result["targetRisk"] == pytest.approx(100.0)
+    assert result["volume"] == pytest.approx(10.0)
 
 
 def test_按固定金额反推手数且金额缺省为一百(monkeypatch):
@@ -932,7 +953,7 @@ def test_手数按步长向下取整(monkeypatch):
     assert result["riskAmount"] == pytest.approx(12.0)
 
 
-def test_实际风险超过账户上限时提示(monkeypatch):
+def test_百分比模式按净值定手_余额更高也不会超限(monkeypatch):
     worker, _, _ = make_worker(
         monkeypatch,
         account={
@@ -949,8 +970,22 @@ def test_实际风险超过账户上限时提示(monkeypatch):
 
     result = worker._size(order(sl=1999.7, riskMode="percent", riskValue=1))
 
-    assert result["riskPct"] == pytest.approx(100.0)
-    assert "风险 100.00% 超过上限 1.0%" in result["warnings"]
+    # 1% 的净值 = 1.0；若按余额算会变成 100.0（净值的 100%）并被闸门拒绝
+    assert result["targetRisk"] == pytest.approx(1.0)
+    assert result["volume"] == pytest.approx(0.1)
+    assert result["riskPct"] == pytest.approx(1.0)
+    assert result["warnings"] == []
+
+
+def test_最小手数导致实际风险超过上限时提示(monkeypatch):
+    worker, _, _ = make_worker(monkeypatch, balance=5.0, equity=5.0)
+
+    result = worker._size(order(sl=1999.7, riskMode="percent", riskValue=0.01))
+
+    assert result["volume"] == pytest.approx(0.01)
+    assert "min" in result["capped"]
+    assert result["riskPct"] == pytest.approx(2.0)
+    assert "风险 2.00% 超过上限 1.0%" in result["warnings"]
 
 
 # ---------- 持仓风险 ----------
