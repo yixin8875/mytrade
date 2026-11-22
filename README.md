@@ -2,7 +2,7 @@
 
 在 TradingView 风格的图表上直接画线、拖拽价格、下单，订单经本地网关推送到本机 MetaTrader 5 执行。
 
-当前为 **v0.7.16**：真实行情 + 可拖动订单线 + 下单票 + 持仓/挂单管理 + 风控 + 交易日志与统计 + 1–6 图多品种/多周期联动 + 历史复盘 + 纪律与评分 + 自选表 + 价格告警，订单经本地网关推送到本机 MT5。
+当前为 **v0.7.17**：真实行情 + 可拖动订单线 + 下单票 + 持仓/挂单管理 + 风控 + 交易日志与统计 + 1–6 图多品种/多周期联动 + 历史复盘 + 纪律与评分 + 自选表 + 价格告警，订单经本地网关推送到本机 MT5。
 图表层已换成 **TradingView Advanced Charts（Charting Library v32）** 本地库，K 线、指标、绘图工具、十字光标、周期切换全部是官方实现；下单线、挂单线、持仓线与 SL/TP 线用官方绘图层（horizontal line）实现，可直接拖动改价。
 
 > 第一次使用请先读 [新用户操作指南](docs/USER_GUIDE.md)：从安装、连接 MT5、第一笔模拟交易，到复盘、统计和实盘前检查清单。
@@ -78,8 +78,8 @@ npm run check
 
 产物：
 
-- `src-tauri/target/release/bundle/msi/Tally_0.7.16_x64_en-US.msi`
-- `src-tauri/target/release/bundle/nsis/Tally_0.7.16_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/Tally_0.7.17_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/Tally_0.7.17_x64-setup.exe`
 - 同名 `.sig` 文件（Tauri 更新签名，发布到 GitHub 时使用）
 
 安装包未签名，首次运行 Windows 可能弹 SmartScreen，选「更多信息 → 仍要运行」。安装包已包含网关 sidecar，启动应用时会在后台自动拉起，退出应用时自动关闭，不需要另开终端运行 Python。
@@ -104,7 +104,7 @@ npm run check
 2. 提交源码并推上去：
 
 ```bash
-git commit -am "chore: 发布 v0.7.16"
+git commit -am "chore: 发布 v0.7.17"
 git push origin main
 ```
 
@@ -120,7 +120,7 @@ npm run release -- --notes "这一版改了什么"
 RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了什么"
 ```
 
-脚本会先构建网关 sidecar，再构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.7.16` 的 tag 与 release、上传安装包与清单。`--upload` 表示必须上传（拿不到 token 直接失败）；只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`（此时 sidecar 也必须已经构建好）。同名资产会先删除再上传，网络失败自动重试，重复执行是安全的。
+脚本会先构建网关 sidecar，再构建 MSI/NSIS、生成签名、写出 `artifacts/release/latest.json`，并在 GitHub 上创建或更新 `v0.7.17` 的 tag 与 release、上传安装包与清单。`--upload` 表示必须上传（拿不到 token 直接失败）；只构建不上传用 `npm run release -- --no-upload`；用已有产物重新上传用 `--skip-build`（此时 sidecar 也必须已经构建好）。同名资产会先删除再上传，网络失败自动重试，重复执行是安全的。
 
 > 更新签名私钥在 `~/.tauri/mytrade.key`（已被 `.gitignore` 排除，**不要提交**），公钥写在 `tauri.conf.json` 的 `plugins.updater.pubkey`。私钥丢失后，已安装的旧版本将无法再自动更新。第一次需要手动安装一次带 updater 的版本（v0.2.0），之后才能自动更新。
 
