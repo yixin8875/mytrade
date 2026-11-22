@@ -96,6 +96,28 @@ export function pineColor(value: unknown): string {
   return text;
 }
 
+/**
+ * 图表库用指标的 description 作为 study.name；Pine 脚本有 shorttitle 时我们把它
+ * 当成 description，所以挂载后的指标名可能是 shorttitle，也可能是完整标题
+ * （旧图表模板里保存的还是完整标题）。两种名字都要能找回脚本；
+ * 两个脚本重名时无法判断归属，宁可跳过也不画错。
+ */
+export function scriptsByName(scripts: PineScriptRecord[]): Map<string, PineScriptRecord> {
+  const namesOf = (script: PineScriptRecord) =>
+    [...new Set([script.title, script.shortTitle].filter((name): name is string => !!name))];
+  const counts = new Map<string, number>();
+  for (const script of scripts) {
+    for (const name of namesOf(script)) counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const byName = new Map<string, PineScriptRecord>();
+  for (const script of scripts) {
+    for (const name of namesOf(script)) {
+      if (counts.get(name) === 1) byName.set(name, script);
+    }
+  }
+  return byName;
+}
+
 export function toInputValue(meta: PineInputMeta, value: unknown): unknown {
   switch (meta.type) {
     case 'int':
@@ -288,11 +310,11 @@ export class PineRunner {
     } catch {
       return;
     }
-    const byTitle = new Map(this.scripts.map((script) => [script.title, script]));
+    const byName = scriptsByName(this.scripts);
     const alive = new Set<string>();
 
     for (const info of studies) {
-      const script = byTitle.get(info.name);
+      const script = byName.get(info.name);
       if (!script) continue;
       alive.add(info.id);
       let api: IStudyApi;
@@ -398,7 +420,14 @@ export class PineRunner {
       if (this.disposed) return;
 
       const aligned = alignSeries(result.series, script.plots);
+      // 试跑时记录的调色板 -> 下标；运行期出现没见过的颜色时退回曲线默认色
+      const palettes = script.plots.map(
+        (plot) =>
+          new Map((plot.colorPalette ?? []).map((color, index) => [color.toUpperCase(), index])),
+      );
+      const hasPalette = palettes.some((palette) => palette.size > 0);
       const byTime = new Map<number, number[]>();
+      const colorsByTime = hasPalette ? new Map<number, (number | null)[]>() : undefined;
       for (let barIndex = 0; barIndex < bars.length; barIndex += 1) {
         const row = new Array(script.plots.length).fill(Number.NaN);
         aligned.forEach((series, plotIndex) => {
@@ -406,9 +435,25 @@ export class PineRunner {
           if (typeof value === 'number' && Number.isFinite(value)) row[plotIndex] = value;
         });
         byTime.set(bars[barIndex].time, row);
+
+        if (colorsByTime) {
+          const colorRow = new Array<number | null>(script.plots.length).fill(null);
+          aligned.forEach((series, plotIndex) => {
+            const palette = palettes[plotIndex];
+            if (palette.size === 0) return;
+            const color = series?.colors?.[barIndex];
+            if (typeof color !== 'string' || !color) return;
+            colorRow[plotIndex] = palette.get(color.toUpperCase()) ?? null;
+          });
+          colorsByTime.set(bars[barIndex].time, colorRow);
+        }
       }
 
-      setPineResult(this.contextId, script.id, { byTime });
+      setPineResult(
+        this.contextId,
+        script.id,
+        colorsByTime ? { byTime, colorsByTime } : { byTime },
+      );
       this.renderer?.update(studyId, script.title, result.visuals);
       this.reportedErrors.delete(studyId);
 

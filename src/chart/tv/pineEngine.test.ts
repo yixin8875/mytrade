@@ -250,6 +250,21 @@ plot(b, 'b')
     expect(result.series.find((series) => series.title === 'b')?.values.at(-1)).toBe(20);
   });
 
+  it('reports absolute-location markers instead of drawing them at the close', async () => {
+    const result = await runPine({
+      source: `//@version=6
+indicator('absolute markers')
+plotshape(close, style=shape.circle, location=location.absolute)
+`,
+      bars: bars(10, 300),
+      symbol: 'NQ',
+      resolution: '5',
+    });
+
+    expect(result.visuals.markers).toHaveLength(0);
+    expect(result.visuals.unsupported.join()).toContain('location.absolute');
+  });
+
   it('reports a single Piner error when the script cannot compile', async () => {
     let message = '';
     try {

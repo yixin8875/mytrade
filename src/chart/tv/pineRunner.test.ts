@@ -1,5 +1,47 @@
 import { describe, expect, it } from 'vitest';
-import { pineColor, toInputValue } from './pineRunner';
+import type { PineScriptRecord } from '../../lib/pineScripts';
+import { pineColor, scriptsByName, toInputValue } from './pineRunner';
+
+function record(patch: Partial<PineScriptRecord>): PineScriptRecord {
+  return {
+    id: 'a',
+    title: '完整标题',
+    source: `//@version=6
+indicator('x')
+`,
+    savedAt: 0,
+    overlay: true,
+    plots: [],
+    inputs: [],
+    ...patch,
+  };
+}
+
+describe('scriptsByName', () => {
+  it('matches a study by its full title or its shorttitle', () => {
+    const byName = scriptsByName([
+      record({ id: 'a', title: '完整 A', shortTitle: 'SHORT_A' }),
+      record({ id: 'b', title: '完整 B' }),
+    ]);
+
+    // 图表库的 study.name 取 description：新模板是 shorttitle，旧模板是全名
+    expect(byName.get('完整 A')?.id).toBe('a');
+    expect(byName.get('SHORT_A')?.id).toBe('a');
+    expect(byName.get('完整 B')?.id).toBe('b');
+  });
+
+  it('skips names shared by two scripts', () => {
+    const byName = scriptsByName([
+      record({ id: 'a', title: '脚本 A', shortTitle: 'DUP' }),
+      record({ id: 'b', title: '脚本 B', shortTitle: 'DUP' }),
+    ]);
+
+    // 重名时无法判断这块指标属于哪个脚本，宁可跳过也不画错
+    expect(byName.has('DUP')).toBe(false);
+    expect(byName.get('脚本 A')?.id).toBe('a');
+    expect(byName.get('脚本 B')?.id).toBe('b');
+  });
+});
 
 describe('pineColor', () => {
   it('turns library color strings back into Piner hex+alpha', () => {

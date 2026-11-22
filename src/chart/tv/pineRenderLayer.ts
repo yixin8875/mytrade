@@ -19,6 +19,9 @@ import type {
  *
  * 只画可视范围附近的对象：图表库对「已加载 K 线之外」的绘图时间会折叠到同一根 bar，
  * 而且一次创建几百个绘图对象会明显拖慢滚动。
+ *
+ * 对象的锚点/颜色变化优先用 getShapeById().setPoints()/setProperties() 原位更新；
+ * 只有工具类型变了（例如 plotshape 从箭头变成文字）或点数变了（polyline）才删除重建。
  */
 
 const VISIBLE_PAD_SEC = 2 * 86_400;
@@ -34,6 +37,13 @@ export interface PineShapePoint {
   price: number;
 }
 
+/** getShapeById() 返回的绘图对象；只用到原位更新这几个方法 */
+export interface PineShapeHandle {
+  setPoints?(points: PineShapePoint[]): void;
+  setProperties?(properties: Record<string, unknown>): void;
+  getProperties?(): Record<string, unknown>;
+}
+
 export interface PineShapeApi {
   createShape(point: PineShapePoint, options: Record<string, unknown>): Promise<string>;
   createMultipointShape(
@@ -41,8 +51,11 @@ export interface PineShapeApi {
     options: Record<string, unknown>,
   ): Promise<string>;
   removeEntity(id: string): void;
+  getShapeById?(id: string): PineShapeHandle | null;
   getVisibleRange(): { from: number; to: number };
   getPanes?(): readonly {
+    /** 主图高度（像素），用于把文字高度换算成价格偏移 */
+    getHeight?(): number;
     getMainSourcePriceScale(): {
       getVisiblePriceRange(): { from: number; to: number } | null;
     } | null;
@@ -62,12 +75,26 @@ interface StudyEntry {
 interface DrawnShape {
   id: string;
   sig: string;
+  /** 工具标识；不同工具无法原位更新 */
+  tool: string;
+}
+
+/** 一个绘图对象的完整描述，创建和原位更新共用 */
+interface ShapeSpec {
+  /** createShape（单点）还是 createMultipointShape（多点） */
+  single: boolean;
+  points: PineShapePoint[];
+  /** 创建参数：shape / text / overrides / zOrder / ownerStudyId 等 */
+  options: Record<string, unknown>;
+  /** 原位更新时传给 setProperties 的覆盖项（含 text） */
+  properties: Record<string, unknown>;
 }
 
 interface WantedShape {
   key: string;
   sig: string;
-  create: () => Promise<string>;
+  tool: string;
+  spec: ShapeSpec;
 }
 
 interface Rgba {
@@ -90,6 +117,33 @@ function parseColor(color?: string): Rgba {
 /** 图表库绘图对象的 transparency 是 0–100，100 = 全透明 */
 function transparency(color?: string): number {
   return Math.round((1 - parseColor(color).alpha) * 100);
+}
+
+/** Pine 的 solid/dotted/dashed -> 图表库 LineStyle 枚举（0/1/2） */
+function lineStyle(style?: string): number {
+  if (style === 'dotted') return 1;
+  if (style === 'dashed') return 2;
+  return 0;
+}
+
+/** Pine label size.* -> 图表库文本字号 */
+const LABEL_FONT_SIZE: Record<string, number> = {
+  tiny: 9,
+  small: 10,
+  normal: 12,
+  large: 14,
+  huge: 18,
+};
+
+/**
+ * 文字块的大致像素高度。
+ * 图表库的 text 对象没有对齐/偏移属性，Pine 的 label.style_label_down 要把文字
+ * 放到锚点上方，只能把锚点价格往上抬这么多像素。
+ */
+function labelHeightPx(size: string | undefined, text: string): number {
+  const font = LABEL_FONT_SIZE[size ?? ''] ?? 11;
+  const lines = Math.max(1, text.split('\n').length);
+  return font * 1.25 * lines + 4;
 }
 
 function rgba(color?: string): string {
@@ -264,6 +318,39 @@ export class PineRenderLayer {
     }
   }
 
+  /** 当前价格缩放下 1 像素对应多少价格；拿不到就返回 null */
+  private pricePerPixel(): number | null {
+    const range = this.priceRange();
+    if (!range) return null;
+    try {
+      const height = this.chart.getPanes?.()[0]?.getHeight?.();
+      if (!height || !Number.isFinite(height) || height <= 0) return null;
+      return (range.to - range.from) / height;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Pine 的 label.style_* 表示箭头指向，文字落在锚点的另一侧：
+   *  - label_down：文字在锚点上方（TradingView 的时段标签、PDH/PDL 都是这种）
+   *  - label_up / label_lower_*：文字在锚点下方，与图表库 text 的默认行为一致
+   *  - label_left / label_right / label_center：文字垂直居中于锚点
+   * 图表库的 text 对象只能从锚点往右下画，所以用价格偏移模拟。
+   */
+  private labelAnchorPrice(drawing: Extract<PineDrawingVisual, { kind: 'label' }>): number {
+    const style = drawing.style ?? '';
+    if (!style.startsWith('label_')) return drawing.price;
+    const height = labelHeightPx(drawing.size, drawing.text);
+    const above = style === 'label_down' || style.startsWith('label_upper');
+    const centered =
+      style === 'label_center' || style === 'label_left' || style === 'label_right';
+    const pixels = above ? height + 2 : centered ? height / 2 : 0;
+    if (!pixels) return drawing.price;
+    const perPixel = this.pricePerPixel();
+    return perPixel == null ? drawing.price : drawing.price + pixels * perPixel;
+  }
+
   private redraw(): void {
     if (this.disposed) return;
     const range = this.visibleRange();
@@ -275,10 +362,19 @@ export class PineRenderLayer {
       this.collectStudy(studyId, entry, range, price, this.desired);
     }
 
-    // 位置/颜色变了或者对象已经不在可视范围：先删掉，下面重新建
+    // 位置/颜色变了先原地改；工具类型变了、polyline 点数变了或对象已失效才删除重建
     for (const [key, drawn] of [...this.shapes]) {
       const wanted = this.desired.get(key);
-      if (wanted && wanted.sig === drawn.sig) continue;
+      if (!wanted) {
+        this.shapes.delete(key);
+        this.remove(drawn.id);
+        continue;
+      }
+      if (wanted.sig === drawn.sig) continue;
+      if (wanted.tool === drawn.tool && this.updateShape(drawn, wanted)) {
+        drawn.sig = wanted.sig;
+        continue;
+      }
       this.shapes.delete(key);
       this.remove(drawn.id);
     }
@@ -286,8 +382,11 @@ export class PineRenderLayer {
     for (const shape of this.desired.values()) {
       if (this.shapes.has(shape.key) || this.pending.has(shape.key)) continue;
       this.pending.add(shape.key);
-      shape
-        .create()
+      const { spec } = shape;
+      const creating = spec.single
+        ? this.chart.createShape(spec.points[0], spec.options)
+        : this.chart.createMultipointShape(spec.points, spec.options);
+      creating
         .then((id) => {
           this.pending.delete(shape.key);
           const stillWanted = this.desired.get(shape.key);
@@ -295,7 +394,7 @@ export class PineRenderLayer {
             this.remove(id);
             return;
           }
-          this.shapes.set(shape.key, { id, sig: shape.sig });
+          this.shapes.set(shape.key, { id, sig: shape.sig, tool: shape.tool });
         })
         .catch(() => {
           this.pending.delete(shape.key);
@@ -305,11 +404,55 @@ export class PineRenderLayer {
     this.renderTables();
   }
 
+  private want(key: string, sig: string, spec: ShapeSpec): WantedShape {
+    return {
+      key,
+      sig,
+      // 工具类型决定能不能原位更新：单点/多点、shape 名字、点数都是工具的一部分
+      tool: `${spec.single ? 'p' : 'm'}:${String(spec.options.shape)}:${spec.points.length}`,
+      spec,
+    };
+  }
+
+  /**
+   * 用 setPoints/setProperties 原地更新锚点和样式，避免删除重建造成闪烁。
+   * 图表库的 setProperties 会把不认识的键当成新属性加进去，所以只写现有属性里有的键。
+   * 对象已失效、点数不匹配（polyline）时返回 false，调用方退回删除重建。
+   */
+  private updateShape(drawn: DrawnShape, wanted: WantedShape): boolean {
+    if (!this.chart.getShapeById) return false;
+    let shape: PineShapeHandle | null;
+    try {
+      shape = this.chart.getShapeById(drawn.id);
+    } catch {
+      return false;
+    }
+    if (!shape?.setPoints) return false;
+    const entries = Object.entries(wanted.spec.properties);
+    try {
+      shape.setPoints(wanted.spec.points);
+      if (entries.length > 0 && shape.setProperties) {
+        const current = shape.getProperties?.();
+        if (!current) return false;
+        const patch: Record<string, unknown> = {};
+        for (const [key, value] of entries) {
+          if (key in current) patch[key] = value;
+        }
+        // 属性名一个都对不上说明工具/接口变了，重建比漏改颜色更安全
+        if (Object.keys(patch).length === 0) return false;
+        shape.setProperties(patch);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private collectStudy(
     studyId: string,
     entry: StudyEntry,
     range: { from: number; to: number } | null,
-    price: { from: number; to: number } | null,
+    priceRange: { from: number; to: number } | null,
     out: Map<string, WantedShape>,
   ): void {
     const inRange = (time: number) => !range || (time >= range.from && time <= range.to);
@@ -321,12 +464,23 @@ export class PineRenderLayer {
       for (const point of points) {
         if (count >= MAX_SHAPES_PER_STUDY) break;
         count += 1;
+        // location.top/bottom 在 TradingView 里贴在面板上/下沿，不是 K 线的高/低点
+        const price =
+          marker.location === 'top'
+            ? priceRange?.to ?? point.price
+            : marker.location === 'bottom'
+              ? priceRange?.from ?? point.price
+              : point.price;
         const key = `${studyId}|m|${marker.id}|${point.time}`;
-        out.set(key, {
-          key,
-          sig: JSON.stringify([point.time, point.price, point.color, point.text, marker.glyph]),
-          create: () => this.createMarker(marker, point),
-        });
+        const sig = JSON.stringify([
+          point.time,
+          price,
+          point.color,
+          point.text,
+          marker.glyph,
+          marker.kind,
+        ]);
+        out.set(key, this.want(key, sig, this.markerSpec(studyId, marker, point, price)));
       }
     }
 
@@ -336,24 +490,23 @@ export class PineRenderLayer {
       if (!this.drawingVisible(drawing, inRange)) continue;
       count += 1;
       const key = `${studyId}|d|${drawing.id}`;
-      out.set(key, {
+      out.set(
         key,
-        sig: JSON.stringify(drawing),
-        create: () => this.createDrawing(drawing),
-      });
+        this.want(key, JSON.stringify(drawing), this.drawingSpec(studyId, drawing)),
+      );
     }
 
-    if (price) {
+    if (priceRange) {
       entry.visuals.backgrounds.forEach((background, index) => {
         if (count >= MAX_SHAPES_PER_STUDY) return;
         if (!this.backgroundVisible(background, range)) return;
         count += 1;
         const key = `${studyId}|bg|${index}`;
-        out.set(key, {
+        const sig = JSON.stringify([background, priceRange]);
+        out.set(
           key,
-          sig: JSON.stringify([background, price]),
-          create: () => this.createBackground(background, price),
-        });
+          this.want(key, sig, this.backgroundSpec(studyId, background, priceRange)),
+        );
       });
     }
 
@@ -370,19 +523,20 @@ export class PineRenderLayer {
         const bottom = Math.min(bar.open, bar.close);
         if (top > bottom) {
           const key = `${studyId}|c|${candle.id}|${bar.time}|b`;
-          out.set(key, {
-            key,
-            sig: JSON.stringify([bar.time, bar.to, top, bottom, bar.color, bar.borderColor]),
-            create: () => this.createCandleBody(bar),
-          });
+          const sig = JSON.stringify([
+            bar.time,
+            bar.to,
+            top,
+            bottom,
+            bar.color,
+            bar.borderColor,
+          ]);
+          out.set(key, this.want(key, sig, this.candleBodySpec(studyId, bar)));
         }
         if (bar.high > bar.low) {
           const key = `${studyId}|c|${candle.id}|${bar.time}|w`;
-          out.set(key, {
-            key,
-            sig: JSON.stringify([bar.time, bar.high, bar.low, bar.wickColor, bar.color]),
-            create: () => this.createCandleWick(bar),
-          });
+          const sig = JSON.stringify([bar.time, bar.high, bar.low, bar.wickColor, bar.color]);
+          out.set(key, this.want(key, sig, this.candleWickSpec(studyId, bar)));
         }
       }
     }
@@ -396,11 +550,8 @@ export class PineRenderLayer {
       fillBars += bars.length;
       for (const bar of bars) {
         const key = `${studyId}|f|${fill.id}|${bar.time}`;
-        out.set(key, {
-          key,
-          sig: JSON.stringify([bar.time, bar.to, bar.top, bar.bottom, bar.color]),
-          create: () => this.createFill(bar),
-        });
+        const sig = JSON.stringify([bar.time, bar.to, bar.top, bar.bottom, bar.color]);
+        out.set(key, this.want(key, sig, this.fillSpec(studyId, bar)));
       }
     }
   }
@@ -431,8 +582,10 @@ export class PineRenderLayer {
     return background.to >= range.from && background.from <= range.to;
   }
 
-  private baseOptions(): Record<string, unknown> {
+  private baseOptions(studyId?: string): Record<string, unknown> {
     return {
+      // 把绘图挂到指标上：隐藏/删除指标时一起收走；非 overlay 指标画在自己的面板里
+      ...(studyId ? { ownerStudyId: studyId } : {}),
       lock: true,
       disableSelection: true,
       disableSave: true,
@@ -441,204 +594,221 @@ export class PineRenderLayer {
     };
   }
 
-  private createMarker(
+  private markerSpec(
+    studyId: string,
     marker: PineMarkerVisual,
     point: PineVisualPoint & { color?: string; text?: string },
-  ): Promise<string> {
-    const { shape, text: glyphText } = markerShape(marker.glyph);
+    price: number,
+  ): ShapeSpec {
+    const mapped = markerShape(marker.glyph);
+    // plotchar 的 char 是任意字符串，不能被 shape.* 的图标映射改写；
+    // 它的 text 参数是悬停提示，画出来的必须是 char 本身
+    const shape = marker.kind === 'char' ? 'text' : mapped.shape;
+    const text = marker.kind === 'char' ? marker.glyph : point.text ?? mapped.text;
     const { hex } = parseColor(point.color);
-    const text = point.text ?? glyphText;
-    return this.chart.createShape(
-      { time: point.time, price: point.price },
-      {
-        ...this.baseOptions(),
+    const overrides =
+      shape === 'text'
+        ? // 文本对象只认小写 fontsize；写 fontSize 会被忽略、退回默认字号
+          { color: hex, fontsize: 11, bold: false }
+        : { color: hex };
+    return {
+      single: true,
+      points: [{ time: point.time, price }],
+      options: {
+        ...this.baseOptions(studyId),
         shape,
         ...(text ? { text } : {}),
-        overrides:
-          shape === 'text'
-            ? { color: hex, fontSize: 11, bold: false }
-            : { color: hex, textColor: hex, fontSize: 10 },
+        overrides,
       },
-    );
+      properties: { ...overrides, ...(text ? { text } : {}) },
+    };
   }
 
-  private createDrawing(drawing: PineDrawingVisual): Promise<string> {
+  private drawingSpec(studyId: string, drawing: PineDrawingVisual): ShapeSpec {
     switch (drawing.kind) {
       case 'label': {
-        const { hex: background } = parseColor(drawing.color);
+        const { hex: background, alpha } = parseColor(drawing.color);
         const { hex: textColor } = parseColor(drawing.textColor);
-        return this.chart.createShape(
-          { time: drawing.time, price: drawing.price },
-          {
-            ...this.baseOptions(),
+        const overrides = {
+          color: textColor,
+          fontsize: LABEL_FONT_SIZE[drawing.size ?? ''] ?? 11,
+          bold: false,
+          drawBorder: false,
+          // 图表库文本对象用 backgroundTransparency，不认 transparency
+          fillBackground: alpha > 0,
+          backgroundColor: background,
+          backgroundTransparency: transparency(drawing.color),
+        };
+        return {
+          single: true,
+          points: [{ time: drawing.time, price: this.labelAnchorPrice(drawing) }],
+          options: {
+            ...this.baseOptions(studyId),
             shape: 'text',
             text: drawing.text,
-            overrides: {
-              color: textColor,
-              backgroundColor: background,
-              transparency: transparency(drawing.color),
-              fontSize: 11,
-            },
+            overrides,
           },
-        );
+          properties: { ...overrides, text: drawing.text },
+        };
       }
       case 'line': {
         const { hex } = parseColor(drawing.color);
-        const [from, to] = drawing.points;
-        const horizontal = Math.abs(from.price - to.price) < 1e-9;
         const overrides = {
           color: hex,
           linecolor: hex,
           linewidth: drawing.width ?? 1,
-          linestyle: drawing.dashed ? 2 : 0,
+          linestyle: lineStyle(drawing.style),
           transparency: transparency(drawing.color),
           extendLeft: drawing.extend === 'left' || drawing.extend === 'both',
           extendRight: drawing.extend === 'right' || drawing.extend === 'both',
         };
-        if (horizontal) {
-          return this.chart.createShape(
-            { time: from.time, price: from.price },
-            {
-              ...this.baseOptions(),
-              shape: 'horizontal_line',
-              overrides,
-            },
-          );
-        }
-        return this.chart.createMultipointShape([from, to], {
-          ...this.baseOptions(),
-          shape: 'trend_line',
-          overrides,
-        });
+        // 水平线也必须画成线段：horizontal_line 会横跨整个图表宽度，
+        // 导致 PDH/PDL、时段中线看起来存在于所有历史里。Pine 的 line.new
+        // 有明确的起止 bar，用 trend_line 才能保住 x1/x2。
+        return {
+          single: false,
+          points: [drawing.points[0], drawing.points[1]],
+          options: { ...this.baseOptions(studyId), shape: 'trend_line', overrides },
+          properties: overrides,
+        };
       }
       case 'box': {
         const { hex: border } = parseColor(drawing.borderColor);
         const { hex: fill } = parseColor(drawing.bgColor);
-        return this.chart.createMultipointShape([drawing.top, drawing.bottom], {
-          ...this.baseOptions(),
-          shape: 'rectangle',
-          overrides: {
-            color: border,
-            backgroundColor: fill,
-            fillBackground: Boolean(drawing.bgColor),
-            transparency: drawing.bgColor ? transparency(drawing.bgColor) : 0,
-            linewidth: drawing.borderWidth ?? 1,
-            linestyle: 0,
-          },
-        });
+        const overrides = {
+          color: border,
+          backgroundColor: fill,
+          fillBackground: Boolean(drawing.bgColor),
+          transparency: drawing.bgColor ? transparency(drawing.bgColor) : 0,
+          linewidth: drawing.borderWidth ?? 1,
+          linestyle: lineStyle(drawing.borderStyle),
+        };
+        return {
+          single: false,
+          points: [drawing.top, drawing.bottom],
+          options: { ...this.baseOptions(studyId), shape: 'rectangle', overrides },
+          properties: overrides,
+        };
       }
       case 'polyline': {
         const { hex } = parseColor(drawing.color);
-        return this.chart.createMultipointShape(drawing.points, {
-          ...this.baseOptions(),
-          shape: 'polyline',
-          overrides: {
-            color: hex,
-            linecolor: hex,
-            linewidth: drawing.width ?? 1,
-          },
-        });
+        const overrides = {
+          color: hex,
+          linecolor: hex,
+          linewidth: drawing.width ?? 1,
+        };
+        return {
+          single: false,
+          points: drawing.points,
+          options: { ...this.baseOptions(studyId), shape: 'polyline', overrides },
+          properties: overrides,
+        };
       }
       case 'table':
         // 表格走 HTML 覆盖层，见 renderTables()
-        return Promise.reject(new Error('table is rendered as HTML'));
+        throw new Error('table is rendered as HTML');
     }
   }
 
-  private createBackground(
+  private backgroundSpec(
+    studyId: string,
     background: PineBackgroundVisual,
     price: { from: number; to: number },
-  ): Promise<string> {
+  ): ShapeSpec {
     const { hex } = parseColor(background.color);
-    return this.chart.createMultipointShape(
-      [
+    const overrides = {
+      color: hex,
+      backgroundColor: hex,
+      fillBackground: true,
+      transparency: transparency(background.color),
+      linewidth: 0,
+      linestyle: 0,
+    };
+    return {
+      single: false,
+      points: [
         { time: background.from, price: price.to },
         { time: background.to, price: price.from },
       ],
-      {
-        ...this.baseOptions(),
+      options: {
+        ...this.baseOptions(studyId),
         shape: 'rectangle',
         zOrder: 'bottom',
-        overrides: {
-          color: hex,
-          backgroundColor: hex,
-          fillBackground: true,
-          transparency: transparency(background.color),
-          linewidth: 0,
-          linestyle: 0,
-        },
+        overrides,
       },
-    );
+      properties: overrides,
+    };
   }
 
   /** plotcandle/plotbar 的实体：图库不允许逐根改蜡烛颜色，用矩形盖在原生蜡烛上 */
-  private createCandleBody(bar: PineCandleBar): Promise<string> {
+  private candleBodySpec(studyId: string, bar: PineCandleBar): ShapeSpec {
     const { hex: body } = parseColor(bar.color);
     const { hex: border } = parseColor(bar.borderColor ?? bar.color);
-    return this.chart.createMultipointShape(
-      [
+    const overrides = {
+      color: border,
+      backgroundColor: body,
+      fillBackground: true,
+      transparency: transparency(bar.color),
+      linewidth: 1,
+      linestyle: 0,
+    };
+    return {
+      single: false,
+      points: [
         { time: bar.time, price: Math.max(bar.open, bar.close) },
         { time: bar.to, price: Math.min(bar.open, bar.close) },
       ],
-      {
-        ...this.baseOptions(),
-        shape: 'rectangle',
-        overrides: {
-          color: border,
-          backgroundColor: body,
-          fillBackground: true,
-          transparency: transparency(bar.color),
-          linewidth: 1,
-          linestyle: 0,
-        },
-      },
-    );
+      options: { ...this.baseOptions(studyId), shape: 'rectangle', overrides },
+      properties: overrides,
+    };
   }
 
-  private createCandleWick(bar: PineCandleBar): Promise<string> {
+  private candleWickSpec(studyId: string, bar: PineCandleBar): ShapeSpec {
     const source = bar.wickColor ?? bar.color;
     const { hex } = parseColor(source);
-    return this.chart.createMultipointShape(
-      [
+    const overrides = {
+      color: hex,
+      linecolor: hex,
+      linewidth: 1,
+      linestyle: 0,
+      transparency: transparency(source),
+    };
+    return {
+      single: false,
+      points: [
         { time: bar.time, price: bar.high },
         { time: bar.time, price: bar.low },
       ],
-      {
-        ...this.baseOptions(),
-        shape: 'trend_line',
-        overrides: {
-          color: hex,
-          linecolor: hex,
-          linewidth: 1,
-          linestyle: 0,
-          transparency: transparency(source),
-        },
-      },
-    );
+      options: { ...this.baseOptions(studyId), shape: 'trend_line', overrides },
+      properties: overrides,
+    };
   }
 
   /** fill：逐 bar 一条矩形色带，放在底层，不挡住蜡烛和曲线 */
-  private createFill(bar: PineFillBar): Promise<string> {
+  private fillSpec(studyId: string, bar: PineFillBar): ShapeSpec {
     const { hex } = parseColor(bar.color);
-    return this.chart.createMultipointShape(
-      [
+    const overrides = {
+      color: hex,
+      backgroundColor: hex,
+      fillBackground: true,
+      transparency: transparency(bar.color),
+      linewidth: 0,
+      linestyle: 0,
+    };
+    return {
+      single: false,
+      points: [
         { time: bar.time, price: bar.top },
         { time: bar.to, price: bar.bottom },
       ],
-      {
-        ...this.baseOptions(),
+      options: {
+        ...this.baseOptions(studyId),
         shape: 'rectangle',
         zOrder: 'bottom',
-        overrides: {
-          color: hex,
-          backgroundColor: hex,
-          fillBackground: true,
-          transparency: transparency(bar.color),
-          linewidth: 0,
-          linestyle: 0,
-        },
+        overrides,
       },
-    );
+      properties: overrides,
+    };
   }
 
   private renderTables(): void {

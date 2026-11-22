@@ -18,6 +18,12 @@ export interface PineSeriesOutput {
   /** 与输入 bars 等长；缺失/无效值为 NaN */
   values: number[];
   color?: string;
+  /** 逐 bar 颜色（Piner 的 #RRGGBBAA，null 表示沿用默认色） */
+  colors?: (string | null)[];
+  /** Pine 的 plot style（line/stepline/histogram/...） */
+  style?: string;
+  /** Pine 的 linewidth= */
+  width?: number;
 }
 
 export interface PineRunOptions {
@@ -48,6 +54,11 @@ export interface PineMarkerVisual {
   id: string;
   /** shape.triangleup / plotchar 的字符等 */
   glyph: string;
+  /**
+   * plotshape | plotchar | plotarrow。
+   * plotchar 的 text 是悬停提示、显示的字符在 glyph 里；plotshape 的 text 才是要显示的文字。
+   */
+  kind?: string;
   /** abovebar | belowbar | top | bottom | absolute */
   location: string;
   points: (PineVisualPoint & { color?: string; text?: string })[];
@@ -63,6 +74,8 @@ export type PineDrawingVisual =
       color?: string;
       textColor?: string;
       style?: string;
+      /** tiny | small | normal | large | huge */
+      size?: string;
     }
   | {
       id: string;
@@ -70,7 +83,8 @@ export type PineDrawingVisual =
       points: [PineVisualPoint, PineVisualPoint];
       color?: string;
       width?: number;
-      dashed?: boolean;
+      /** solid | dotted | dashed */
+      style?: string;
       /** none | left | right | both */
       extend?: string;
     }
@@ -82,6 +96,8 @@ export type PineDrawingVisual =
       borderColor?: string;
       bgColor?: string;
       borderWidth?: number;
+      /** solid | dotted | dashed */
+      borderStyle?: string;
     }
   | {
       id: string;
@@ -448,6 +464,7 @@ function backgroundRuns(
 
 interface RawMarker {
   id: number;
+  kind?: string;
   location: string;
   glyph: string;
   data: ({ color?: string | null; text?: string } | null)[];
@@ -494,6 +511,7 @@ function normalizeDrawing(
         color: asColor(props.color),
         textColor: asColor(props.textcolor),
         style: asText(props.style),
+        size: asText(props.size),
       };
     }
     case 'line': {
@@ -513,7 +531,7 @@ function normalizeDrawing(
         points: [from, to],
         color: asColor(props.color),
         width: asNumber(props.width),
-        dashed: asText(props.style) === 'dashed',
+        style: asText(props.style),
         extend: asText(props.extend),
       };
     }
@@ -532,6 +550,7 @@ function normalizeDrawing(
         borderColor: asColor(props.border_color),
         bgColor: asColor(props.bgcolor),
         borderWidth: asNumber(props.border_width),
+        borderStyle: asText(props.border_style),
       };
     }
     case 'polyline': {
@@ -615,6 +634,20 @@ function collectVisuals(
   const step = barStepSeconds(bars);
 
   for (const marker of engine.outputs.markers.values()) {
+    // plotarrow 的方向藏在系列值的正负里，Piner 的 MarkerPoint 只给了「是否显示」，
+    // 画不出上/下箭头；与其画错方向，不如明确报告不支持。
+    if (marker.kind === 'arrow') {
+      if (!visuals.unsupported.includes('plotarrow')) visuals.unsupported.push('plotarrow');
+      continue;
+    }
+    // location.absolute 需要系列值本身，Piner 的 MarkerPoint 没有带；
+    // 之前按 close 画会把标记放在错误的价格上，宁可明确报告不支持。
+    if (marker.location === 'absolute') {
+      if (!visuals.unsupported.includes('plotshape(location.absolute)')) {
+        visuals.unsupported.push('plotshape(location.absolute)');
+      }
+      continue;
+    }
     const points: PineMarkerVisual['points'] = [];
     for (let index = 0; index < marker.data.length && index < bars.length; index += 1) {
       const point = marker.data[index];
@@ -634,6 +667,7 @@ function collectVisuals(
       visuals.markers.push({
         id: String(marker.id),
         glyph: marker.glyph,
+        kind: marker.kind,
         location: marker.location,
         points,
       });
@@ -764,6 +798,8 @@ async function runPiner(options: PineRunOptions, warnings: string[]): Promise<Pi
   const series: PineSeriesOutput[] = [];
   const plots = [...engine.outputs.plots.values()].sort((a, b) => a.id - b.id);
   for (const plot of plots) {
+    const style = typeof plot.options?.style === 'string' ? plot.options.style : undefined;
+    const width = Number(plot.options?.linewidth);
     series.push({
       key: `plot_${plot.id}`,
       title: plot.title || `Plot ${plot.id + 1}`,
@@ -774,6 +810,9 @@ async function runPiner(options: PineRunOptions, warnings: string[]): Promise<Pi
         normalizeColor(
           typeof plot.options?.color === 'string' ? plot.options.color : undefined,
         ),
+      ...(plot.colors?.length ? { colors: plot.colors } : {}),
+      ...(style ? { style } : {}),
+      ...(Number.isFinite(width) && width > 0 ? { width } : {}),
     });
   }
 

@@ -35,6 +35,10 @@ export interface PineInputMeta {
   maxval?: number;
   step?: number;
   options?: unknown[];
+  /** Pine 的 group=，图表库会渲染成分组标题 */
+  group?: string;
+  /** Pine 的 tooltip=，图表库没有对应字段，仅保存备用 */
+  tooltip?: string;
 }
 
 export interface PinePlotMeta {
@@ -45,6 +49,16 @@ export interface PinePlotMeta {
   color: string;
   /** Pine 的 plot style（line/area/histogram/hline/...） */
   style?: string;
+  /** Pine 的 linewidth=（1–4），图表库只支持这个区间 */
+  width?: number;
+  /** 颜色透明度 0–100，由 Piner 颜色的 alpha 通道换算而来 */
+  transparency?: number;
+  /**
+   * 逐 bar 颜色（Piner 的 #RRGGBBAA，去重后的前几个）。
+   * 图表库的指标曲线本身只能有一个颜色，多于一种时用 colorer 调色板逐 bar 上色；
+   * 调色板必须和试跑时看到的颜色一致，所以要把它们保存在指标元信息里。
+   */
+  colorPalette?: string[];
   /** display.none 的曲线保留数值，但不在图上显示 */
   visible?: boolean;
 }
@@ -53,6 +67,8 @@ export interface PineScriptRecord {
   id: string;
   /** 展示名，也是图表库里指标的 description（必须唯一） */
   title: string;
+  /** Pine 的 shorttitle=，TradingView 的图例与设置标题用它 */
+  shortTitle?: string;
   source: string;
   savedAt: number;
   overlay: boolean;
@@ -122,12 +138,19 @@ function uniqueTitle(base: string, records: PineScriptRecord[]): string {
   return title;
 }
 
-function parseDeclaration(source: string): { title: string; overlay: boolean } {
+function parseDeclaration(source: string): {
+  title: string;
+  shortTitle?: string;
+  overlay: boolean;
+} {
   const head = source.slice(0, 1200);
   const match = head.match(/indicator\s*\(\s*(?:title\s*=\s*)?(['"])([\s\S]*?)\1/);
   const title = match?.[2]?.trim() || 'Pine 指标';
+  // Piner 的 metadata 不含 shorttitle，只能从声明里取
+  const shortMatch = head.match(/shorttitle\s*=\s*(['"])([\s\S]*?)\1/);
+  const shortTitle = shortMatch?.[2]?.trim() || undefined;
   const overlay = /indicator\s*\([\s\S]{0,400}?overlay\s*=\s*true/.test(head);
-  return { title, overlay };
+  return { title, ...(shortTitle ? { shortTitle } : {}), overlay };
 }
 
 const NAMED_COLORS: Record<string, string> = {
@@ -231,6 +254,41 @@ function plotColor(colors: (string | null)[] | undefined, fallback: string): str
   return fallback;
 }
 
+/**
+ * 逐 bar 颜色。Piner 的 colors 是逐 bar 稀疏数组，同色脚本会有几十根重复值；
+ * 去重后只留前几个，调色板再多设置界面就没法看了。
+ */
+function plotPalette(colors: (string | null)[] | undefined): string[] {
+  const seen = new Set<string>();
+  const palette: string[] = [];
+  for (const color of colors ?? []) {
+    if (typeof color !== 'string' || !color.startsWith('#')) continue;
+    const key = color.toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    palette.push(color);
+    if (palette.length >= 8) break;
+  }
+  return palette;
+}
+
+/** plot(..., color=color.new(x, 60)) 里的 60：alpha 通道 40% -> 图表库 transparency 60。 */
+function plotTransparency(colors: (string | null)[] | undefined): number | undefined {
+  for (const color of colors ?? []) {
+    const match = typeof color === 'string' ? /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})$/.exec(color) : null;
+    if (!match) continue;
+    return Math.round((1 - parseInt(match[1], 16) / 255) * 100);
+  }
+  return undefined;
+}
+
+/** Pine 的 linewidth= 只允许 1–4，越界会让图表库设置界面报错。 */
+function plotWidth(value: unknown): number | undefined {
+  const width = Number(value);
+  if (!Number.isFinite(width)) return undefined;
+  return Math.min(4, Math.max(1, Math.round(width)));
+}
+
 function hasNumbers(values: number[] | undefined): boolean {
   return !!values?.some((value) => typeof value === 'number' && Number.isFinite(value));
 }
@@ -244,13 +302,17 @@ async function scanWithPiner(source: string): Promise<PineScanResult> {
   const compiled = compile(source);
   const inputs: PineInputMeta[] = (compiled.metadata.inputs ?? []).map((item) => ({
     id: item.key,
-    title: item.title?.trim() || item.key,
+    // 未写 title 的输入（如 inline 复选框）在 TV 里就是空白，不要用 key 兜底：
+    // Piner 会给重名输入加 " (2)" 后缀，显示出来就成了莫名其妙的 "(2)"。
+    title: item.title?.trim() ?? '',
     type: item.kind as PineInputType,
     defval: item.default,
     ...(item.minval == null ? {} : { minval: item.minval }),
     ...(item.maxval == null ? {} : { maxval: item.maxval }),
     ...(item.step == null ? {} : { step: item.step }),
     ...(item.options == null ? {} : { options: item.options }),
+    ...(item.group?.trim() ? { group: item.group.trim() } : {}),
+    ...(item.tooltip?.trim() ? { tooltip: item.tooltip.trim() } : {}),
   }));
 
   const engine = new Engine(compiled, new ArrayFeed(syntheticPinerBars()));
@@ -262,11 +324,19 @@ async function scanWithPiner(source: string): Promise<PineScanResult> {
     if (plots.length >= 20) break;
     if (!hasNumbers(plot.data)) continue;
     const style = typeof plot.options?.style === 'string' ? plot.options.style : '';
+    const width = plotWidth(plot.options?.linewidth);
+    const transparency = plotTransparency(plot.colors);
+    const palette = plotPalette(plot.colors);
+    const display = typeof plot.options?.display === 'string' ? plot.options.display : '';
     plots.push({
       key: `plot_${plot.id}`,
       title: plot.title?.trim() || `曲线 ${plots.length + 1}`,
       color: plotColor(plot.colors, PALETTE[plots.length % PALETTE.length]),
       ...(style ? { style } : {}),
+      ...(width != null ? { width } : {}),
+      ...(transparency != null ? { transparency } : {}),
+      ...(palette.length > 1 ? { colorPalette: palette } : {}),
+      ...(display === 'none' ? { visible: false } : {}),
     });
   }
   const hlines = [...engine.outputs.hlines.values()].sort((a, b) => a.id - b.id);
@@ -308,7 +378,7 @@ export async function savePineScript(source: string): Promise<PineScriptRecord> 
     throw new Error('没有找到 indicator() 声明');
   }
 
-  const { title: rawTitle, overlay } = parseDeclaration(trimmed);
+  const { title: rawTitle, shortTitle, overlay } = parseDeclaration(trimmed);
 
   let scan: PineScanResult;
   try {
@@ -331,6 +401,7 @@ export async function savePineScript(source: string): Promise<PineScriptRecord> 
   const record: PineScriptRecord = {
     id: newId(),
     title,
+    ...(shortTitle ? { shortTitle } : {}),
     source: trimmed,
     savedAt: Date.now(),
     overlay,
