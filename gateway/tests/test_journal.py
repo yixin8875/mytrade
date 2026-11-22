@@ -160,6 +160,7 @@ class _StatsStore:
         self.base_dir = base_dir
         self.rows = rows
         self.since = None
+        self.execution_since = None
 
     def journal_list(self, limit=200, since=0, login=0, filters=None):
         self.since = since
@@ -176,6 +177,7 @@ class _StatsStore:
         pass
 
     def execution_entry_map(self, login, since):
+        self.execution_since = since
         return {}
 
 
@@ -267,6 +269,27 @@ def test_stats_explicit_since_never_negative(tmp_path):
     journal.stats(days=30, login=1, server_offset=3600, since=-100)
 
     assert store.since == 0
+
+
+def test_stats_execution_window_uses_resolved_start(tmp_path):
+    store = _StatsStore(tmp_path, [_row()])
+    journal = TradeJournal(store)
+
+    journal.stats(days=30, login=1, server_offset=0, timezone_offset_min=480)
+
+    # 默认不传 since 时，执行成本查询必须用算出来的窗口起点；
+    # 直接把 None 传下去会让 int(None) 抛 TypeError，报表整块打不开
+    assert store.execution_since is not None
+    assert store.execution_since == store.since
+
+
+def test_stats_all_range_execution_window_is_zero(tmp_path):
+    store = _StatsStore(tmp_path, [_row()])
+    journal = TradeJournal(store)
+
+    journal.stats(days=0, login=1, server_offset=0, timezone_offset_min=480)
+
+    assert store.execution_since == 0
 
 
 def test_stats_all_range_passes_filters_through(tmp_path):

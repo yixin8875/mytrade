@@ -521,7 +521,8 @@ class TradeJournal:
             "r": r_stats,
             "template": _plan_fidelity(rows, risks, plans, steps),
             "execution": _execution_cross(
-                rows, self.store.execution_entry_map(login, since)
+                # 用算好的窗口起点，不能直接用 since：默认调用时它是 None
+                rows, self.store.execution_entry_map(login, start)
             ),
             "bySymbol": self._breakdown(rows, lambda r: r["symbol"], risks),
             # 与复盘/分析页同口径：平仓时间换算到复盘时区后的整点
