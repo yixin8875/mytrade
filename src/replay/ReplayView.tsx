@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useApp } from '../store/useApp';
 import { ReplayCreate } from './ReplayCreate';
 import { ReplayList } from './ReplayList';
@@ -54,27 +55,21 @@ export function ReplayView() {
   // 网关连上后先读回会话，避免先闪一屏「还没有复盘会话」
   if (!hydrated && route.kind === 'list') {
     return (
-      <div className="h-full overflow-auto bg-console-canvas">
+      <div className="h-full overflow-auto bg-sidebar">
         <div className="mx-auto w-full max-w-[1320px] px-8 py-8">
-          <div className="h-7 w-24 animate-pulse rounded bg-console-line" />
-          <div className="mt-3 h-4 w-64 animate-pulse rounded bg-console-line" />
+          <Skeleton className="h-7 w-24 rounded" />
+          <Skeleton className="mt-3 h-4 w-64 rounded" />
           <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
             {Array.from({ length: 4 }, (_, index) => (
-              <div
-                key={index}
-                className="h-24 animate-pulse rounded-[12px] border border-console-line bg-console-card"
-              />
+              <Skeleton key={index} className="h-24 rounded-xl border border-border bg-card" />
             ))}
           </div>
           <div className="mt-6 space-y-2">
             {Array.from({ length: 5 }, (_, index) => (
-              <div
-                key={index}
-                className="h-12 animate-pulse rounded-[10px] border border-console-line bg-console-card"
-              />
+              <Skeleton key={index} className="h-12 rounded-lg border border-border bg-card" />
             ))}
           </div>
-          <p className="mt-4 text-[11px] text-console-muted">正在从网关读取复盘会话…</p>
+          <p className="mt-4 text-[11px] text-muted-foreground">正在从网关读取复盘会话…</p>
         </div>
       </div>
     );
@@ -86,8 +81,8 @@ export function ReplayView() {
       {route.kind === 'session' && session && <ReplayWorkspace sessionId={route.id} />}
       {route.kind === 'report' && session && <ReplayReport sessionId={route.id} />}
       {route.kind !== 'list' && !session && (
-        <div className="flex h-full items-center justify-center bg-console-canvas">
-          <div className="text-[12px] text-console-muted">正在打开复盘会话…</div>
+        <div className="flex h-full items-center justify-center bg-sidebar">
+          <div className="text-[12px] text-muted-foreground">正在打开复盘会话…</div>
         </div>
       )}
       <ReplayCreate open={creating} onClose={() => setCreating(false)} />

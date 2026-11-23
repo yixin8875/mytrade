@@ -22,6 +22,8 @@ import type {
   Position,
   PositionPlanStep,
 } from '../gateway/types';
+import { Button } from './ui/button';
+import { Tabs, TabsList, TabsTab } from './ui/tabs';
 
 interface Deal {
   ticket: number;
@@ -410,7 +412,7 @@ export function TradeDock() {
 
   return (
     <section
-      className="relative flex shrink-0 flex-col border-t border-tv-border bg-tv-panel"
+      className="relative flex shrink-0 flex-col border-t border-border bg-card"
       style={{ height: dockCollapsed ? 32 : dockHeight }}
       data-dock
     >
@@ -420,36 +422,48 @@ export function TradeDock() {
           onPointerMove={moveResize}
           onPointerUp={endResize}
           onPointerCancel={endResize}
-          className="absolute -top-[3px] left-0 right-0 z-10 h-[6px] cursor-ns-resize hover:bg-tv-accent/30"
+          className="absolute -top-[3px] left-0 right-0 z-10 h-[6px] cursor-ns-resize hover:bg-brand/30"
           title="拖动调整高度"
           aria-hidden="true"
         />
       )}
 
-      <div className="flex h-8 shrink-0 items-stretch border-b border-tv-border bg-tv-raised/70 px-1">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setDockTab(tab.key)}
-            className={clsx(
-              'relative flex items-center gap-1.5 px-3 text-[12px] transition-colors',
-              dockTab === tab.key
-                ? 'font-medium text-tv-text'
-                : 'text-tv-muted hover:text-tv-text',
-            )}
+      <div className="flex h-8 shrink-0 items-stretch border-b border-border bg-muted/50 pl-1">
+        <Tabs
+          value={dockTab}
+          onValueChange={(next) => {
+            if (
+              next === 'positions' ||
+              next === 'orders' ||
+              next === 'deals' ||
+              next === 'closed'
+            ) {
+              setDockTab(next);
+            }
+          }}
+          className="min-w-0 flex-1 gap-0"
+        >
+          <TabsList
+            variant="underline"
+            className="h-full w-full justify-start gap-0.5 rounded-none px-0"
           >
-            {tab.label}
-            <span className="num font-mono text-[10px] text-tv-faint">{counts[tab.key]}</span>
-            {dockTab === tab.key && (
-              <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-tv-accent" />
-            )}
-          </button>
-        ))}
+            {TABS.map((tab) => (
+              <TabsTab key={tab.key} value={tab.key} className="h-6 gap-1.5 px-3 text-[12px]">
+                {tab.label}
+                <span className="num font-mono text-[10px] text-muted-foreground/60">
+                  {counts[tab.key]}
+                </span>
+              </TabsTab>
+            ))}
+          </TabsList>
+        </Tabs>
 
-        <div className="ml-auto flex items-center gap-1 pr-1">
+        <div className="ml-auto flex items-center gap-1 px-1">
           {dockTab === 'positions' && (
             <>
-              <button
+              <Button
+                variant={confirmFlatten ? 'destructive' : 'ghost'}
+                size="xs"
                 onClick={() => void flatten()}
                 disabled={!symbol}
                 title={
@@ -458,10 +472,8 @@ export function TradeDock() {
                     : '平掉当前品种的全部持仓，并撤销挂单'
                 }
                 className={clsx(
-                  'h-6 whitespace-nowrap rounded px-2 text-[11px] transition-colors',
-                  confirmFlatten
-                    ? 'bg-tv-down text-white'
-                    : 'text-tv-down hover:bg-tv-down-soft',
+                  'whitespace-nowrap px-2 text-[11px]',
+                  !confirmFlatten && 'text-destructive-foreground hover:bg-destructive/10',
                 )}
               >
                 {confirmFlatten
@@ -471,55 +483,59 @@ export function TradeDock() {
                   : symbol
                     ? `平掉 ${symbol} 全部`
                     : '平掉当前品种全部'}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant={confirmAll ? 'destructive' : 'ghost'}
+                size="xs"
                 onClick={() => void closeAll()}
                 title="平掉账户里所有品种的持仓"
                 className={clsx(
-                  'h-6 whitespace-nowrap rounded px-2 text-[11px] transition-colors',
-                  confirmAll
-                    ? 'bg-tv-down text-white'
-                    : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+                  'whitespace-nowrap px-2 text-[11px]',
+                  !confirmAll && 'text-muted-foreground',
                 )}
               >
                 {confirmAll ? '确认平掉所有品种？' : '平掉账户全部'}
-              </button>
+              </Button>
             </>
           )}
           {(dockTab === 'deals' || dockTab === 'closed') && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon-xs"
               onClick={() => setTick((value) => value + 1)}
               disabled={loading}
               title="刷新"
               aria-label="刷新历史"
-              className="flex h-6 w-6 items-center justify-center rounded text-tv-muted hover:bg-tv-hover hover:text-tv-text disabled:opacity-40"
+              className="text-muted-foreground"
             >
               <RefreshCw
                 size={13}
                 strokeWidth={1.5}
                 className={loading ? 'animate-spin' : undefined}
               />
-            </button>
+            </Button>
           )}
-          <button
+          <Button
+            variant="ghost"
+            size="icon-xs"
             onClick={() => setDockCollapsed(!dockCollapsed)}
             title={dockCollapsed ? '展开托盘' : '收起托盘'}
             aria-label={dockCollapsed ? '展开托盘' : '收起托盘'}
-            className="flex h-6 w-6 items-center justify-center rounded text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+            className="text-muted-foreground"
           >
             {dockCollapsed ? (
               <ChevronUp size={14} strokeWidth={1.5} />
             ) : (
               <ChevronDown size={14} strokeWidth={1.5} />
             )}
-          </button>
+          </Button>
         </div>
       </div>
 
       {dockCollapsed ? (
         <button
           onClick={() => setDockCollapsed(false)}
-          className="flex flex-1 items-center px-3 text-[11px] text-tv-muted hover:text-tv-text"
+          className="flex flex-1 items-center px-3 text-[11px] text-muted-foreground hover:text-foreground"
         >
           持仓 {positions.length} · 挂单 {orders.length} · 盈亏{' '}
           <span className={clsx('num ml-1 font-mono', signedClass(totalProfit(positions)))}>
@@ -532,7 +548,7 @@ export function TradeDock() {
             <>
               <div
                 className={clsx(
-                  'sticky top-0 z-[1] grid items-center gap-2 border-b border-tv-border bg-tv-panel px-2 py-1 text-[10px] text-tv-faint',
+                  'sticky top-0 z-[1] grid items-center gap-2 border-b border-border bg-card px-2 py-1 text-[10px] text-muted-foreground/60',
                   GRID_POSITION,
                 )}
               >
@@ -546,7 +562,7 @@ export function TradeDock() {
                 <span className="text-right">操作</span>
               </div>
               {positions.length === 0 && (
-                <div className="px-3 py-4 text-[12px] text-tv-muted">当前没有持仓</div>
+                <div className="px-3 py-4 text-[12px] text-muted-foreground">当前没有持仓</div>
               )}
               {positions.map((position) => {
                 const info = infoOf(position.symbol);
@@ -554,10 +570,10 @@ export function TradeDock() {
                 const current = priceOf(position);
                 const expanded = detailFor === position.ticket;
                 return (
-                  <div key={position.ticket} className="border-b border-tv-border/40">
+                  <div key={position.ticket} className="border-b border-border/60">
                     <div
                       className={clsx(
-                        'grid h-9 items-center gap-2 px-2 text-[11px] hover:bg-tv-hover/60',
+                        'grid h-9 items-center gap-2 px-2 text-[11px] hover:bg-accent/40',
                         GRID_POSITION,
                       )}
                     >
@@ -570,27 +586,27 @@ export function TradeDock() {
                           className={clsx(
                             'rounded px-1 py-0.5 text-[10px] font-medium',
                             position.side === 'buy'
-                              ? 'bg-tv-up-soft text-tv-up'
-                              : 'bg-tv-down-soft text-tv-down',
+                              ? 'bg-success/10 text-success-foreground'
+                              : 'bg-destructive/10 text-destructive-foreground',
                           )}
                         >
                           {position.side === 'buy' ? '多' : '空'}
                         </span>
-                        <span className="truncate font-medium text-tv-text">{position.symbol}</span>
+                        <span className="truncate font-medium text-foreground">{position.symbol}</span>
                       </button>
-                      <span className="num text-right font-mono text-tv-text">
+                      <span className="num text-right font-mono text-foreground">
                         {fmtVolume(position.volume, info?.volumeStep ?? 0.01)}
                       </span>
-                      <span className="num text-right font-mono text-tv-muted">
+                      <span className="num text-right font-mono text-muted-foreground">
                         {fmtPrice(position.openPrice, digits)}
                       </span>
-                      <span className="num text-right font-mono text-tv-text">
+                      <span className="num text-right font-mono text-foreground">
                         {fmtPrice(current, digits)}
                       </span>
-                      <span className="num text-right font-mono text-tv-warn">
+                      <span className="num text-right font-mono text-warning-foreground">
                         {position.sl != null ? fmtPrice(position.sl, digits) : '—'}
                       </span>
-                      <span className="num text-right font-mono text-tv-accent">
+                      <span className="num text-right font-mono text-brand">
                         {position.tp != null ? fmtPrice(position.tp, digits) : '—'}
                       </span>
                       <span
@@ -599,71 +615,75 @@ export function TradeDock() {
                         {fmtSigned(position.profit)}
                       </span>
                       <span className="flex items-center justify-end gap-1">
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="xs"
                           onClick={() => void breakeven(position)}
                           disabled={busy === position.ticket}
-                          className="h-6 rounded px-1.5 text-[10px] text-tv-muted hover:bg-tv-hover hover:text-tv-text disabled:opacity-40"
+                          className="px-1.5 text-[10px] text-muted-foreground"
                         >
                           保本
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          variant={confirmHalf === position.ticket ? 'destructive' : 'ghost'}
+                          size="xs"
                           onClick={() => void closeHalf(position)}
                           disabled={busy === position.ticket}
                           className={clsx(
-                            'h-6 rounded px-1.5 text-[10px] disabled:opacity-40',
-                            confirmHalf === position.ticket
-                              ? 'bg-tv-down text-white'
-                              : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+                            'px-1.5 text-[10px]',
+                            confirmHalf !== position.ticket && 'text-muted-foreground',
                           )}
                         >
                           {confirmHalf === position.ticket ? '确认？' : '平掉一半'}
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          variant={confirmClose === position.ticket ? 'destructive' : 'ghost'}
+                          size="xs"
                           onClick={() => void close(position.ticket)}
                           disabled={busy === position.ticket}
                           className={clsx(
-                            'h-6 rounded px-1.5 text-[10px] disabled:opacity-40',
-                            confirmClose === position.ticket
-                              ? 'bg-tv-down text-white'
-                              : 'text-tv-down hover:bg-tv-down-soft',
+                            'px-1.5 text-[10px]',
+                            confirmClose !== position.ticket &&
+                              'text-destructive-foreground hover:bg-destructive/10',
                           )}
                         >
                           {confirmClose === position.ticket ? '确认？' : '平仓'}
-                        </button>
+                        </Button>
                       </span>
                     </div>
 
                     {expanded && (
-                      <div className="grid grid-cols-[1fr_1fr_1fr] gap-3 border-t border-tv-border/40 bg-tv-raised/50 px-3 py-2">
+                      <div className="grid grid-cols-[1fr_1fr_1fr] gap-3 border-t border-border/60 bg-muted/40 px-3 py-2">
                         <div>
-                          <div className="mb-1 text-[10px] text-tv-faint">止损 / 止盈</div>
+                          <div className="mb-1 text-[10px] text-muted-foreground/60">止损 / 止盈</div>
                           <div className="flex items-center gap-1">
                             <input
                               value={slInput}
                               onChange={(event) => setSlInput(event.target.value)}
                               placeholder="止损"
                               aria-label={`${position.symbol} 止损价`}
-                              className="h-6 w-[78px] rounded border border-tv-border bg-tv-panel px-1.5 font-mono text-[11px] text-tv-warn outline-none focus:border-tv-accent"
+                              className="h-6 w-[78px] rounded border border-border bg-card px-1.5 font-mono text-[11px] text-warning-foreground outline-none focus:border-brand"
                             />
                             <input
                               value={tpInput}
                               onChange={(event) => setTpInput(event.target.value)}
                               placeholder="止盈"
                               aria-label={`${position.symbol} 止盈价`}
-                              className="h-6 w-[78px] rounded border border-tv-border bg-tv-panel px-1.5 font-mono text-[11px] text-tv-accent outline-none focus:border-tv-accent"
+                              className="h-6 w-[78px] rounded border border-border bg-card px-1.5 font-mono text-[11px] text-brand outline-none focus:border-brand"
                             />
-                            <button
+                            <Button
+                              size="xs"
                               onClick={() => void saveStops(position)}
                               disabled={busy === position.ticket}
-                              className="h-6 rounded bg-tv-accent px-2 text-[10px] text-white disabled:opacity-40"
+                              className="px-2 text-[10px]"
                             >
                               保存
-                            </button>
+                            </Button>
                           </div>
                         </div>
 
                         <div>
-                          <div className="mb-1 text-[10px] text-tv-faint">
+                          <div className="mb-1 text-[10px] text-muted-foreground/60">
                             移动止损
                             {position.trailing ? `（${position.trailing.distancePoints} 点）` : ''}
                           </div>
@@ -673,33 +693,37 @@ export function TradeDock() {
                               onChange={(event) => setTrailDist(event.target.value)}
                               inputMode="decimal"
                               aria-label={`${position.symbol} 移动止损距离`}
-                              className="h-6 w-[64px] rounded border border-tv-border bg-tv-panel px-1.5 font-mono text-[11px] text-tv-text outline-none focus:border-tv-accent"
+                              className="h-6 w-[64px] rounded border border-border bg-card px-1.5 font-mono text-[11px] text-foreground outline-none focus:border-brand"
                             />
-                            <span className="text-[10px] text-tv-faint">点</span>
-                            <button
+                            <span className="text-[10px] text-muted-foreground/60">点</span>
+                            <Button
+                              variant="secondary"
+                              size="xs"
                               onClick={() => void applyTrailing(position)}
                               disabled={busy === position.ticket}
-                              className="h-6 rounded bg-tv-raised px-2 text-[10px] text-tv-text hover:bg-tv-hover disabled:opacity-40"
+                              className="px-2 text-[10px]"
                             >
                               {position.trailing ? '更新' : '启动'}
-                            </button>
+                            </Button>
                             {position.trailing && (
-                              <button
+                              <Button
+                                variant="ghost"
+                                size="xs"
                                 onClick={() => void clearTrailing(position)}
                                 disabled={busy === position.ticket}
-                                className="h-6 rounded px-1.5 text-[10px] text-tv-muted hover:text-tv-down disabled:opacity-40"
+                                className="px-1.5 text-[10px] text-muted-foreground hover:text-destructive-foreground"
                               >
                                 取消
-                              </button>
+                              </Button>
                             )}
                           </div>
                         </div>
 
                         <div>
-                          <div className="mb-1 flex items-center gap-1.5 text-[10px] text-tv-faint">
+                          <div className="mb-1 flex items-center gap-1.5 text-[10px] text-muted-foreground/60">
                             分批止盈
                             {position.plan && position.plan.steps.length > 0 && (
-                              <span className="text-tv-muted">
+                              <span className="text-muted-foreground">
                                 {
                                   position.plan.steps.filter((s) => !s.done && !s.skipped)
                                     .length
@@ -709,30 +733,34 @@ export function TradeDock() {
                             )}
                           </div>
                           <div className="flex flex-wrap items-center gap-1">
-                            <button
+                            <Button
+                              variant="secondary"
+                              size="xs"
                               onClick={() => void addPlanStep(position)}
                               disabled={busy === position.ticket}
-                              className="h-6 rounded bg-tv-raised px-2 text-[10px] text-tv-text hover:bg-tv-hover disabled:opacity-40"
+                              className="px-2 text-[10px]"
                             >
                               ＋ 加一档
-                            </button>
+                            </Button>
                             {position.plan && position.plan.steps.length > 0 && (
-                              <button
+                              <Button
+                                variant="ghost"
+                                size="xs"
                                 onClick={() => void clearPlan(position)}
                                 disabled={busy === position.ticket}
-                                className="h-6 rounded px-1.5 text-[10px] text-tv-muted hover:text-tv-down disabled:opacity-40"
+                                className="px-1.5 text-[10px] text-muted-foreground hover:text-destructive-foreground"
                               >
                                 清空
-                              </button>
+                              </Button>
                             )}
                             {position.plan?.steps.map((step) => (
                               <span
                                 key={step.id}
                                 className={clsx(
-                                  'flex items-center gap-1 rounded bg-tv-panel px-1.5 py-0.5 font-mono text-[10px]',
+                                  'flex items-center gap-1 rounded bg-card px-1.5 py-0.5 font-mono text-[10px]',
                                   step.done || step.skipped
-                                    ? 'text-tv-faint line-through'
-                                    : 'text-tv-text',
+                                    ? 'text-muted-foreground/60 line-through'
+                                    : 'text-foreground',
                                 )}
                                 title={
                                   step.done ? '已执行' : step.skipped ? '已跳过' : '等待触发'
@@ -743,7 +771,7 @@ export function TradeDock() {
                                   <button
                                     onClick={() => void removePlanStep(position, step)}
                                     aria-label={`删除 ${step.price} 分批`}
-                                    className="text-tv-faint hover:text-tv-down"
+                                    className="text-muted-foreground/60 hover:text-destructive-foreground"
                                   >
                                     <X size={10} strokeWidth={2} />
                                   </button>
@@ -764,7 +792,7 @@ export function TradeDock() {
             <>
               <div
                 className={clsx(
-                  'sticky top-0 z-[1] grid items-center gap-2 border-b border-tv-border bg-tv-panel px-2 py-1 text-[10px] text-tv-faint',
+                  'sticky top-0 z-[1] grid items-center gap-2 border-b border-border bg-card px-2 py-1 text-[10px] text-muted-foreground/60',
                   GRID_ORDER,
                 )}
               >
@@ -778,7 +806,7 @@ export function TradeDock() {
                 <span className="text-right">操作</span>
               </div>
               {orders.length === 0 && (
-                <div className="px-3 py-4 text-[12px] text-tv-muted">当前没有挂单</div>
+                <div className="px-3 py-4 text-[12px] text-muted-foreground">当前没有挂单</div>
               )}
               {orders.map((order) => {
                 const info = infoOf(order.symbol);
@@ -787,37 +815,39 @@ export function TradeDock() {
                   <div
                     key={order.ticket}
                     className={clsx(
-                      'grid h-9 items-center gap-2 border-b border-tv-border/40 px-2 text-[11px] hover:bg-tv-hover/60',
+                      'grid h-9 items-center gap-2 border-b border-border/60 px-2 text-[11px] hover:bg-accent/40',
                       GRID_ORDER,
                     )}
                   >
                     <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="rounded bg-tv-raised px-1 py-0.5 text-[10px] text-tv-muted">
+                      <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
                         {order.side === 'buy' ? '买' : '卖'}
                       </span>
-                      <span className="truncate font-medium text-tv-text">{order.symbol}</span>
+                      <span className="truncate font-medium text-foreground">{order.symbol}</span>
                     </span>
-                    <span className="text-tv-muted">{orderTypeLabel(order.type)}</span>
-                    <span className="num text-right font-mono text-tv-text">
+                    <span className="text-muted-foreground">{orderTypeLabel(order.type)}</span>
+                    <span className="num text-right font-mono text-foreground">
                       {fmtVolume(order.volume, info?.volumeStep ?? 0.01)}
                     </span>
-                    <span className="num text-right font-mono text-tv-text">
+                    <span className="num text-right font-mono text-foreground">
                       {fmtPrice(order.price, digits)}
                     </span>
-                    <span className="num text-right font-mono text-tv-warn">
+                    <span className="num text-right font-mono text-warning-foreground">
                       {order.sl != null ? fmtPrice(order.sl, digits) : '—'}
                     </span>
-                    <span className="num text-right font-mono text-tv-accent">
+                    <span className="num text-right font-mono text-brand">
                       {order.tp != null ? fmtPrice(order.tp, digits) : '—'}
                     </span>
-                    <span className="text-right text-tv-muted">{order.state || '—'}</span>
+                    <span className="text-right text-muted-foreground">{order.state || '—'}</span>
                     <span className="text-right">
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="xs"
                         onClick={() => void cancelOrderWithUndo(order, notify)}
-                        className="h-6 rounded px-1.5 text-[10px] text-tv-down hover:bg-tv-down-soft"
+                        className="px-1.5 text-[10px] text-destructive-foreground hover:bg-destructive/10"
                       >
                         撤单
-                      </button>
+                      </Button>
                     </span>
                   </div>
                 );
@@ -829,7 +859,7 @@ export function TradeDock() {
             <>
               <div
                 className={clsx(
-                  'sticky top-0 z-[1] grid items-center gap-2 border-b border-tv-border bg-tv-panel px-2 py-1 text-[10px] text-tv-faint',
+                  'sticky top-0 z-[1] grid items-center gap-2 border-b border-border bg-card px-2 py-1 text-[10px] text-muted-foreground/60',
                   GRID_DEAL,
                 )}
               >
@@ -843,7 +873,7 @@ export function TradeDock() {
                 <span className="text-right">类型</span>
               </div>
               {deals.length === 0 && (
-                <div className="px-3 py-4 text-[12px] text-tv-muted">
+                <div className="px-3 py-4 text-[12px] text-muted-foreground">
                   {loading ? '加载成交记录…' : '最近 7 天没有成交'}
                 </div>
               )}
@@ -851,26 +881,26 @@ export function TradeDock() {
                 <div
                   key={`${deal.ticket}`}
                   className={clsx(
-                    'grid h-8 items-center gap-2 border-b border-tv-border/40 px-2 text-[11px] hover:bg-tv-hover/60',
+                    'grid h-8 items-center gap-2 border-b border-border/60 px-2 text-[11px] hover:bg-accent/40',
                     GRID_DEAL,
                   )}
                 >
-                  <span className="num font-mono text-tv-muted">{fmtTime(deal.time)}</span>
-                  <span className="truncate font-medium text-tv-text">{deal.symbol}</span>
-                  <span className={deal.side === 'buy' ? 'text-tv-up' : 'text-tv-down'}>
+                  <span className="num font-mono text-muted-foreground">{fmtTime(deal.time)}</span>
+                  <span className="truncate font-medium text-foreground">{deal.symbol}</span>
+                  <span className={deal.side === 'buy' ? 'text-success-foreground' : 'text-destructive-foreground'}>
                     {deal.side === 'buy' ? '买' : '卖'}
                   </span>
-                  <span className="num text-right font-mono text-tv-text">
+                  <span className="num text-right font-mono text-foreground">
                     {deal.volume.toFixed(2)}
                   </span>
-                  <span className="num text-right font-mono text-tv-text">{deal.price}</span>
+                  <span className="num text-right font-mono text-foreground">{deal.price}</span>
                   <span className={clsx('num text-right font-mono', signedClass(deal.profit))}>
                     {fmtSigned(deal.profit)}
                   </span>
-                  <span className="num text-right font-mono text-tv-muted">
+                  <span className="num text-right font-mono text-muted-foreground">
                     {fmtMoney(deal.commission + deal.swap)}
                   </span>
-                  <span className="text-right text-[10px] text-tv-muted">
+                  <span className="text-right text-[10px] text-muted-foreground">
                     {deal.entry === 0 ? '开仓' : deal.entry === 1 ? '平仓' : '—'}
                   </span>
                 </div>
@@ -882,7 +912,7 @@ export function TradeDock() {
             <>
               <div
                 className={clsx(
-                  'sticky top-0 z-[1] grid items-center gap-2 border-b border-tv-border bg-tv-panel px-2 py-1 text-[10px] text-tv-faint',
+                  'sticky top-0 z-[1] grid items-center gap-2 border-b border-border bg-card px-2 py-1 text-[10px] text-muted-foreground/60',
                   GRID_CLOSED,
                 )}
               >
@@ -896,7 +926,7 @@ export function TradeDock() {
                 <span className="text-right">持续</span>
               </div>
               {closed.length === 0 && (
-                <div className="px-3 py-4 text-[12px] text-tv-muted">
+                <div className="px-3 py-4 text-[12px] text-muted-foreground">
                   {loading ? '加载已平仓记录…' : '最近 30 天没有已平仓交易'}
                 </div>
               )}
@@ -907,28 +937,28 @@ export function TradeDock() {
                   <div
                     key={row.position_id}
                     className={clsx(
-                      'grid h-8 items-center gap-2 border-b border-tv-border/40 px-2 text-[11px] hover:bg-tv-hover/60',
+                      'grid h-8 items-center gap-2 border-b border-border/60 px-2 text-[11px] hover:bg-accent/40',
                       GRID_CLOSED,
                     )}
                   >
-                    <span className="num font-mono text-tv-muted">{fmtTime(row.close_time)}</span>
-                    <span className="truncate font-medium text-tv-text">{row.symbol}</span>
-                    <span className={row.side === 'buy' ? 'text-tv-up' : 'text-tv-down'}>
+                    <span className="num font-mono text-muted-foreground">{fmtTime(row.close_time)}</span>
+                    <span className="truncate font-medium text-foreground">{row.symbol}</span>
+                    <span className={row.side === 'buy' ? 'text-success-foreground' : 'text-destructive-foreground'}>
                       {row.side === 'buy' ? '多' : '空'}
                     </span>
-                    <span className="num text-right font-mono text-tv-text">
+                    <span className="num text-right font-mono text-foreground">
                       {fmtVolume(row.volume, 0.01)}
                     </span>
-                    <span className="num text-right font-mono text-tv-muted">
+                    <span className="num text-right font-mono text-muted-foreground">
                       {fmtPrice(row.entry_price, digits)} → {fmtPrice(row.exit_price, digits)}
                     </span>
                     <span className={clsx('num text-right font-mono', signedClass(net))}>
                       {fmtSigned(net)}
                     </span>
-                    <span className="text-right text-[10px] text-tv-muted">
+                    <span className="text-right text-[10px] text-muted-foreground">
                       {closedByLabel(row.closed_by)}
                     </span>
-                    <span className="num text-right font-mono text-tv-faint">
+                    <span className="num text-right font-mono text-muted-foreground/60">
                       {row.duration_sec >= 3600
                         ? `${(row.duration_sec / 3600).toFixed(1)}h`
                         : `${Math.max(1, Math.round(row.duration_sec / 60))}m`}

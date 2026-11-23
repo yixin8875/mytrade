@@ -62,6 +62,6 @@ export function snapToLevel(value: number, digits: number, point: number): numbe
 }
 
 export function signedClass(value: number | null | undefined): string {
-  if (value == null || value === 0) return 'text-tv-muted';
-  return value > 0 ? 'text-tv-up' : 'text-tv-down';
+  if (value == null || value === 0) return 'text-muted-foreground';
+  return value > 0 ? 'text-success-foreground' : 'text-destructive-foreground';
 }

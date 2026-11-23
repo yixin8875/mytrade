@@ -1,13 +1,15 @@
 import { type ReactNode } from 'react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
+import { Button } from '../ui/button';
+import { Kbd as CossKbd } from '../ui/kbd';
 
 export const inputClass =
-  'h-8 w-full rounded-lg border border-tv-border bg-tv-raised px-2 font-mono text-[12px] text-tv-text outline-none transition-colors focus:border-tv-accent focus:bg-tv-panel';
+  'h-8 w-full min-w-0 rounded-lg border border-input bg-card px-2 font-mono text-[12px] text-foreground outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 disabled:opacity-60';
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[11px] text-tv-muted">{label}</span>
+      <span className="mb-1.5 block text-[11px] text-muted-foreground">{label}</span>
       {children}
     </label>
   );
@@ -16,8 +18,8 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 export function PreviewRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <span className="text-tv-muted">{label}</span>
-      <span className="num font-mono text-tv-text">{value}</span>
+      <span className="text-muted-foreground">{label}</span>
+      <span className="num font-mono text-foreground">{value}</span>
     </div>
   );
 }
@@ -33,8 +35,8 @@ export function ConfirmRow({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-tv-muted">{label}</dt>
-      <dd className={clsx('num font-mono', accent ?? 'text-tv-text')}>{value}</dd>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={cn('num font-mono', accent ?? 'text-foreground')}>{value}</dd>
     </div>
   );
 }
@@ -53,28 +55,30 @@ export function RuleButton({
 }) {
   const activeClass =
     tone === 'up'
-      ? 'border-tv-up/50 bg-tv-up/10 text-tv-up'
+      ? 'border-success/50 bg-success/10 text-success-foreground'
       : tone === 'down'
-        ? 'border-tv-down/50 bg-tv-down/10 text-tv-down'
-        : 'border-tv-border bg-tv-panel text-tv-muted';
+        ? 'border-destructive/50 bg-destructive/10 text-destructive-foreground'
+        : 'border-border bg-card text-muted-foreground';
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="xs"
       onClick={onClick}
-      className={clsx(
-        'h-5 rounded border px-1 text-[10px] leading-none transition-colors',
-        active ? activeClass : 'border-transparent text-tv-faint hover:bg-tv-hover',
+      className={cn(
+        'h-5 rounded border px-1 text-[10px] leading-none',
+        active ? activeClass : 'border-transparent text-muted-foreground/60 hover:bg-accent',
       )}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
 export function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-tv-border bg-tv-panel px-1 font-mono text-[11px] text-tv-muted">
+    <CossKbd className="h-5 min-w-5 rounded border border-border bg-card font-mono text-[11px] text-muted-foreground">
       {children}
-    </kbd>
+    </CossKbd>
   );
 }

@@ -73,31 +73,28 @@ describe('accentForTheme', () => {
 describe('applyAccent', () => {
   it('默认色不覆盖 CSS 变量', () => {
     const style = document.documentElement.style;
-    style.setProperty('--color-tv-accent', '#ff0000');
+    style.setProperty('--brand', '#ff0000');
 
     applyAccent(DEFAULT_ACCENT, 'light');
 
-    expect(style.getPropertyValue('--color-tv-accent')).toBe('');
-    expect(style.getPropertyValue('--color-console-accent')).toBe('');
+    expect(style.getPropertyValue('--brand')).toBe('');
+    expect(style.getPropertyValue('--brand-soft')).toBe('');
   });
 
-  it('自定义色写入四个变量，柔色底随主题变化', () => {
+  it('自定义色写入品牌变量，柔色底随主题变化', () => {
     applyAccent('#b4541f', 'light');
     const style = document.documentElement.style;
 
-    expect(style.getPropertyValue('--color-tv-accent')).toBe(accentForTheme('#b4541f', 'light'));
-    expect(style.getPropertyValue('--color-console-accent')).toBe(
-      accentForTheme('#b4541f', 'light'),
-    );
-    expect(style.getPropertyValue('--color-tv-accent-soft')).toMatch(/^#[0-9a-f]{6}$/);
+    expect(style.getPropertyValue('--brand')).toBe(accentForTheme('#b4541f', 'light'));
+    expect(style.getPropertyValue('--brand-soft')).toMatch(/^#[0-9a-f]{6}$/);
 
-    const lightSoft = style.getPropertyValue('--color-tv-accent-soft');
+    const lightSoft = style.getPropertyValue('--brand-soft');
     applyAccent('#b4541f', 'dark');
-    expect(style.getPropertyValue('--color-tv-accent-soft')).not.toBe(lightSoft);
+    expect(style.getPropertyValue('--brand-soft')).not.toBe(lightSoft);
   });
 
   it('非法颜色等同默认色', () => {
     applyAccent('nope', 'dark');
-    expect(document.documentElement.style.getPropertyValue('--color-tv-accent')).toBe('');
+    expect(document.documentElement.style.getPropertyValue('--brand')).toBe('');
   });
 });

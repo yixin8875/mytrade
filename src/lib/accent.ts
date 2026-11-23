@@ -85,30 +85,26 @@ export function accentForTheme(hex: string, theme: Theme): string {
   return mix(base, toward, hi);
 }
 
-const PANELS: Record<Theme, { tv: string; console: string; soft: number }> = {
-  light: { tv: '#ffffff', console: '#fffdf8', soft: 0.11 },
-  white: { tv: '#ffffff', console: '#ffffff', soft: 0.11 },
-  dark: { tv: '#1a1d23', console: '#211c16', soft: 0.16 },
+const PANELS: Record<Theme, { card: string; soft: number }> = {
+  light: { card: '#ffffff', soft: 0.11 },
+  white: { card: '#ffffff', soft: 0.11 },
+  dark: { card: '#16171a', soft: 0.16 },
 };
 
 /**
- * 把强调色写到根节点。默认色不做覆盖，index.css 里浅色/深色各自的默认值照常生效；
+ * 把品牌强调色写到根节点。默认色不做覆盖，index.css 里各主题的默认值照常生效；
  * 用户改过才写入，强调色与柔色底随主题一起算。
  */
 export function applyAccent(hex: string, theme: Theme): void {
   const root = document.documentElement.style;
   const accent = normalizeHex(hex);
   if (!accent || accent === DEFAULT_ACCENT) {
-    root.removeProperty('--color-tv-accent');
-    root.removeProperty('--color-console-accent');
-    root.removeProperty('--color-tv-accent-soft');
-    root.removeProperty('--color-console-accent-soft');
+    root.removeProperty('--brand');
+    root.removeProperty('--brand-soft');
     return;
   }
   const resolved = accentForTheme(accent, theme);
   const panels = PANELS[theme];
-  root.setProperty('--color-tv-accent', resolved);
-  root.setProperty('--color-console-accent', resolved);
-  root.setProperty('--color-tv-accent-soft', mix(panels.tv, resolved, panels.soft));
-  root.setProperty('--color-console-accent-soft', mix(panels.console, resolved, panels.soft));
+  root.setProperty('--brand', resolved);
+  root.setProperty('--brand-soft', mix(panels.card, resolved, panels.soft));
 }

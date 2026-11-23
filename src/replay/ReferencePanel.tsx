@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { clsx } from 'clsx';
 import { Camera, Eye, EyeOff, RotateCcw, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { gateway } from '../gateway/client';
 import type { RuleCheck, TradeNoteDetail } from '../gateway/types';
 import { isShotMeta, shotY, type ShotMeta } from '../chart/tv/shotMeta';
@@ -28,9 +29,9 @@ function fmtDuration(sec: number): string {
 }
 
 function ruleMark(followed: boolean | null): { text: string; tone: string } {
-  if (followed === true) return { text: '遵守', tone: 'text-console-gain' };
-  if (followed === false) return { text: '违反', tone: 'text-console-loss' };
-  return { text: '未评估', tone: 'text-console-faint' };
+  if (followed === true) return { text: '遵守', tone: 'text-success-foreground' };
+  if (followed === false) return { text: '违反', tone: 'text-destructive-foreground' };
+  return { text: '未评估', tone: 'text-muted-foreground/60' };
 }
 
 /** 实盘交易的只读摘要；参照面板与报告共用同一份字段与文案 */
@@ -45,17 +46,17 @@ export function ReferenceSummary({
 }) {
   return (
     <div
-      className={clsx(
-        'grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] text-console-muted',
+      className={cn(
+        'grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] text-muted-foreground',
         className,
       )}
     >
       <span>
         方向{' '}
         <b
-          className={clsx(
+          className={cn(
             'font-normal',
-            reference.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
+            reference.side === 'buy' ? 'text-success-foreground' : 'text-destructive-foreground',
           )}
         >
           {reference.side === 'buy' ? '多' : '空'} {fmtVolume(reference.volume)}
@@ -63,65 +64,65 @@ export function ReferenceSummary({
       </span>
       <span className="text-right">
         盈亏{' '}
-        <b className={clsx('font-mono font-normal', signedClass(reference.profit))}>
+        <b className={cn('font-mono font-normal', signedClass(reference.profit))}>
           {fmtSigned(reference.profit)}
         </b>
         {reference.r != null && (
-          <span className={clsx('ml-1 font-mono', signedClass(reference.r))}>
+          <span className={cn('ml-1 font-mono', signedClass(reference.r))}>
             {fmtSigned(reference.r)}R
           </span>
         )}
       </span>
       <span>
         入场{' '}
-        <b className="font-mono font-normal text-console-ink-2">
+        <b className="font-mono font-normal text-foreground/80">
           {fmtPrice(reference.entry, digits)}
         </b>
       </span>
       <span className="text-right">
         出场{' '}
-        <b className="font-mono font-normal text-console-ink-2">
+        <b className="font-mono font-normal text-foreground/80">
           {fmtPrice(reference.exit, digits)}
         </b>
       </span>
-      <span className="col-span-2 font-mono text-console-faint">
+      <span className="col-span-2 font-mono text-muted-foreground/60">
         {fmtDateTime(reference.openTs)} → {fmtDateTime(reference.closeTs)}
       </span>
       <span>
         持仓{' '}
-        <b className="font-normal text-console-ink-2">
+        <b className="font-normal text-foreground/80">
           {fmtDuration(reference.closeTs - reference.openTs)}
         </b>
       </span>
       <span className="text-right">
         平仓{' '}
-        <b className="font-normal text-console-ink-2">
+        <b className="font-normal text-foreground/80">
           {reference.closedBy ? CLOSED_BY[reference.closedBy] ?? reference.closedBy : '—'}
         </b>
       </span>
       <span>
         MFE{' '}
-        <b className="font-mono font-normal text-console-ink-2">{fmtMoney(reference.mfe)}</b>
+        <b className="font-mono font-normal text-foreground/80">{fmtMoney(reference.mfe)}</b>
       </span>
       <span className="text-right">
         MAE{' '}
-        <b className="font-mono font-normal text-console-ink-2">{fmtMoney(reference.mae)}</b>
+        <b className="font-mono font-normal text-foreground/80">{fmtMoney(reference.mae)}</b>
       </span>
       <span>
         止损{' '}
-        <b className="font-mono font-normal text-console-ink-2">
+        <b className="font-mono font-normal text-foreground/80">
           {fmtPrice(reference.sl, digits)}
         </b>
       </span>
       <span className="text-right">
         止盈{' '}
-        <b className="font-mono font-normal text-console-ink-2">
+        <b className="font-mono font-normal text-foreground/80">
           {fmtPrice(reference.tp, digits)}
         </b>
       </span>
       {reference.tag && (
         <span className="col-span-2">
-          标签 <b className="font-normal text-console-ink-2">{reference.tag}</b>
+          标签 <b className="font-normal text-foreground/80">{reference.tag}</b>
         </span>
       )}
     </div>
@@ -171,7 +172,7 @@ export function ReferencePanel({
 
   if (!reference) {
     return (
-      <div className="px-5 py-6 text-[11px] leading-5 text-console-muted">
+      <div className="px-5 py-6 text-[11px] leading-5 text-muted-foreground">
         这个会话没有关联实盘交易。
       </div>
     );
@@ -190,26 +191,28 @@ export function ReferencePanel({
   return (
     <div className="pb-4">
       {session.dataSource === 'demo' && (
-        <div className="mx-5 mt-3 rounded-[8px] bg-console-warn-soft px-3 py-2 text-[10px] leading-4 text-console-warn">
+        <div className="mx-5 mt-3 rounded-[8px] bg-warning/10 px-3 py-2 text-[10px] leading-4 text-warning-foreground">
           演示数据 · 不能作为真实行情对照。参照层默认隐藏，需要手动打开。
         </div>
       )}
 
-      <div className="border-b border-console-line px-5 py-3">
+      <div className="border-b border-border px-5 py-3">
         <div className="flex items-center gap-2">
           <span className="text-[12px] font-medium">参照交易 · 实盘</span>
-          <span className="font-mono text-[10px] text-console-muted">#{reference.positionId}</span>
+          <span className="font-mono text-[10px] text-muted-foreground">#{reference.positionId}</span>
           <span className="flex-1" />
-          <button
+          <Button
+            variant="link"
+            size="xs"
             onClick={onToggleVisible}
-            className="inline-flex items-center gap-1 text-[10px] text-console-muted hover:text-console-ink"
+            className="h-auto gap-1 p-0 text-[10px] font-normal text-muted-foreground hover:text-foreground hover:no-underline"
           >
-            {visible ? <EyeOff size={12} strokeWidth={1.5} /> : <Eye size={12} strokeWidth={1.5} />}
+            {visible ? <EyeOff strokeWidth={1.5} /> : <Eye strokeWidth={1.5} />}
             {visible ? '隐藏参照层' : '显示参照层'}
-          </button>
+          </Button>
         </div>
         {accountMismatch && (
-          <div className="mt-1 text-[10px] text-console-faint">
+          <div className="mt-1 text-[10px] text-muted-foreground/60">
             账户 {reference.login} · 当前终端为 {currentLogin}
           </div>
         )}
@@ -218,14 +221,14 @@ export function ReferencePanel({
       </div>
 
       {(reference.fills?.length ?? 0) > 0 && (
-        <div className="border-b border-console-line px-5 py-3">
+        <div className="border-b border-border px-5 py-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-medium">逐笔成交</span>
-            <span className="text-[10px] text-console-muted">{reference.fills!.length} 笔</span>
+            <span className="text-[10px] text-muted-foreground">{reference.fills!.length} 笔</span>
           </div>
           <table className="mt-2 w-full text-[10px]">
             <thead>
-              <tr className="text-left text-console-faint">
+              <tr className="text-left text-muted-foreground/60">
                 <th className="pb-1 font-normal">时间</th>
                 <th className="pb-1 font-normal">方向</th>
                 <th className="pb-1 text-right font-normal">手数</th>
@@ -235,21 +238,21 @@ export function ReferencePanel({
             </thead>
             <tbody>
               {reference.fills!.map((fill) => (
-                <tr key={fill.ticket} className="border-t border-console-line/60">
-                  <td className="py-1 font-mono text-console-muted">{fmtDateTime(fill.time)}</td>
-                  <td className="py-1 text-console-ink-2">
+                <tr key={fill.ticket} className="border-t border-border/60">
+                  <td className="py-1 font-mono text-muted-foreground">{fmtDateTime(fill.time)}</td>
+                  <td className="py-1 text-foreground/80">
                     {fill.entry === 'in' ? '开仓' : '平仓'}
                   </td>
-                  <td className="py-1 text-right font-mono text-console-ink-2">
+                  <td className="py-1 text-right font-mono text-foreground/80">
                     {fmtVolume(fill.volume)}
                   </td>
-                  <td className="py-1 text-right font-mono text-console-ink-2">
+                  <td className="py-1 text-right font-mono text-foreground/80">
                     {fmtPrice(fill.price, digits)}
                   </td>
                   <td
-                    className={clsx(
+                    className={cn(
                       'py-1 text-right font-mono',
-                      fill.entry === 'in' ? 'text-console-faint' : signedClass(fill.profit),
+                      fill.entry === 'in' ? 'text-muted-foreground/60' : signedClass(fill.profit),
                     )}
                   >
                     {fill.entry === 'in' ? '—' : fmtSigned(fill.profit)}
@@ -258,65 +261,67 @@ export function ReferencePanel({
               ))}
             </tbody>
           </table>
-          <p className="mt-1.5 text-[10px] leading-4 text-console-faint">
+          <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground/60">
             来自网关执行记录；图表上的灰色标记只在游标走过之后出现。
           </p>
         </div>
       )}
 
-      <div className="border-b border-console-line px-5 py-3">
+      <div className="border-b border-border px-5 py-3">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[11px] font-medium">当时的判断</span>
           {note?.playbookName && (
-            <span className="text-[10px] text-console-muted">{note.playbookName}</span>
+            <span className="text-[10px] text-muted-foreground">{note.playbookName}</span>
           )}
         </div>
         {noteLoading ? (
-          <div className="mt-2 text-[10px] text-console-muted">读取复盘…</div>
+          <div className="mt-2 text-[10px] text-muted-foreground">读取复盘…</div>
         ) : noteError ? (
-          <div className="mt-2 text-[10px] leading-4 text-console-muted">
+          <div className="mt-2 text-[10px] leading-4 text-muted-foreground">
             复盘记录不可用：{noteError}
           </div>
         ) : !reviewed ? (
-          <div className="mt-2 flex items-center gap-2 text-[10px] text-console-muted">
+          <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
             这笔还没复盘。
-            <button
+            <Button
+              variant="link"
+              size="xs"
               onClick={() => {
                 if (reference) setJournalFocus(reference.positionId);
                 setPage('journal');
               }}
-              className="text-console-accent hover:underline"
+              className="h-auto p-0 text-[10px] font-normal text-brand"
             >
               去复盘
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="mt-2 space-y-2">
-            <div className="flex items-center gap-2 text-[10px] text-console-muted">
+            <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
               {note?.rating != null && (
                 <span>
                   评分{' '}
-                  <b className="font-mono font-normal text-console-ink-2">{note.rating}/5</b>
+                  <b className="font-mono font-normal text-foreground/80">{note.rating}/5</b>
                 </span>
               )}
               {note && note.mistakes.length > 0 && (
                 <span className="min-w-0 truncate" title={note.mistakes.join('、')}>
-                  错误 <span className="text-console-loss">{note.mistakes.join('、')}</span>
+                  错误 <span className="text-destructive-foreground">{note.mistakes.join('、')}</span>
                 </span>
               )}
             </div>
             {note?.note && (
-              <p className="text-[11px] leading-5 text-console-ink-2">{note.note}</p>
+              <p className="text-[11px] leading-5 text-foreground/80">{note.note}</p>
             )}
             {rules.length > 0 && (
               <div className="space-y-1">
-                <div className="text-[10px] text-console-muted">当时勾选的规则</div>
+                <div className="text-[10px] text-muted-foreground">当时勾选的规则</div>
                 {rules.map((item) => {
                   const mark = ruleMark(item.followed);
                   return (
                     <div key={item.rule} className="flex items-start gap-2 text-[10px] leading-4">
-                      <span className={clsx('w-9 shrink-0', mark.tone)}>{mark.text}</span>
-                      <span className="min-w-0 text-console-ink-2">{item.rule}</span>
+                      <span className={cn('w-9 shrink-0', mark.tone)}>{mark.text}</span>
+                      <span className="min-w-0 text-foreground/80">{item.rule}</span>
                     </div>
                   );
                 })}
@@ -326,7 +331,7 @@ export function ReferencePanel({
         )}
       </div>
 
-      <div className="border-b border-console-line px-5 py-3">
+      <div className="border-b border-border px-5 py-3">
         <div className="text-[11px] font-medium">成交截图</div>
         {reference.hasShot ? (
           <ShotPreview
@@ -338,19 +343,16 @@ export function ReferencePanel({
             profit={reference.profit}
           />
         ) : (
-          <div className="mt-2 text-[10px] text-console-muted">这笔交易没有保存截图。</div>
+          <div className="mt-2 text-[10px] text-muted-foreground">这笔交易没有保存截图。</div>
         )}
       </div>
 
       <div className="px-5 py-3">
-        <button
-          onClick={onRetry}
-          className="console-btn console-btn-primary flex w-full items-center justify-center gap-1.5"
-        >
-          <RotateCcw size={13} strokeWidth={1.6} />
+        <Button onClick={onRetry} className="w-full">
+          <RotateCcw strokeWidth={1.6} />
           重演这笔
-        </button>
-        <div className="mt-1.5 text-[10px] leading-4 text-console-muted">
+        </Button>
+        <div className="mt-1.5 text-[10px] leading-4 text-muted-foreground">
           按实盘方向、手数、止损止盈预填下单票，不会自动发送。
         </div>
       </div>
@@ -397,9 +399,10 @@ function ShotPreview({
 
   return (
     <>
-      <button
+      <Button
+        variant="outline"
         onClick={() => setOpen(true)}
-        className="mt-2 block w-full overflow-hidden rounded-[8px] border border-console-line"
+        className="mt-2 block h-auto w-full overflow-hidden rounded-lg p-0"
         title="查看完整截图"
       >
         <img
@@ -407,7 +410,7 @@ function ShotPreview({
           alt={`交易 ${positionId} 的成交截图`}
           className="block h-32 w-full object-cover object-top"
         />
-      </button>
+      </Button>
       {open && (
         <div
           className="console-scope fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-4"
@@ -437,13 +440,15 @@ function ShotPreview({
                 align="right"
               />
             )}
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
               onClick={() => setOpen(false)}
               aria-label="关闭"
-              className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-md bg-black/60 text-white/90 hover:bg-black/80"
+              className="absolute right-2 top-2 bg-black/60 text-white/90 hover:bg-black/80 hover:text-white"
             >
-              <X size={15} strokeWidth={1.6} />
-            </button>
+              <X strokeWidth={1.6} />
+            </Button>
             {!meta && (
               <div className="absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-black/75 px-3 py-1.5 text-[11px] text-white/90">
                 旧截图没有坐标信息，无法在图上定位

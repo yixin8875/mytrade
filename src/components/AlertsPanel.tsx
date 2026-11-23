@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { clsx } from 'clsx';
 import { Bell, Pause, Pencil, Play, Trash2, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { beep, desktopNotify, desktopPermission, requestDesktopPermission } from '../lib/alert';
 import { fmtPrice } from '../lib/format';
+import { Button } from './ui/button';
+import { Checkbox } from './ui/checkbox';
+import { Empty, EmptyDescription } from './ui/empty';
 import type { PriceAlert } from '../gateway/types';
 
 const inputClass =
-  'h-7 min-w-0 rounded-lg border border-tv-border bg-tv-raised px-2 font-mono text-[12px] text-tv-text outline-none focus:border-tv-accent';
+  'h-7 min-w-0 rounded-lg border border-input bg-background px-2 font-mono text-[12px] text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 disabled:opacity-40';
 
 /** 稳定的空数组：选择器每次返回新 [] 会触发 useSyncExternalStore 无限重渲染 */
 const NO_CHANNELS: string[] = [];
@@ -189,136 +192,153 @@ export function AlertsPanel() {
   return (
     <aside
       data-panel="alerts"
-      className="absolute inset-y-0 right-0 z-20 flex w-[320px] flex-col border-l border-tv-border bg-tv-panel shadow-[-12px_0_32px_-16px_rgba(0,0,0,0.35)]"
+      className="absolute inset-y-0 right-0 z-20 flex w-[320px] flex-col border-l border-border bg-card shadow-lg/5"
     >
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-tv-border px-4">
-        <Bell size={14} strokeWidth={1.5} className="text-tv-muted" />
-        <span className="text-[12px] font-medium text-tv-text">价格告警</span>
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
+        <Bell size={14} strokeWidth={1.5} className="text-muted-foreground" />
+        <span className="text-[12px] font-medium text-foreground">价格告警</span>
         {activeCount > 0 && (
-          <span className="num font-mono text-[11px] text-tv-muted">{activeCount}</span>
+          <span className="num font-mono text-[11px] text-muted-foreground">{activeCount}</span>
         )}
         <span className="flex-1" />
-        <button
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={() => setOpen(false)}
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+          className="h-7 w-7 text-muted-foreground hover:text-foreground"
           title="关闭告警面板"
           aria-label="关闭告警面板"
         >
           <X size={14} strokeWidth={1.5} />
-        </button>
+        </Button>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-tv-border px-3 py-2.5">
-        <button
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-2.5">
+        <Button
+          variant={sound ? 'secondary' : 'ghost'}
+          size="xs"
           onClick={toggleSound}
-          className={clsx(
-            'flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] transition-colors',
-            sound
-              ? 'border-tv-border bg-tv-raised text-tv-text'
-              : 'border-transparent text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+          aria-pressed={sound}
+          className={cn(
+            'h-7 gap-1.5 px-2.5 text-[11px] font-normal',
+            !sound && 'text-muted-foreground hover:text-foreground',
           )}
         >
           <span
-            className={clsx('h-1.5 w-1.5 rounded-full', sound ? 'bg-tv-up' : 'bg-tv-faint')}
+            className={cn('h-1.5 w-1.5 rounded-full', sound ? 'bg-success' : 'bg-muted-foreground/60')}
           />
           声音
-        </button>
-        <button
+        </Button>
+        <Button
+          variant={desktop ? 'secondary' : 'ghost'}
+          size="xs"
           onClick={() => void toggleDesktop()}
-          className={clsx(
-            'flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] transition-colors',
-            desktop
-              ? 'border-tv-border bg-tv-raised text-tv-text'
-              : 'border-transparent text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+          aria-pressed={desktop}
+          className={cn(
+            'h-7 gap-1.5 px-2.5 text-[11px] font-normal',
+            !desktop && 'text-muted-foreground hover:text-foreground',
           )}
         >
           <span
-            className={clsx('h-1.5 w-1.5 rounded-full', desktop ? 'bg-tv-up' : 'bg-tv-faint')}
+            className={cn(
+              'h-1.5 w-1.5 rounded-full',
+              desktop ? 'bg-success' : 'bg-muted-foreground/60',
+            )}
           />
           桌面通知
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={() => void test()}
-          className="ml-auto h-7 rounded-lg px-2 text-[11px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+          className="ml-auto h-7 px-2 text-[11px] font-normal text-muted-foreground hover:text-foreground"
         >
           测试
-        </button>
+        </Button>
       </div>
 
-      <div className="space-y-2.5 border-b border-tv-border px-3 py-3">
+      <div className="space-y-2.5 border-b border-border px-3 py-3">
         <div className="flex items-center gap-2">
-          <span className="w-8 shrink-0 text-[11px] text-tv-muted">品种</span>
-          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-tv-text">
+          <span className="w-8 shrink-0 text-[11px] text-muted-foreground">品种</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">
             {formSymbol || '—'}
-            {editing && <span className="ml-1.5 text-[10px] text-tv-muted">编辑中</span>}
+            {editing && <span className="ml-1.5 text-[10px] text-muted-foreground">编辑中</span>}
           </span>
           <div className="flex gap-1">
-            <button
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={() => setKind('above')}
-              className={clsx(
-                'h-7 rounded-lg border px-2 text-[11px] transition-colors',
+              aria-pressed={kind === 'above'}
+              className={cn(
+                'h-7 rounded-lg border px-2 text-[11px] font-normal',
                 kind === 'above'
-                  ? 'border-tv-up/40 bg-tv-up-soft text-tv-up'
-                  : 'border-transparent text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+                  ? 'border-success/40 bg-success/10 text-success-foreground hover:bg-success/10'
+                  : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
             >
               上穿
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={() => setKind('below')}
-              className={clsx(
-                'h-7 rounded-lg border px-2 text-[11px] transition-colors',
+              aria-pressed={kind === 'below'}
+              className={cn(
+                'h-7 rounded-lg border px-2 text-[11px] font-normal',
                 kind === 'below'
-                  ? 'border-tv-down/40 bg-tv-down-soft text-tv-down'
-                  : 'border-transparent text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+                  ? 'border-destructive/40 bg-destructive/10 text-destructive-foreground hover:bg-destructive/10'
+                  : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
             >
               下穿
-            </button>
+            </Button>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="w-8 shrink-0 text-[11px] text-tv-muted">价格</span>
+          <span className="w-8 shrink-0 text-[11px] text-muted-foreground">价格</span>
           <input
             type="number"
             step={Math.pow(10, -digits)}
             value={price}
             onChange={(event) => setPrice(event.target.value)}
-            className={clsx(inputClass, 'flex-1')}
+            className={cn(inputClass, 'flex-1')}
           />
           {!editing && (
-            <button
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={() => {
                 const base = useApp.getState().quote?.bid;
                 if (base) setPrice(base.toFixed(digits));
               }}
-              className="h-7 shrink-0 rounded-lg px-2 text-[11px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+              className="h-7 shrink-0 px-2 text-[11px] font-normal text-muted-foreground hover:text-foreground"
             >
               现价
-            </button>
+            </Button>
           )}
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="w-8 shrink-0 text-[11px] text-tv-muted">备注</span>
+          <span className="w-8 shrink-0 text-[11px] text-muted-foreground">备注</span>
           <input
             type="text"
             maxLength={80}
             value={note}
             placeholder="前高 / 日线阻力"
             onChange={(event) => setNote(event.target.value)}
-            className={clsx(inputClass, 'flex-1')}
+            className={cn(inputClass, 'flex-1')}
           />
         </div>
 
-        <div className="flex items-center gap-2 text-[11px] text-tv-muted">
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
           <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={repeat}
-              onChange={(event) => setRepeat(event.target.checked)}
-              className="accent-tv-accent"
+              onCheckedChange={setRepeat}
+              aria-label="重复"
+              className="size-3.5"
             />
             重复
           </label>
@@ -328,84 +348,87 @@ export function AlertsPanel() {
             value={cooldown}
             onChange={(event) => setCooldown(event.target.value)}
             disabled={!repeat}
-            className="h-6 w-11 rounded-md border border-tv-border bg-tv-raised px-1 text-right font-mono text-[11px] text-tv-text outline-none focus:border-tv-accent disabled:opacity-40"
+            className="h-6 w-11 rounded-md border border-input bg-background px-1 text-right font-mono text-[11px] text-foreground outline-none focus-visible:border-ring disabled:opacity-40"
           />
           <span>秒</span>
           {editing && (
-            <button
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={resetForm}
-              className="ml-auto h-7 rounded-lg px-2 text-[11px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+              className="ml-auto h-7 px-2 text-[11px] font-normal text-muted-foreground hover:text-foreground"
             >
               取消编辑
-            </button>
+            </Button>
           )}
-          <button
+          <Button
+            size="sm"
             onClick={() => void save()}
             disabled={busy}
-            className={clsx(
-              'h-7 rounded-lg bg-tv-text px-3 text-[12px] font-medium text-tv-bg transition-opacity hover:opacity-90',
-              !editing && 'ml-auto',
-              busy && 'opacity-50',
-            )}
+            className={cn('h-7 px-3 text-[12px]', !editing && 'ml-auto')}
           >
             {busy ? '保存中…' : editing ? '保存修改' : '添加告警'}
-          </button>
+          </Button>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
         {alerts.length === 0 && (
-          <div className="px-4 py-8 text-center text-[12px] leading-relaxed text-tv-muted">
-            还没有告警。
-            <br />
-            选中价格和方向后添加。
-          </div>
+          <Empty className="gap-1 px-4 py-8">
+            <EmptyDescription className="text-[12px] leading-relaxed text-muted-foreground">
+              还没有告警。
+              <br />
+              选中价格和方向后添加。
+            </EmptyDescription>
+          </Empty>
         )}
         {alerts.map((alert) => (
           <div
             key={alert.id}
-            className={clsx(
-              'group flex items-center gap-2 border-b border-tv-border/60 px-3 py-2.5 text-[12px]',
+            className={cn(
+              'group flex items-center gap-2 border-b border-border/60 px-3 py-2.5 text-[12px]',
               !alert.enabled && 'opacity-55',
             )}
           >
             <span
-              className={clsx(
+              className={cn(
                 'flex w-9 shrink-0 items-center gap-1 text-[11px]',
-                alert.kind === 'above' ? 'text-tv-up' : 'text-tv-down',
+                alert.kind === 'above' ? 'text-success-foreground' : 'text-destructive-foreground',
               )}
             >
               <span
-                className={clsx(
+                className={cn(
                   'h-1.5 w-1.5 rounded-full',
-                  alert.kind === 'above' ? 'bg-tv-up' : 'bg-tv-down',
+                  alert.kind === 'above' ? 'bg-success' : 'bg-destructive',
                 )}
               />
               {alert.kind === 'above' ? '上穿' : '下穿'}
             </span>
             <div className="min-w-0 flex-1">
-              <div className="truncate font-mono text-tv-text">
+              <div className="truncate font-mono text-foreground">
                 {alert.symbol} · {fmtPrice(alert.price, digitsFor(alert.symbol))}
                 {alert.repeat ? (
-                  <span className="ml-1.5 font-mono text-[11px] text-tv-faint">
+                  <span className="ml-1.5 font-mono text-[11px] text-muted-foreground/60">
                     ×{alert.cooldown_sec}s
                   </span>
                 ) : null}
               </div>
-              <div className="mt-0.5 truncate text-[11px] text-tv-muted">
+              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
                 {alert.note || '无备注'}
                 {alert.trigger_count > 0 ? ` · 触发 ${alert.trigger_count} 次` : ''}
               </div>
             </div>
-            <button
+            <Button
+              variant="ghost"
+              size="icon-xs"
               onClick={() => void toggleEnabled(alert)}
               title={alert.enabled ? '停用' : '启用'}
               aria-label={alert.enabled ? '停用告警' : '启用告警'}
-              className={clsx(
-                'flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors',
+              className={cn(
+                'h-6 w-6 shrink-0',
                 alert.enabled
-                  ? 'text-tv-muted hover:bg-tv-hover hover:text-tv-text'
-                  : 'text-tv-accent hover:bg-tv-accent-soft',
+                  ? 'text-muted-foreground hover:text-foreground'
+                  : 'text-brand hover:bg-brand/10',
               )}
             >
               {alert.enabled ? (
@@ -413,33 +436,37 @@ export function AlertsPanel() {
               ) : (
                 <Play size={13} strokeWidth={1.5} />
               )}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
               onClick={() => startEdit(alert)}
               title="编辑"
               aria-label="编辑告警"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
             >
               <Pencil size={13} strokeWidth={1.5} />
-            </button>
-            <button
+            </Button>
+            <Button
+              variant={confirmId === alert.id ? 'destructive' : 'ghost'}
+              size={confirmId === alert.id ? 'xs' : 'icon-xs'}
               onClick={() => void remove(alert)}
               title={confirmId === alert.id ? '再点一次确认删除' : '删除'}
               aria-label="删除告警"
-              className={clsx(
-                'flex h-6 shrink-0 items-center justify-center rounded-md transition-colors',
+              className={cn(
+                'h-6 shrink-0',
                 confirmId === alert.id
-                  ? 'w-auto bg-tv-down px-1.5 text-[10px] text-white'
-                  : 'w-6 text-tv-muted hover:bg-tv-down-soft hover:text-tv-down',
+                  ? 'px-1.5 text-[10px]'
+                  : 'w-6 text-muted-foreground hover:bg-destructive/10 hover:text-destructive-foreground',
               )}
             >
               {confirmId === alert.id ? '确认' : <Trash2 size={13} strokeWidth={1.5} />}
-            </button>
+            </Button>
           </div>
         ))}
       </div>
 
-      <div className="shrink-0 border-t border-tv-border px-4 py-2.5 text-[11px] leading-relaxed text-tv-faint">
+      <div className="shrink-0 border-t border-border px-4 py-2.5 text-[11px] leading-relaxed text-muted-foreground/60">
         第三方推送：{channels.length > 0 ? channels.join(' / ') : '未配置（见 config.json）'}。
         声音与桌面通知需要页面保持打开。
       </div>

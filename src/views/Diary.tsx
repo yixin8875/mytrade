@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { clsx } from 'clsx';
 import {
   ChevronLeft,
   ChevronRight,
@@ -8,6 +7,27 @@ import {
   NotebookPen,
   RefreshCw,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
 import { gateway } from '../gateway/client';
 import { AiReviewPanel } from '../components/AiReviewPanel';
 import { TradeReviewDrawer } from '../components/TradeReviewDrawer';
@@ -245,12 +265,12 @@ export function DiaryView() {
   };
 
   return (
-    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
+    <div className="console-scope h-full min-h-0 overflow-auto bg-sidebar">
       <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-[24px] font-medium tracking-[-0.01em]">盈亏日历</h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">
+            <p className="mt-1.5 text-[13px] text-muted-foreground">
               按交易日归集净盈亏
               {activeLogin ? ` · 账户 ${activeLogin}` : ''}
               {calendar ? ` · UTC${offsetLabel(calendar.timezoneOffsetMin)}` : ''} · 点格子看当天明细
@@ -258,45 +278,57 @@ export function DiaryView() {
           </div>
           <div className="flex items-center gap-2">
             {masked && (
-              <span className="console-chip border-console-warn/40 text-console-warn">
+              <span className="inline-flex h-7 items-center rounded-md border border-warning/40 px-2.5 text-[12px] text-warning-foreground">
                 隐私模式 · 金额已遮
               </span>
             )}
             <div className="flex items-center gap-1">
-              <button
-                onClick={() => setMonth(shiftMonth(month, -1))}
-                className="console-chip px-2"
-                aria-label="上个月"
-              >
-                <ChevronLeft size={14} strokeWidth={1.8} />
-              </button>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      onClick={() => setMonth(shiftMonth(month, -1))}
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="上个月"
+                    />
+                  }
+                >
+                  <ChevronLeft size={14} strokeWidth={1.8} />
+                </TooltipTrigger>
+                <TooltipPopup>上个月</TooltipPopup>
+              </Tooltip>
               <span className="min-w-[110px] text-center text-[13px] font-medium">
                 {monthLabel(month)}
               </span>
-              <button
-                onClick={() => setMonth(shiftMonth(month, 1))}
-                className="console-chip px-2"
-                aria-label="下个月"
-              >
-                <ChevronRight size={14} strokeWidth={1.8} />
-              </button>
-              <button onClick={() => setMonth(currentMonth())} className="console-chip">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      onClick={() => setMonth(shiftMonth(month, 1))}
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="下个月"
+                    />
+                  }
+                >
+                  <ChevronRight size={14} strokeWidth={1.8} />
+                </TooltipTrigger>
+                <TooltipPopup>下个月</TooltipPopup>
+              </Tooltip>
+              <Button onClick={() => setMonth(currentMonth())} size="xs" variant="outline">
                 本月
-              </button>
+              </Button>
             </div>
-            <button
-              onClick={() => void loadCalendar(month)}
-              disabled={loading}
-              className="console-btn console-btn-secondary"
-            >
-              <RefreshCw size={14} strokeWidth={1.5} className={clsx(loading && 'animate-spin')} />
+            <Button onClick={() => void loadCalendar(month)} disabled={loading} variant="outline">
+              <RefreshCw size={14} strokeWidth={1.5} className={cn(loading && 'animate-spin')} />
               {loading ? '读取中…' : '刷新'}
-            </button>
+            </Button>
           </div>
         </header>
 
         {error && (
-          <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
+          <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive-foreground">
             读取失败：{error}
           </div>
         )}
@@ -324,7 +356,7 @@ export function DiaryView() {
                 ? `${summary.totalR >= 0 ? '+' : ''}${summary.totalR.toFixed(2)}R`
                 : '—'
             }
-            tone={summary && summary.totalR > 0 ? 'text-console-gain' : undefined}
+            tone={summary && summary.totalR > 0 ? 'text-success-foreground' : undefined}
             hint={summary ? `${summary.rTrades} 笔带风险` : undefined}
           />
           <Stat
@@ -340,21 +372,21 @@ export function DiaryView() {
           />
         </div>
 
-        <section className="console-card mt-4 overflow-hidden">
-          <div className="grid grid-cols-[repeat(7,minmax(0,1fr))_76px] border-b border-console-line bg-console-sidebar/60">
+        <Card className="mt-4 overflow-hidden">
+          <div className="grid grid-cols-[repeat(7,minmax(0,1fr))_76px] border-b border-border bg-sidebar/60">
             {WEEKDAYS.map((label) => (
-              <div key={label} className="px-2 py-2 text-center text-[11px] text-console-muted">
+              <div key={label} className="px-2 py-2 text-center text-[11px] text-muted-foreground">
                 周{label}
               </div>
             ))}
-            <div className="hidden px-2 py-2 text-center text-[11px] text-console-muted sm:block">
+            <div className="hidden px-2 py-2 text-center text-[11px] text-muted-foreground sm:block">
               周合计
             </div>
           </div>
           {calendar?.weeks.map((week, index) => (
             <div
               key={`${week.days[0]?.date ?? index}-${index}`}
-              className="grid grid-cols-[repeat(7,minmax(0,1fr))_76px] border-b border-console-line/60 last:border-b-0"
+              className="grid grid-cols-[repeat(7,minmax(0,1fr))_76px] border-b border-border/60 last:border-b-0"
             >
               {week.days.map((day, dayIndex) => (
                 <DayCell
@@ -369,7 +401,7 @@ export function DiaryView() {
                 />
               ))}
               <div
-                className={clsx(
+                className={cn(
                   'hidden items-center justify-end px-2 py-2 font-mono text-[11px] sm:flex',
                   signedClass(week.total),
                 )}
@@ -379,27 +411,27 @@ export function DiaryView() {
             </div>
           ))}
           {!calendar && (
-            <div className="px-4 py-16 text-center text-[12px] text-console-faint">
+            <div className="px-4 py-16 text-center text-[12px] text-muted-foreground/60">
               {loading ? '读取中…' : '还没有数据'}
             </div>
           )}
-        </section>
+        </Card>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_390px]">
-          <section className="console-card min-w-0 overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-console-line px-4 py-3">
+          <Card className="min-w-0 overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
               <div>
                 <div className="text-[14px] font-medium">
                   {selected ? shortDay(selected) : '选择一天'}
                   {detail && detail.summary.trades > 0 && (
                     <span
-                      className={clsx('num ml-2 font-mono text-[13px]', signedClass(detail.summary.net))}
+                      className={cn('num ml-2 font-mono text-[13px]', signedClass(detail.summary.net))}
                     >
                       {fmtSigned(detail.summary.net)}
                     </span>
                   )}
                 </div>
-                <div className="mt-0.5 text-[11px] text-console-muted">
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
                   {detail && detail.summary.trades > 0
                     ? `${detail.summary.trades} 笔 · 胜率 ${fmtPct(detail.summary.winRate)} · 累计 R ${
                         detail.summary.rTrades > 0 ? detail.summary.totalR.toFixed(2) : '—'
@@ -409,130 +441,130 @@ export function DiaryView() {
                       : '这天没有已平仓交易'}
                 </div>
               </div>
-              <button
+              <Button
                 onClick={() => exportCard('png')}
                 disabled={!detail}
-                className="console-btn console-btn-secondary"
+                variant="outline"
                 title="把当天复盘导出为 PNG"
               >
                 <ImageDown size={14} strokeWidth={1.5} />
                 复盘卡片
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => exportCard('pdf')}
                 disabled={!detail}
-                className="console-btn console-btn-secondary"
+                variant="outline"
                 title="把当天复盘导出为单页 PDF（中文已栅格化）"
               >
                 <FileDown size={14} strokeWidth={1.5} />
                 PDF
-              </button>
+              </Button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[680px] border-collapse text-[12px]">
-                <thead>
-                  <tr className="border-b border-console-line text-left text-[11px] text-console-faint">
-                    <th className="px-4 py-2 font-normal">平仓</th>
-                    <th className="px-2 py-2 font-normal">品种 / 方向</th>
-                    <th className="px-3 py-2 text-right font-normal">盈亏</th>
-                    <th className="px-3 py-2 text-right font-normal">R</th>
-                    <th className="px-3 py-2 font-normal">复盘</th>
-                    <th className="px-4 py-2 font-normal" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {(detail?.records.length ?? 0) === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-[12px] text-console-faint">
-                        {dayLoading ? '读取中…' : '这天没有已平仓交易，也可以在右侧写当天笔记'}
-                      </td>
-                    </tr>
-                  )}
-                  {detail?.records.map((record) => (
-                    <tr
-                      key={record.position_id}
-                      className="border-t border-console-line/70 transition-colors hover:bg-console-hover/50"
+            <Table className="w-full min-w-[680px] border-collapse text-[12px]">
+              <TableHeader>
+                <TableRow className="border-0 border-b border-border text-left text-[11px] text-muted-foreground/60 hover:bg-transparent">
+                  <TableHead className="h-auto px-4 py-2 font-normal">平仓</TableHead>
+                  <TableHead className="h-auto px-2 py-2 font-normal">品种 / 方向</TableHead>
+                  <TableHead className="h-auto px-3 py-2 text-right font-normal">盈亏</TableHead>
+                  <TableHead className="h-auto px-3 py-2 text-right font-normal">R</TableHead>
+                  <TableHead className="h-auto px-3 py-2 font-normal">复盘</TableHead>
+                  <TableHead className="h-auto px-4 py-2 font-normal" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(detail?.records.length ?? 0) === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="px-4 py-12 text-center text-[12px] text-muted-foreground/60">
+                      {dayLoading ? '读取中…' : '这天没有已平仓交易，也可以在右侧写当天笔记'}
+                    </TableCell>
+                  </TableRow>
+                )}
+                {detail?.records.map((record) => (
+                  <TableRow
+                    key={record.position_id}
+                    className="border-t border-border/70 transition-colors hover:bg-accent/50"
+                  >
+                    <TableCell className="num whitespace-nowrap px-4 py-2.5 font-mono text-[11px] text-muted-foreground">
+                      {fmtReviewTime(record.close_time, serverOffset)}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap px-2 py-2.5">
+                      <span className="font-medium">{record.symbol}</span>
+                      <span
+                        className={cn(
+                          'ml-1.5 text-[11px]',
+                          record.side === 'buy' ? 'text-success-foreground' : 'text-destructive-foreground',
+                        )}
+                      >
+                        {record.side === 'buy' ? '多' : '空'}
+                      </span>
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        'num px-3 py-2.5 text-right font-mono font-medium',
+                        signedClass(record.profit),
+                      )}
                     >
-                      <td className="num whitespace-nowrap px-4 py-2.5 font-mono text-[11px] text-console-muted">
-                        {fmtReviewTime(record.close_time, serverOffset)}
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-2.5">
-                        <span className="font-medium">{record.symbol}</span>
-                        <span
-                          className={clsx(
-                            'ml-1.5 text-[11px]',
-                            record.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
-                          )}
-                        >
-                          {record.side === 'buy' ? '多' : '空'}
-                        </span>
-                      </td>
-                      <td
-                        className={clsx(
-                          'num px-3 py-2.5 text-right font-mono font-medium',
-                          signedClass(record.profit),
-                        )}
-                      >
-                        {fmtSigned(record.profit)}
-                      </td>
-                      <td
-                        className={clsx(
-                          'num px-3 py-2.5 text-right font-mono text-[11px]',
-                          signedClass(record.r),
-                        )}
-                      >
-                        {fmtR(record.r)}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {record.annotation ? (
-                          <span className="flex items-center gap-1.5 text-[11px] text-console-muted">
-                            <span className="truncate font-medium text-console-ink-2">
-                              {record.annotation.playbookName ?? '未关联策略'}
-                            </span>
-                            {record.annotation.rules.length > 0 && (
-                              <span className="num font-mono text-console-faint">
-                                ✓{record.annotation.followed} ✗{record.annotation.broken}
-                              </span>
-                            )}
+                      {fmtSigned(record.profit)}
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        'num px-3 py-2.5 text-right font-mono text-[11px]',
+                        signedClass(record.r),
+                      )}
+                    >
+                      {fmtR(record.r)}
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      {record.annotation ? (
+                        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <span className="truncate font-medium text-foreground/80">
+                            {record.annotation.playbookName ?? '未关联策略'}
                           </span>
-                        ) : (
-                          <span className="text-[11px] text-console-faint">未复盘</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => setReviewing(record.position_id)}
-                            className="console-chip"
-                          >
-                            复盘
-                          </button>
-                          <button
-                            onClick={() => replay.start(record)}
-                            className="console-chip"
-                            title="从当时行情回放这笔交易"
-                          >
-                            回放
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                          {record.annotation.rules.length > 0 && (
+                            <span className="num font-mono text-muted-foreground/60">
+                              ✓{record.annotation.followed} ✗{record.annotation.broken}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground/60">未复盘</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="px-4 py-2.5 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Button
+                          onClick={() => setReviewing(record.position_id)}
+                          size="xs"
+                          variant="outline"
+                        >
+                          复盘
+                        </Button>
+                        <Button
+                          onClick={() => replay.start(record)}
+                          size="xs"
+                          variant="outline"
+                          title="从当时行情回放这笔交易"
+                        >
+                          回放
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
 
           {selected && <AiReviewPanel date={selected} />}
 
-          <section className="console-card flex min-h-[320px] flex-col overflow-hidden">
-            <div className="flex items-center justify-between border-b border-console-line px-4 py-3">
+          <Card className="flex min-h-[320px] flex-col overflow-hidden">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <div className="flex items-center gap-2 text-[13px] font-medium">
-                <NotebookPen size={15} strokeWidth={1.5} className="text-console-muted" />
+                <NotebookPen size={15} strokeWidth={1.5} className="text-muted-foreground" />
                 当天笔记
               </div>
-              <span className="text-[11px] text-console-faint">
+              <span className="text-[11px] text-muted-foreground/60">
                 {savedAt ? '已保存' : noteText || mood ? '自动保存' : ' '}
               </span>
             </div>
@@ -540,70 +572,72 @@ export function DiaryView() {
             <div className="space-y-3 p-4">
               <div className="flex items-center gap-1">
                 {MOODS.map((item) => (
-                  <button
+                  <Button
                     key={item.value}
                     onClick={() => queueNote({ mood: mood === item.value ? null : item.value })}
-                    className={clsx(
-                      'h-7 flex-1 rounded-md border text-[11px] transition-colors',
-                      mood === item.value
-                        ? 'border-console-ink bg-console-selected font-medium text-console-ink'
-                        : 'border-console-line text-console-muted hover:bg-console-hover',
+                    size="xs"
+                    variant={mood === item.value ? 'secondary' : 'outline'}
+                    className={cn(
+                      'h-7 flex-1 text-[11px]',
+                      mood === item.value && 'border-foreground font-medium',
                     )}
                   >
                     {item.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
 
-              <input
+              <Input
                 value={tagsText}
                 onChange={(event) => queueNote({ tags: splitTags(event.target.value) })}
                 placeholder="标签：耐心、按计划、情绪化…"
-                className="console-input w-full"
+                className="w-full"
                 maxLength={120}
               />
 
-              <textarea
+              <Textarea
                 value={noteText}
                 onChange={(event) => queueNote({ note: event.target.value })}
                 placeholder="盘前计划 / 盘中发生了什么 / 收盘复盘"
                 rows={9}
                 maxLength={20000}
-                className="console-input w-full resize-y py-2 leading-relaxed"
+                className="w-full"
               />
 
               <div className="flex items-center justify-between gap-2">
-                <select
-                  defaultValue=""
-                  onChange={(event) => {
+                <Select
+                  value=""
+                  onValueChange={(value) => {
                     const template = detail?.templates.find(
-                      (item) => String(item.id) === event.target.value,
+                      (item) => String(item.id) === String(value),
                     );
                     if (template) {
                       queueNote({
                         note: noteText ? `${noteText}\n\n${template.body}` : template.body,
                       });
                     }
-                    event.target.value = '';
                   }}
-                  className="console-input h-8 flex-1 text-[12px]"
                 >
-                  <option value="">插入模板…</option>
-                  {detail?.templates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
-                <button onClick={flushNote} className="console-chip">
+                  <SelectTrigger size="sm" className="min-w-0 flex-1" aria-label="插入模板">
+                    <SelectValue>插入模板…</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {detail?.templates.map((template) => (
+                      <SelectItem key={template.id} value={String(template.id)}>
+                        {template.name}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+                <Button onClick={flushNote} size="xs" variant="outline">
                   立即保存
-                </button>
-                <button onClick={() => void saveAsTemplate()} className="console-chip">
+                </Button>
+                <Button onClick={() => void saveAsTemplate()} size="xs" variant="outline">
                   存为模板
-                </button>
+                </Button>
               </div>
             </div>
-          </section>
+          </Card>
         </div>
       </div>
 
@@ -636,54 +670,54 @@ function DayCell({
   onSelect: (date: string) => void;
 }) {
   if (!day) {
-    return <div className="min-h-[84px] border-r border-console-line/40 last:border-r-0" />;
+    return <div className="min-h-[84px] border-r border-border/40 last:border-r-0" />;
   }
   const tone = dayTone(day.net);
   const isToday = day.date === today;
   const isSelected = day.date === selected;
   return (
-    <button
-      onClick={() => onSelect(day.date)}
-      className={clsx(
-        'relative flex min-h-[84px] flex-col items-start gap-1 border-r border-console-line/40 px-2 py-1.5 text-left transition-colors last:border-r-0 hover:bg-console-hover/60',
-        tone === 'win' && 'bg-console-gain-soft/50',
-        tone === 'loss' && 'bg-console-loss-soft/50',
-        isSelected && 'ring-1 ring-inset ring-console-ink/60',
+    <Card
+      render={<button type="button" onClick={() => onSelect(day.date)} />}
+      className={cn(
+        'min-h-[84px] flex-col items-start gap-1 rounded-none border-x-0 border-t-0 border-r border-border/40 px-2 py-1.5 text-left shadow-none transition-colors last:border-r-0 hover:bg-accent/60',
+        tone === 'win' && 'bg-success/10',
+        tone === 'loss' && 'bg-destructive/10',
+        isSelected && 'ring-1 ring-inset ring-foreground/60',
       )}
     >
       <span className="flex w-full items-center justify-between">
         <span
-          className={clsx(
+          className={cn(
             'num font-mono text-[11px]',
-            isToday ? 'rounded bg-console-ink px-1 text-console-card' : 'text-console-muted',
+            isToday ? 'rounded bg-foreground px-1 text-card' : 'text-muted-foreground',
           )}
         >
           {Number(day.date.slice(8))}
         </span>
         {day.trades > 0 && (
-          <span className="num font-mono text-[10px] text-console-faint">{day.trades} 笔</span>
+          <span className="num font-mono text-[10px] text-muted-foreground/60">{day.trades} 笔</span>
         )}
       </span>
       {day.trades > 0 && (
         <>
           <span
-            className={clsx(
+            className={cn(
               'num font-mono text-[13px] font-medium leading-none',
               tone === 'win'
-                ? 'text-console-gain'
+                ? 'text-success-foreground'
                 : tone === 'loss'
-                  ? 'text-console-loss'
-                  : 'text-console-muted',
+                  ? 'text-destructive-foreground'
+                  : 'text-muted-foreground',
             )}
           >
             {compactMoney(day.net)}
           </span>
           {day.rTrades > 0 && (
-            <span className="num font-mono text-[10px] text-console-faint">{fmtR(day.r)}</span>
+            <span className="num font-mono text-[10px] text-muted-foreground/60">{fmtR(day.r)}</span>
           )}
         </>
       )}
-    </button>
+    </Card>
   );
 }
 
@@ -700,16 +734,16 @@ function Stat({
 }) {
   return (
     <div className="readout-cell">
-      <div className="text-[12px] text-console-muted">{label}</div>
+      <div className="text-[12px] text-muted-foreground">{label}</div>
       <div
-        className={clsx(
+        className={cn(
           'num mt-1.5 font-mono text-[20px] font-medium leading-none tracking-[-0.01em]',
           tone,
         )}
       >
         {value}
       </div>
-      <div className="mt-2 truncate text-[11px] text-console-faint">{hint ?? ' '}</div>
+      <div className="mt-2 truncate text-[11px] text-muted-foreground/60">{hint ?? ' '}</div>
     </div>
   );
 }

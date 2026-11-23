@@ -31,9 +31,9 @@ describe('RangeChips', () => {
   it('当前值用高亮类标出，其他按钮不激活', () => {
     render(<RangeChips value={90} onChange={() => {}} />);
 
-    expect(screen.getByRole('button', { name: '90 天' })).toHaveClass('console-chip-active');
+    expect(screen.getByRole('button', { name: '90 天' })).toHaveAttribute('aria-pressed', 'true');
     for (const label of ['7 天', '30 天', '1 年', '全部']) {
-      expect(screen.getByRole('button', { name: label })).not.toHaveClass('console-chip-active');
+      expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-pressed', 'false');
     }
   });
 
@@ -55,7 +55,7 @@ describe('RangeChips', () => {
       '15 天',
       '全部',
     ]);
-    expect(screen.getByRole('button', { name: '15 天' })).toHaveClass('console-chip-active');
+    expect(screen.getByRole('button', { name: '15 天' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '15 天' }).parentElement).toHaveClass(
       'extra-class',
     );

@@ -1,6 +1,23 @@
 import { useMemo, useState } from 'react';
-import { clsx } from 'clsx';
 import { FilterX, SlidersHorizontal } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { fmtPct, fmtR, sampleHint } from '../lib/review';
 import { fmtSigned, signedClass } from '../lib/format';
 import {
@@ -99,27 +116,28 @@ export function AnalysisSection({
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-[16px] font-medium tracking-[-0.01em]">深度分析</h2>
-          <p className="mt-1.5 text-[13px] text-console-muted">
+          <p className="mt-1.5 text-[13px] text-muted-foreground">
             最近 {days} 天 · 先筛出想看的交易，再按品种、时段、星期等维度拆开对比
             {activeLogin ? ` · 账户 ${activeLogin}` : ''}
           </p>
         </div>
       </header>
 
-      <section className="console-card mt-6 p-4">
+      <Card className="mt-6 p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-[13px] font-medium">
               <SlidersHorizontal size={14} strokeWidth={1.6} />
               筛选
             </div>
-            <button
+            <Button
               onClick={() => setFilters({ ...EMPTY_FILTERS })}
               disabled={!isFiltered(filters)}
-              className="console-chip disabled:opacity-40"
+              size="xs"
+              variant="outline"
             >
-              <FilterX size={12} strokeWidth={1.6} className="mr-1" />
+              <FilterX size={12} strokeWidth={1.6} />
               清空
-            </button>
+            </Button>
           </div>
 
           <FilterRow label="品种">
@@ -143,7 +161,7 @@ export function AnalysisSection({
                 {side === 'buy' ? '做多' : '做空'}
               </Chip>
             ))}
-            <span className="mx-1 h-4 w-px bg-console-line" />
+            <span className="mx-1 h-4 w-px bg-border" />
             {[
               { key: 'all', label: '全部' },
               { key: 'win', label: '只看盈利' },
@@ -204,9 +222,9 @@ export function AnalysisSection({
               </Chip>
             ))}
           </FilterRow>
-        </section>
+        </Card>
 
-        <section className="console-card mt-4 grid grid-cols-2 gap-4 px-4 py-3 md:grid-cols-5">
+        <Card className="mt-4 grid grid-cols-2 gap-4 px-4 py-3 md:grid-cols-5">
           <Metric label="笔数" value={String(stats.count)} />
           <Metric label="净盈亏" value={fmtSigned(stats.net)} tone={stats.net} />
           <Metric label="胜率" value={fmtPct(stats.winRate)} />
@@ -216,74 +234,88 @@ export function AnalysisSection({
             value={fmtSigned(stats.expectancy ?? 0)}
             tone={stats.expectancy ?? 0}
           />
-        </section>
-        {hint && <p className="mt-2 px-1 text-[11px] text-console-faint">{hint}</p>}
+        </Card>
+        {hint && <p className="mt-2 px-1 text-[11px] text-muted-foreground/60">{hint}</p>}
 
         <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-          <div className="console-card overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-console-line px-4 py-2.5">
+          <Card className="overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
               <h2 className="text-[13px] font-medium">分组汇总</h2>
               <div className="flex flex-wrap items-center gap-1">
                 {DIMENSIONS.map((item) => (
-                  <button
+                  <Button
                     key={item.key}
                     onClick={() => setDimension(item.key)}
-                    className={clsx('console-chip', dimension === item.key && 'console-chip-active')}
+                    size="xs"
+                    variant={dimension === item.key ? 'default' : 'outline'}
                   >
                     {item.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
             <GroupTable rows={groups} />
-          </div>
+          </Card>
 
-          <div className="console-card overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-console-line px-4 py-2.5">
+          <Card className="overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
               <h2 className="text-[13px] font-medium">交叉矩阵</h2>
               <div className="flex flex-wrap items-center gap-1">
                 {CROSS_METRICS.map((item) => (
-                  <button
+                  <Button
                     key={item.key}
                     onClick={() => setMetric(item.key)}
-                    className={clsx('console-chip', metric === item.key && 'console-chip-active')}
+                    size="xs"
+                    variant={metric === item.key ? 'default' : 'outline'}
                   >
                     {item.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2 px-4 py-2 text-[11px] text-console-muted">
+            <div className="flex flex-wrap items-center gap-2 px-4 py-2 text-[11px] text-muted-foreground">
               <span>行</span>
-              <select
+              <Select
                 value={rowDim}
-                onChange={(event) => setRowDim(event.target.value)}
-                className="console-input h-7 py-0 text-[11px]"
+                onValueChange={(value) => setRowDim(String(value))}
               >
-                {DIMENSIONS.map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger size="sm" className="w-auto min-w-0 text-[11px]" aria-label="行维度">
+                  <SelectValue>
+                    {DIMENSIONS.find((item) => item.key === rowDim)?.label}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  {DIMENSIONS.map((item) => (
+                    <SelectItem key={item.key} value={item.key}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
               <span>列</span>
-              <select
+              <Select
                 value={colDim}
-                onChange={(event) => setColDim(event.target.value)}
-                className="console-input h-7 py-0 text-[11px]"
+                onValueChange={(value) => setColDim(String(value))}
               >
-                {DIMENSIONS.map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger size="sm" className="w-auto min-w-0 text-[11px]" aria-label="列维度">
+                  <SelectValue>
+                    {DIMENSIONS.find((item) => item.key === colDim)?.label}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  {DIMENSIONS.map((item) => (
+                    <SelectItem key={item.key} value={item.key}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
             </div>
             <CrossMatrix rows={cross.rows} cols={cross.cols} cells={cross.cells} metric={metric} />
-          </div>
+          </Card>
         </section>
 
-      <p className="mt-4 text-[11px] leading-relaxed text-console-faint">
+      <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground/60">
         所有筛选与分组都只作用于当前区间的平仓记录；格子里的数字是所选指标，括号内是笔数。
         少于 3 笔的格子会淡显，避免把噪声当结论。
       </p>
@@ -294,7 +326,7 @@ export function AnalysisSection({
 function FilterRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1">
-      <span className="w-[40px] shrink-0 text-[11px] text-console-faint">{label}</span>
+      <span className="w-[40px] shrink-0 text-[11px] text-muted-foreground/60">{label}</span>
       {children}
     </div>
   );
@@ -310,20 +342,20 @@ function Chip({
   children: React.ReactNode;
 }) {
   return (
-    <button onClick={onClick} className={clsx('console-chip', on && 'console-chip-active')}>
+    <Button onClick={onClick} size="xs" variant={on ? 'default' : 'outline'}>
       {children}
-    </button>
+    </Button>
   );
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: number }) {
   return (
     <div>
-      <div className="text-[11px] text-console-faint">{label}</div>
+      <div className="text-[11px] text-muted-foreground/60">{label}</div>
       <div
-        className={clsx(
+        className={cn(
           'num mt-0.5 font-mono text-[15px]',
-          tone == null ? 'text-console-ink' : signedClass(tone),
+          tone == null ? 'text-foreground' : signedClass(tone),
         )}
       >
         {value}
@@ -334,47 +366,41 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: n
 
 function GroupTable({ rows }: { rows: GroupRow[] }) {
   if (rows.length === 0) {
-    return <p className="px-4 py-8 text-center text-[12px] text-console-faint">当前筛选没有交易</p>;
+    return <p className="px-4 py-8 text-center text-[12px] text-muted-foreground/60">当前筛选没有交易</p>;
   }
   return (
-    <div className="overflow-auto">
-      <table className="w-full text-[12px]">
-        <thead>
-          <tr className="border-b border-console-line text-left text-[10px] text-console-faint">
-            <th className="px-4 py-2 font-normal">分组</th>
-            <th className="px-2 py-2 text-right font-normal">笔数</th>
-            <th className="px-2 py-2 text-right font-normal">净盈亏</th>
-            <th className="px-2 py-2 text-right font-normal">胜率</th>
-            <th className="px-4 py-2 text-right font-normal">平均 R</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.key} className="border-b border-console-line/50 last:border-0">
-              <td className="max-w-[160px] truncate px-4 py-2">{row.key}</td>
-              <td className="num px-2 py-2 text-right font-mono">{row.stats.count}</td>
-              <td
-                className={clsx(
-                  'num px-2 py-2 text-right font-mono',
-                  signedClass(row.stats.net),
-                )}
-              >
-                {fmtSigned(row.stats.net)}
-              </td>
-              <td className="num px-2 py-2 text-right font-mono">{fmtPct(row.stats.winRate)}</td>
-              <td
-                className={clsx(
-                  'num px-4 py-2 text-right font-mono',
-                  signedClass(row.stats.avgR ?? 0),
-                )}
-              >
-                {fmtR(row.stats.avgR)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table className="w-full text-[12px]">
+      <TableHeader>
+        <TableRow className="border-b border-border text-left text-[10px] text-muted-foreground/60 hover:bg-transparent">
+          <TableHead className="h-auto px-4 py-2 font-normal">分组</TableHead>
+          <TableHead className="h-auto px-2 py-2 text-right font-normal">笔数</TableHead>
+          <TableHead className="h-auto px-2 py-2 text-right font-normal">净盈亏</TableHead>
+          <TableHead className="h-auto px-2 py-2 text-right font-normal">胜率</TableHead>
+          <TableHead className="h-auto px-4 py-2 text-right font-normal">平均 R</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={row.key} className="border-b border-border/50 last:border-0">
+            <TableCell className="max-w-[160px] truncate px-4 py-2">{row.key}</TableCell>
+            <TableCell className="num px-2 py-2 text-right font-mono">{row.stats.count}</TableCell>
+            <TableCell
+              className={cn('num px-2 py-2 text-right font-mono', signedClass(row.stats.net))}
+            >
+              {fmtSigned(row.stats.net)}
+            </TableCell>
+            <TableCell className="num px-2 py-2 text-right font-mono">
+              {fmtPct(row.stats.winRate)}
+            </TableCell>
+            <TableCell
+              className={cn('num px-4 py-2 text-right font-mono', signedClass(row.stats.avgR ?? 0))}
+            >
+              {fmtR(row.stats.avgR)}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -390,7 +416,7 @@ function CrossMatrix({
   metric: CrossMetric;
 }) {
   if (rows.length === 0 || cols.length === 0) {
-    return <p className="px-4 py-8 text-center text-[12px] text-console-faint">当前筛选没有交易</p>;
+    return <p className="px-4 py-8 text-center text-[12px] text-muted-foreground/60">当前筛选没有交易</p>;
   }
   const format = (value: number | null) => {
     if (value == null) return '—';
@@ -401,54 +427,57 @@ function CrossMatrix({
   };
   return (
     <div className="overflow-auto px-4 pb-4">
-      <table className="w-full border-collapse text-[11px]">
-        <thead>
-          <tr>
-            <th className="sticky left-0 bg-console-card px-2 py-1.5 text-left font-normal text-console-faint" />
+      <Table className="w-full border-collapse text-[11px]">
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="sticky left-0 h-auto bg-card px-2 py-1.5 text-left font-normal text-muted-foreground/60" />
             {cols.map((col) => (
-              <th key={col} className="px-1.5 py-1.5 text-center font-normal text-console-faint">
+              <TableHead
+                key={col}
+                className="h-auto px-1.5 py-1.5 text-center font-normal text-muted-foreground/60"
+              >
                 {col}
-              </th>
+              </TableHead>
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {rows.map((row) => (
-            <tr key={row}>
-              <td className="sticky left-0 max-w-[120px] truncate bg-console-card px-2 py-1.5 text-console-muted">
+            <TableRow key={row}>
+              <TableCell className="sticky left-0 max-w-[120px] truncate bg-card px-2 py-1.5 text-muted-foreground">
                 {row}
-              </td>
+              </TableCell>
               {cols.map((col) => {
                 const cell = cells[crossKey(row, col)];
                 if (!cell) {
                   return (
-                    <td key={col} className="px-1.5 py-1.5 text-center text-console-line">
+                    <TableCell key={col} className="px-1.5 py-1.5 text-center text-border">
                       ·
-                    </td>
+                    </TableCell>
                   );
                 }
                 const weak = cell.count < 3;
                 return (
-                  <td
+                  <TableCell
                     key={col}
-                    className={clsx(
+                    className={cn(
                       'px-1.5 py-1.5 text-center font-mono',
                       weak && 'opacity-45',
                       metric !== 'count' && metric !== 'winRate' && cell.value != null
                         ? signedClass(cell.value)
-                        : 'text-console-ink',
+                        : 'text-foreground',
                     )}
                     title={`${row} × ${col} · ${cell.count} 笔`}
                   >
                     {format(cell.value)}
-                    <span className="ml-0.5 text-[9px] text-console-faint">({cell.count})</span>
-                  </td>
+                    <span className="ml-0.5 text-[9px] text-muted-foreground/60">({cell.count})</span>
+                  </TableCell>
                 );
               })}
-            </tr>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }

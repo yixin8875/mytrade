@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { clsx } from 'clsx';
+import { Tabs, TabsList, TabsTab } from './ui/tabs';
 
 export interface PageTab<T extends string> {
   key: T;
@@ -18,23 +18,21 @@ export function PageTabs<T extends string>({
   onChange: (key: T) => void;
 }) {
   return (
-    <div
-      role="tablist"
-      className="flex h-12 shrink-0 items-center gap-1 border-b border-console-line bg-console-canvas px-6"
+    <Tabs
+      value={value}
+      onValueChange={(next) => {
+        if (typeof next === 'string') onChange(next as T);
+      }}
+      className="shrink-0 gap-0 border-b border-border bg-sidebar px-6"
     >
-      {tabs.map((tab) => (
-        <button
-          key={tab.key}
-          role="tab"
-          aria-selected={value === tab.key}
-          onClick={() => onChange(tab.key)}
-          title={tab.hint}
-          className={clsx('console-chip', value === tab.key && 'console-chip-active')}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </div>
+      <TabsList variant="underline" className="h-12 gap-1">
+        {tabs.map((tab) => (
+          <TabsTab key={tab.key} value={tab.key} title={tab.hint} className="h-10 px-3">
+            {tab.label}
+          </TabsTab>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }
 

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { clsx } from 'clsx';
 import { PanelLeftClose, Plus, Search, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { requestSymbol } from '../chart/tv/registry';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { fmtPrice, signedClass } from '../lib/format';
+import { Button } from './ui/button';
+import { SegmentedControl, SegmentedControlItem } from './ui/segmented-control';
 import type { WatchlistRow } from '../gateway/types';
 
 type Filter = 'all' | 'position' | 'order';
@@ -115,26 +117,28 @@ export function WatchlistPanel() {
   });
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-tv-panel" data-panel="watchlist">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-tv-border px-3">
-        <span className="text-[12px] font-semibold text-tv-text">
+    <section className="flex h-full min-h-0 flex-col bg-card" data-panel="watchlist">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
+        <span className="text-[12px] font-semibold text-foreground">
           行情
-          <span className="num ml-1.5 font-mono text-[11px] font-normal text-tv-muted">
+          <span className="num ml-1.5 font-mono text-[11px] font-normal text-muted-foreground">
             {watchlist.length}
           </span>
         </span>
         <div className="ml-auto flex items-center gap-1">
           <div className="relative">
-            <button
+            <Button
+              variant="outline"
+              size="xs"
               onClick={() => (addOpen ? setAddOpen(false) : openAdd())}
               title="添加自选品种"
               aria-label="添加自选品种"
               aria-expanded={addOpen}
-              className="flex h-6 items-center gap-1 rounded border border-tv-border bg-tv-raised px-1.5 text-[11px] text-tv-muted outline-none hover:text-tv-text focus:border-tv-accent"
+              className="h-6 gap-1 px-1.5 text-[11px] font-normal text-muted-foreground hover:text-foreground"
             >
-              <Plus size={12} strokeWidth={1.5} />
+              <Plus size={12} strokeWidth={1.5} className="size-3" />
               添加
-            </button>
+            </Button>
             {addOpen && (
               <>
                 <button
@@ -143,9 +147,9 @@ export function WatchlistPanel() {
                   aria-label="关闭添加菜单"
                   tabIndex={-1}
                 />
-                <div className="absolute right-0 top-7 z-50 w-[260px] overflow-hidden rounded-lg border border-tv-border bg-tv-panel shadow-[0_12px_32px_rgba(0,0,0,0.14)]">
-                  <div className="flex items-center gap-2 border-b border-tv-border px-2.5 py-1.5">
-                    <Search size={13} strokeWidth={1.5} className="text-tv-faint" />
+                <div className="absolute right-0 top-7 z-50 w-[260px] overflow-hidden rounded-lg border border-border bg-popover shadow-lg/5">
+                  <div className="flex items-center gap-2 border-b border-border px-2.5 py-1.5">
+                    <Search size={13} strokeWidth={1.5} className="text-muted-foreground/60" />
                     <input
                       ref={addInputRef}
                       value={addQuery}
@@ -156,12 +160,12 @@ export function WatchlistPanel() {
                       }}
                       placeholder="搜索品种 / 名称"
                       aria-label="搜索可添加品种"
-                      className="h-6 min-w-0 flex-1 bg-transparent text-[12px] text-tv-text outline-none placeholder:text-tv-faint"
+                      className="h-6 min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground/60"
                     />
                   </div>
                   <div className="max-h-64 overflow-y-auto py-1">
                     {candidates.length === 0 && (
-                      <div className="px-3 py-4 text-center text-[12px] text-tv-muted">
+                      <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
                         没有匹配的品种
                       </div>
                     )}
@@ -169,12 +173,12 @@ export function WatchlistPanel() {
                       <button
                         key={item.name}
                         onClick={() => addSymbol(item.name)}
-                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-tv-hover"
+                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-accent"
                       >
-                        <span className="w-[72px] shrink-0 text-[12px] font-medium text-tv-text">
+                        <span className="w-[72px] shrink-0 text-[12px] font-medium text-foreground">
                           {item.name}
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-[11px] text-tv-muted">
+                        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
                           {item.description}
                         </span>
                       </button>
@@ -184,32 +188,34 @@ export function WatchlistPanel() {
               </>
             )}
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="icon-xs"
             onClick={() => setWatchColumnOpen(false)}
             title="收起行情列"
             aria-label="收起行情列"
-            className="flex h-6 w-6 items-center justify-center rounded text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
           >
-            <PanelLeftClose size={14} strokeWidth={1.5} />
-          </button>
+            <PanelLeftClose size={14} strokeWidth={1.5} className="size-3.5" />
+          </Button>
         </div>
       </div>
 
       <div className="shrink-0 px-2 pt-2">
-        <div className="flex h-7 items-center gap-1.5 rounded-md border border-tv-border bg-tv-raised px-2">
-          <Search size={13} strokeWidth={1.5} className="shrink-0 text-tv-faint" />
+        <div className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-muted px-2">
+          <Search size={13} strokeWidth={1.5} className="shrink-0 text-muted-foreground/60" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索自选"
             aria-label="搜索自选品种"
-            className="h-full min-w-0 flex-1 bg-transparent text-[11px] text-tv-text outline-none placeholder:text-tv-faint"
+            className="h-full min-w-0 flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground/60"
           />
           {query && (
             <button
               onClick={() => setQuery('')}
               aria-label="清空搜索"
-              className="text-tv-faint hover:text-tv-text"
+              className="text-muted-foreground/60 hover:text-foreground"
             >
               <X size={12} strokeWidth={1.5} />
             </button>
@@ -217,31 +223,32 @@ export function WatchlistPanel() {
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1 px-2 py-1.5">
-        {(
-          [
-            ['all', '全部'],
-            ['position', '持仓中'],
-            ['order', '有挂单'],
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setFilter(key)}
-            aria-pressed={filter === key}
-            className={clsx(
-              'h-6 rounded px-2 text-[11px] transition-colors',
-              filter === key
-                ? 'bg-tv-accent-soft text-tv-accent'
-                : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
-            )}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="flex shrink-0 items-center px-2 py-1.5">
+        <SegmentedControl size="sm">
+          {(
+            [
+              ['all', '全部'],
+              ['position', '持仓中'],
+              ['order', '有挂单'],
+            ] as const
+          ).map(([key, label]) => {
+            const active = filter === key;
+            return (
+              <SegmentedControlItem
+                key={key}
+                data-checked={active ? '' : undefined}
+                aria-pressed={active}
+                onClick={() => setFilter(key)}
+                className="h-6 rounded px-2 text-[11px]"
+              >
+                {label}
+              </SegmentedControlItem>
+            );
+          })}
+        </SegmentedControl>
       </div>
 
-      <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_52px_52px_48px] items-center gap-1 border-y border-tv-border bg-tv-raised/60 px-2 py-1 text-[10px] text-tv-faint">
+      <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_52px_52px_48px] items-center gap-1 border-y border-border bg-muted/60 px-2 py-1 text-[10px] text-muted-foreground/60">
         <span>品种</span>
         <span className="text-right">卖价</span>
         <span className="text-right">买价</span>
@@ -250,12 +257,12 @@ export function WatchlistPanel() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {watchlist.length === 0 && (
-          <div className="px-3 py-3 text-[11px] text-tv-muted">
+          <div className="px-3 py-3 text-[11px] text-muted-foreground">
             {conn === 'open' ? '还没有自选品种，从上方添加' : '等待网关连接…'}
           </div>
         )}
         {watchlist.length > 0 && visible.length === 0 && (
-          <div className="px-3 py-3 text-[11px] text-tv-muted">没有符合条件的品种</div>
+          <div className="px-3 py-3 text-[11px] text-muted-foreground">没有符合条件的品种</div>
         )}
         {visible.map((name) => {
           const row = rowOf(name);
@@ -268,46 +275,46 @@ export function WatchlistPanel() {
                 // 优先切到最近操作的图表；交易台没挂载时退回全局品种
                 if (!requestSymbol(name)) setSymbol(name);
               }}
-              className={clsx(
-                'group relative grid h-9 cursor-pointer grid-cols-[minmax(0,1fr)_52px_52px_48px] items-center gap-1 border-b border-tv-border/50 px-2 text-[11px] transition-colors',
-                active ? 'bg-tv-accent-soft' : 'hover:bg-tv-hover',
+              className={cn(
+                'group relative grid h-9 cursor-pointer grid-cols-[minmax(0,1fr)_52px_52px_48px] items-center gap-1 border-b border-border/50 px-2 text-[11px] transition-colors',
+                active ? 'bg-brand/10' : 'hover:bg-accent',
               )}
             >
               <div className="flex min-w-0 items-center gap-1.5">
                 {row?.hasPosition && (
                   <span
-                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-tv-accent"
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand"
                     title="有持仓"
                   />
                 )}
                 {orderSymbols.has(name) && !row?.hasPosition && (
                   <span
-                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-tv-warn"
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
                     title="有挂单"
                   />
                 )}
                 <div className="min-w-0">
                   <div
-                    className={clsx(
+                    className={cn(
                       'truncate font-medium',
-                      active ? 'text-tv-text' : 'text-tv-text/90',
+                      active ? 'text-foreground' : 'text-foreground/90',
                     )}
                   >
                     {name}
                   </div>
-                  <div className="truncate text-[10px] leading-tight text-tv-faint">
+                  <div className="truncate text-[10px] leading-tight text-muted-foreground/60">
                     {info?.description ?? row?.description ?? ''}
                   </div>
                 </div>
               </div>
-              <span className="num text-right font-mono text-tv-down">
+              <span className="num text-right font-mono text-destructive-foreground">
                 {row ? fmtPrice(row.bid, row.digits) : '—'}
               </span>
-              <span className="num text-right font-mono text-tv-up">
+              <span className="num text-right font-mono text-success-foreground">
                 {row ? fmtPrice(row.ask, row.digits) : '—'}
               </span>
               <span
-                className={clsx(
+                className={cn(
                   'num text-right font-mono group-hover:invisible',
                   signedClass(row?.changePct),
                 )}
@@ -316,23 +323,25 @@ export function WatchlistPanel() {
                   ? `${row.changePct >= 0 ? '+' : ''}${row.changePct.toFixed(2)}%`
                   : '—'}
               </span>
-              <button
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={(event) => {
                   event.stopPropagation();
                   save(watchlist.filter((item) => item !== name));
                 }}
                 title="从自选里移除"
                 aria-label={`从自选移除 ${name}`}
-                className="absolute right-1 top-1/2 hidden h-5 w-5 -translate-y-1/2 items-center justify-center rounded bg-tv-panel text-tv-muted hover:text-tv-text group-hover:flex"
+                className="absolute right-1 top-1/2 hidden h-5 w-5 -translate-y-1/2 bg-card text-muted-foreground hover:text-foreground group-hover:flex"
               >
-                <X size={12} strokeWidth={1.5} />
-              </button>
+                <X size={12} strokeWidth={1.5} className="size-3" />
+              </Button>
             </div>
           );
         })}
       </div>
 
-      <div className="shrink-0 border-t border-tv-border px-2 py-1.5 text-[10px] leading-tight text-tv-faint">
+      <div className="shrink-0 border-t border-border px-2 py-1.5 text-[10px] leading-tight text-muted-foreground/60">
         点差按「点」计，涨跌幅按 D1 开盘价；蓝点=持仓，琥珀点=挂单。
       </div>
     </section>

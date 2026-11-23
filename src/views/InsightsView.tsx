@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { PageTabs, useVisited } from '../components/PageTabs';
 import { useApp } from '../store/useApp';
 import { ReportsTab } from './Reports';
@@ -16,16 +16,16 @@ export function InsightsView() {
   const seen = useVisited(tab);
 
   return (
-    <div className="console-scope flex h-full min-h-0 flex-col bg-console-canvas">
+    <div className="console-scope flex h-full min-h-0 flex-col bg-sidebar">
       <PageTabs tabs={TABS} value={tab} onChange={setTab} />
       <div className="relative min-h-0 flex-1">
         {seen.includes('reports') && (
-          <div className={clsx('absolute inset-0', tab !== 'reports' && 'hidden')}>
+          <div className={cn('absolute inset-0', tab !== 'reports' && 'hidden')}>
             <ReportsTab />
           </div>
         )}
         {seen.includes('review') && (
-          <div className={clsx('absolute inset-0', tab !== 'review' && 'hidden')}>
+          <div className={cn('absolute inset-0', tab !== 'review' && 'hidden')}>
             <ReviewView />
           </div>
         )}

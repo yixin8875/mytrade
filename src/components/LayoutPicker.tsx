@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { LAYOUT_GROUPS, layoutById, type LayoutPreset } from '../chart/layouts';
 import { useApp, type ChartSync } from '../store/useApp';
+import { Button } from './ui/button';
 
 /** 用布局预设自己的格子矩形画小图标，和实际图表排列一致 */
 export function LayoutIcon({
@@ -52,7 +53,7 @@ export function LayoutGallery({
 
   const renderRow = (count: number | string, presets: LayoutPreset[], label?: string) => (
     <div key={`${label ?? 'group'}-${count}`} className="flex items-center gap-2.5">
-      <span className="w-5 shrink-0 select-none text-right font-mono text-[11px] text-tv-faint">
+      <span className="w-5 shrink-0 select-none text-right font-mono text-[11px] text-muted-foreground/60">
         {count}
       </span>
       <div className="flex flex-wrap items-center gap-1">
@@ -64,11 +65,11 @@ export function LayoutGallery({
             aria-label={`${preset.count} 图 ${preset.label}`}
             aria-pressed={value === preset.id}
             onClick={() => onChange(preset.id)}
-            className={clsx(
+            className={cn(
               'rounded-md p-1 transition-colors',
               value === preset.id
-                ? 'bg-tv-accent-soft text-tv-accent'
-                : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+                ? 'bg-brand/10 text-brand'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
             )}
           >
             <LayoutIcon preset={preset} className="h-5 w-5" />
@@ -87,7 +88,7 @@ export function LayoutGallery({
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
-          className="rounded-md px-1 text-[11px] text-tv-muted transition-colors hover:text-tv-text"
+          className="rounded-md px-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
         >
           {expanded ? '收起更多布局' : '更多布局'}
         </button>
@@ -112,7 +113,7 @@ export function SyncToggles({ className }: { className?: string }) {
   const setSync = useApp((s) => s.setLayoutSync);
 
   return (
-    <div className={clsx('grid grid-cols-3 gap-x-2 gap-y-1.5', className)}>
+    <div className={cn('grid grid-cols-3 gap-x-2 gap-y-1.5', className)}>
       {SYNC_ITEMS.map((item) => {
         const on = sync[item.key];
         return (
@@ -122,15 +123,15 @@ export function SyncToggles({ className }: { className?: string }) {
             title={item.hint}
             aria-pressed={on}
             onClick={() => setSync({ [item.key]: !on } as Partial<ChartSync>)}
-            className={clsx(
+            className={cn(
               'flex items-center gap-1.5 rounded-md px-1 py-1 text-left text-[11px] transition-colors',
-              on ? 'text-tv-text' : 'text-tv-muted hover:text-tv-text',
+              on ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
             )}
           >
             <span
-              className={clsx(
+              className={cn(
                 'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[4px] border transition-colors',
-                on ? 'border-tv-accent bg-tv-accent' : 'border-tv-border bg-tv-raised',
+                on ? 'border-brand bg-brand' : 'border-border bg-muted',
               )}
             >
               {on && (
@@ -180,28 +181,26 @@ export function LayoutPickerButton() {
 
   return (
     <div ref={wrapRef} className="relative shrink-0">
-      <button
-        type="button"
+      <Button
+        variant={open ? 'secondary' : 'ghost'}
+        size="sm"
         onClick={() => setOpen((value) => !value)}
         title="图表布局与联动"
         aria-expanded={open}
-        className={clsx(
-          'flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] transition-colors',
-          open ? 'bg-tv-hover text-tv-text' : 'text-tv-text hover:bg-tv-hover',
-        )}
+        className="h-7 gap-1.5 px-2 text-[11px] font-normal"
       >
         <LayoutIcon preset={preset} className="h-3.5 w-3.5" />
         布局
-      </button>
+      </Button>
 
       {open && (
         <div
-          className="absolute left-0 top-full z-50 mt-1.5 w-[348px] overflow-y-auto rounded-xl border border-tv-border bg-tv-panel p-3 shadow-[0_18px_48px_-16px_rgba(0,0,0,0.35)]"
+          className="absolute left-0 top-full z-50 mt-1.5 w-[348px] overflow-y-auto rounded-xl border border-border bg-popover p-3 shadow-lg/5"
           style={{ maxHeight: 'min(70vh, 520px)' }}
         >
           <div className="mb-2 flex items-baseline justify-between px-1">
-            <span className="text-[12px] font-medium text-tv-text">图表布局</span>
-            <span className="num font-mono text-[11px] text-tv-faint">
+            <span className="text-[12px] font-medium text-foreground">图表布局</span>
+            <span className="num font-mono text-[11px] text-muted-foreground/60">
               {preset.count} 图 · {preset.label}
             </span>
           </div>
@@ -212,8 +211,8 @@ export function LayoutPickerButton() {
               setOpen(false);
             }}
           />
-          <div className="mt-3 border-t border-tv-border pt-3">
-            <div className="mb-1.5 px-1 text-[11px] text-tv-muted">同步到所有图表</div>
+          <div className="mt-3 border-t border-border pt-3">
+            <div className="mb-1.5 px-1 text-[11px] text-muted-foreground">同步到所有图表</div>
             <SyncToggles className="px-1" />
           </div>
         </div>

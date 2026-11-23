@@ -146,7 +146,7 @@ export function TradeChart({ record }: { record: JournalRecord }) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="text-[11px] text-console-muted">
+        <span className="text-[11px] text-muted-foreground">
           MT5 行情 · {RESOLUTION_LABELS[effective] ?? effective} · 阴影为持仓时段
         </span>
         <span className="flex-1" />
@@ -165,7 +165,7 @@ export function TradeChart({ record }: { record: JournalRecord }) {
 
       <div
         ref={boxRef}
-        className="relative min-h-0 flex-1 overflow-hidden rounded-lg border border-console-line bg-console-card"
+        className="relative min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-card"
       >
         <svg
           width={size.width}
@@ -330,8 +330,8 @@ export function TradeChart({ record }: { record: JournalRecord }) {
               className={clsx(
                 'rounded-md px-2.5 py-1 text-[11px]',
                 error
-                  ? 'bg-console-loss-soft text-console-loss'
-                  : 'bg-console-canvas/90 text-console-muted',
+                  ? 'bg-destructive/10 text-destructive-foreground'
+                  : 'bg-sidebar/90 text-muted-foreground',
               )}
             >
               {emptyHint}
@@ -370,9 +370,9 @@ function Metric({
 }) {
   return (
     <span className="flex items-baseline gap-1.5">
-      <span className="text-console-faint">{label}</span>
-      <span className={clsx('num font-mono text-[12px] text-console-ink-2', tone)}>{value}</span>
-      {hint && <span className="num font-mono text-[10px] text-console-faint">{hint}</span>}
+      <span className="text-muted-foreground/60">{label}</span>
+      <span className={clsx('num font-mono text-[12px] text-foreground/85', tone)}>{value}</span>
+      {hint && <span className="num font-mono text-[10px] text-muted-foreground/60">{hint}</span>}
     </span>
   );
 }

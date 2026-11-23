@@ -180,7 +180,7 @@ export function ChartGrid() {
 
   return (
     <div
-      className="grid h-full w-full gap-px bg-tv-border"
+      className="grid h-full w-full gap-px bg-border"
       style={{
         gridTemplateAreas: preset.areas,
         gridTemplateColumns: `repeat(${preset.cols}, minmax(0, 1fr))`,
@@ -191,7 +191,7 @@ export function ChartGrid() {
         <div
           key={index}
           style={{ gridArea: `c${index}` }}
-          className="relative min-h-0 min-w-0 overflow-hidden bg-tv-bg"
+          className="relative min-h-0 min-w-0 overflow-hidden bg-sidebar"
         >
           <ChartPanel
             slot={index === 0 ? 'main' : `c${index}`}

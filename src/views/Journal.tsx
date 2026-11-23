@@ -1,6 +1,18 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { clsx } from 'clsx';
 import { Camera, NotebookPen, Play, RefreshCw } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
 import { gateway } from '../gateway/client';
 import { RangeChips } from '../components/RangeChips';
 import { TradeDetailModal } from '../components/TradeDetailModal';
@@ -138,31 +150,27 @@ export function JournalView() {
   };
 
   return (
-    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
+    <div className="console-scope h-full min-h-0 overflow-auto bg-sidebar">
       <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-[24px] font-medium tracking-[-0.01em]">交易日志</h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">
+            <p className="mt-1.5 text-[13px] text-muted-foreground">
               已平仓交易自动记录
               {activeLogin ? ` · 账户 ${activeLogin}` : ''} · 点击标签可修改策略
             </p>
           </div>
           <div className="flex items-center gap-2">
             <RangeChips value={days} onChange={setDays} />
-            <button
-              onClick={() => void load(true)}
-              disabled={loading}
-              className="console-btn console-btn-secondary"
-            >
-              <RefreshCw size={14} strokeWidth={1.5} className={clsx(loading && 'animate-spin')} />
+            <Button onClick={() => void load(true)} disabled={loading} variant="outline">
+              <RefreshCw size={14} strokeWidth={1.5} className={cn(loading && 'animate-spin')} />
               {loading ? '读取中…' : '同步刷新'}
-            </button>
+            </Button>
           </div>
         </header>
 
         {error && (
-          <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
+          <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive-foreground">
             读取日志失败：{error}
           </div>
         )}
@@ -185,22 +193,23 @@ export function JournalView() {
               hint={summary ? `${summary.wins} 胜 / ${summary.losses} 负` : undefined}
             />
           </div>
-          <button
+          <Button
             onClick={() => setPage('reports')}
-            className="console-btn console-btn-secondary mt-1 whitespace-nowrap"
+            variant="outline"
+            className="mt-1 whitespace-nowrap"
           >
             查看完整报表
-          </button>
+          </Button>
         </div>
 
-        <section className="console-card mt-4 flex flex-wrap items-center gap-2 px-3 py-2">
-          <span className="text-[11px] text-console-faint">筛选</span>
+        <Card className="mt-4 flex flex-row flex-wrap items-center gap-2 px-3 py-2">
+          <span className="text-[11px] text-muted-foreground/60">筛选</span>
           <select
             value={filter.symbol ?? ''}
             onChange={(event) =>
               setFilter((prev) => ({ ...prev, symbol: event.target.value || undefined }))
             }
-            className="console-input h-7 w-[116px] text-[12px]"
+            className="h-7 w-[116px] rounded-md border border-input bg-background px-2 text-[12px] text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
             aria-label="按品种筛选"
           >
             <option value="">全部品种</option>
@@ -219,7 +228,7 @@ export function JournalView() {
             onChange={(event) =>
               setFilter((prev) => ({ ...prev, tag: event.target.value || undefined }))
             }
-            className="console-input h-7 w-[116px] text-[12px]"
+            className="h-7 w-[116px] rounded-md border border-input bg-background px-2 text-[12px] text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
             aria-label="按标签筛选"
           >
             <option value="">全部标签</option>
@@ -240,15 +249,16 @@ export function JournalView() {
               { value: 'loss' as const, label: '亏损' },
             ]
           ).map((item) => (
-            <button
+            <Button
               key={item.label}
               onClick={() => setFilter((prev) => ({ ...prev, result: item.value }))}
-              className={clsx('console-chip', (filter.result ?? undefined) === item.value && 'console-chip-active')}
+              size="xs"
+              variant={(filter.result ?? undefined) === item.value ? 'default' : 'outline'}
             >
               {item.label}
-            </button>
+            </Button>
           ))}
-          <span className="mx-1 h-4 w-px bg-console-line" />
+          <span className="mx-1 h-4 w-px bg-border" />
           {(
             [
               { value: undefined, label: '全部复盘' },
@@ -256,191 +266,200 @@ export function JournalView() {
               { value: 1 as const, label: '已复盘' },
             ]
           ).map((item) => (
-            <button
+            <Button
               key={item.label}
               onClick={() => setFilter((prev) => ({ ...prev, reviewed: item.value }))}
-              className={clsx('console-chip', filter.reviewed === item.value && 'console-chip-active')}
+              size="xs"
+              variant={filter.reviewed === item.value ? 'default' : 'outline'}
             >
               {item.label}
-            </button>
+            </Button>
           ))}
           {filterActive && (
-            <button
+            <Button
               onClick={() => setFilter({})}
-              className="ml-1 text-[11px] text-console-muted hover:text-console-ink"
+              variant="ghost"
+              size="xs"
+              className="ml-1 text-muted-foreground"
             >
               清除筛选
-            </button>
+            </Button>
           )}
-          <span className="ml-auto text-[10px] text-console-faint">
+          <span className="ml-auto text-[10px] text-muted-foreground/60">
             统计卡与列表按同一筛选口径
           </span>
-        </section>
+        </Card>
 
-        <section className="console-card mt-2 min-w-0 overflow-hidden">
+        <Card className="mt-2 min-w-0 overflow-hidden">
           <div className="max-h-[calc(100vh-320px)] min-h-[240px] overflow-auto">
-            <table className="w-full min-w-[760px] border-collapse text-[12px]">
-              <thead className="sticky top-0 z-10 bg-console-card">
-                <tr className="text-left text-[11px] text-console-faint shadow-[inset_0_-1px_0_var(--color-console-line)]">
-                  <th className="w-[116px] px-4 py-2 font-normal">平仓时间</th>
-                  <th className="w-[96px] px-2 py-2 font-normal">品种 / 方向</th>
-                  <th className="w-[48px] px-2 py-2 text-right font-normal">手数</th>
-                  <th className="w-[150px] px-3 py-2 text-right font-normal">开 → 平</th>
-                  <th className="w-[112px] px-3 py-2 text-right font-normal">盈亏</th>
-                  <th className="w-[62px] px-2 py-2 text-right font-normal">持仓</th>
-                    <th className="w-[110px] px-2 py-2 font-normal">标签</th>
-                    <th className="w-[72px] px-2 py-2 text-right font-normal">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {records.length === 0 && (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-14 text-center text-[12px] text-console-faint">
-                        {loading
-                          ? '读取中…'
-                          : filterActive
-                            ? '当前筛选下没有已平仓交易'
-                            : '这段时间还没有已平仓交易'}
-                      </td>
-                    </tr>
-                  )}
-                  {shown.map((record) => {
-                    const rMultiple = record.risk && record.risk > 0 ? record.profit / record.risk : null;
-                    const closedBy = CLOSED_BY[String(record.closed_by)] ?? null;
-                    return (
-                      <tr
-                        key={`${record.login}-${record.position_id}`}
-                        onClick={() => setShot({ record, tab: 'chart' })}
-                        className="cursor-pointer border-t border-console-line/70 transition-colors hover:bg-console-hover/50"
+            <Table className="w-full min-w-[760px] border-collapse text-[12px]">
+              <TableHeader className="sticky top-0 z-10 bg-card">
+                <TableRow className="border-0 text-left text-[11px] text-muted-foreground/60 shadow-[inset_0_-1px_0_var(--border)] hover:bg-transparent">
+                  <TableHead className="h-auto w-[116px] px-4 py-2 font-normal">平仓时间</TableHead>
+                  <TableHead className="h-auto w-[96px] px-2 py-2 font-normal">品种 / 方向</TableHead>
+                  <TableHead className="h-auto w-[48px] px-2 py-2 text-right font-normal">手数</TableHead>
+                  <TableHead className="h-auto w-[150px] px-3 py-2 text-right font-normal">开 → 平</TableHead>
+                  <TableHead className="h-auto w-[112px] px-3 py-2 text-right font-normal">盈亏</TableHead>
+                  <TableHead className="h-auto w-[62px] px-2 py-2 text-right font-normal">持仓</TableHead>
+                  <TableHead className="h-auto w-[110px] px-2 py-2 font-normal">标签</TableHead>
+                  <TableHead className="h-auto w-[72px] px-2 py-2 text-right font-normal">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {records.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="px-4 py-14 text-center text-[12px] text-muted-foreground/60">
+                      {loading
+                        ? '读取中…'
+                        : filterActive
+                          ? '当前筛选下没有已平仓交易'
+                          : '这段时间还没有已平仓交易'}
+                    </TableCell>
+                  </TableRow>
+                )}
+                {shown.map((record) => {
+                  const rMultiple = record.risk && record.risk > 0 ? record.profit / record.risk : null;
+                  const closedBy = CLOSED_BY[String(record.closed_by)] ?? null;
+                  return (
+                    <TableRow
+                      key={`${record.login}-${record.position_id}`}
+                      onClick={() => setShot({ record, tab: 'chart' })}
+                      className="cursor-pointer border-t border-border/70 transition-colors hover:bg-accent/50"
+                    >
+                      <TableCell
+                        className="num whitespace-nowrap px-4 py-1.5 font-mono text-[11px] text-muted-foreground"
+                        title="本机时区"
                       >
-                        <td
-                          className="num whitespace-nowrap px-4 py-1.5 font-mono text-[11px] text-console-muted"
-                          title="本机时区"
-                        >
-                          {fmtLocalTime(record.close_time, rowOffset(record, serverOffset))}
-                          {closedBy && (
-                            <span className="ml-1.5 text-[10px] text-console-faint">· {closedBy}</span>
-                          )}
-                          {!record.reviewed_at && (
-                            <span className="ml-1.5 text-[10px] text-console-faint" title="还没有复盘">
-                              · 待复盘
-                            </span>
-                          )}
-                        </td>
-                        <td className="whitespace-nowrap px-2 py-1.5">
-                          <span className="font-medium text-console-ink">{record.symbol}</span>
-                          <span
-                            className={clsx(
-                              'ml-1.5 inline-flex items-center gap-1 text-[11px]',
-                              record.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
-                            )}
-                          >
-                            <span
-                              className={clsx(
-                                'h-1.5 w-1.5 rounded-full',
-                                record.side === 'buy' ? 'bg-console-gain' : 'bg-console-loss',
-                              )}
-                            />
-                            {record.side === 'buy' ? '多' : '空'}
+                        {fmtLocalTime(record.close_time, rowOffset(record, serverOffset))}
+                        {closedBy && (
+                          <span className="ml-1.5 text-[10px] text-muted-foreground/60">· {closedBy}</span>
+                        )}
+                        {!record.reviewed_at && (
+                          <span className="ml-1.5 text-[10px] text-muted-foreground/60" title="还没有复盘">
+                            · 待复盘
                           </span>
-                        </td>
-                        <td className="num px-2 py-1.5 text-right font-mono text-[11px] text-console-ink-2">
-                          {fmtVolume(record.volume)}
-                        </td>
-                        <td className="num whitespace-nowrap px-3 py-1.5 text-right font-mono text-[11px] text-console-muted">
-                          {price(record.entry_price)} → {price(record.exit_price)}
-                        </td>
-                        <td
-                          className={clsx(
-                            'num whitespace-nowrap px-3 py-1.5 text-right font-mono font-medium',
-                            signedClass(record.profit),
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap px-2 py-1.5">
+                        <span className="font-medium text-foreground">{record.symbol}</span>
+                        <span
+                          className={cn(
+                            'ml-1.5 inline-flex items-center gap-1 text-[11px]',
+                            record.side === 'buy' ? 'text-success-foreground' : 'text-destructive-foreground',
                           )}
                         >
-                          {fmtSigned(record.profit)}
-                          {rMultiple != null && (
-                            <span className="ml-1.5 text-[10px] font-normal text-console-faint">
-                              {rMultiple >= 0 ? '+' : ''}
-                              {rMultiple.toFixed(2)}R
-                            </span>
-                          )}
-                        </td>
-                        <td className="num whitespace-nowrap px-2 py-1.5 text-right font-mono text-[11px] text-console-muted">
-                          {fmtDuration(record.duration_sec)}
-                        </td>
-                        <td className="px-2 py-1.5" onClick={(event) => event.stopPropagation()}>
-                          {editing?.id === record.position_id ? (
-                            <input
-                              autoFocus
-                              value={editing.value}
-                              maxLength={40}
-                              onChange={(event) =>
-                                setEditing({ id: record.position_id, value: event.target.value })
-                              }
-                              onBlur={() => void saveTag(record, editing.value)}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter') void saveTag(record, editing.value);
-                                if (event.key === 'Escape') setEditing(null);
-                              }}
-                              className="console-input h-6 w-24 px-1.5 text-[12px]"
-                            />
-                          ) : (
-                            <button
-                              onClick={() =>
-                                setEditing({ id: record.position_id, value: record.tag ?? '' })
-                              }
-                              className="h-6 max-w-[104px] truncate rounded-md px-1.5 text-left text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
-                              title="点击修改策略标签"
-                            >
-                              {record.tag || <span className="text-console-faint">未标记</span>}
-                            </button>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <div className="flex items-center justify-end gap-0.5">
-                            {!!record.has_shot && (
-                              <RowAction
-                                label="截图"
-                                onClick={() => setShot({ record, tab: 'shot' })}
-                              >
-                                <Camera size={14} strokeWidth={1.6} />
-                              </RowAction>
+                          <span
+                            className={cn(
+                              'h-1.5 w-1.5 rounded-full',
+                              record.side === 'buy' ? 'bg-success' : 'bg-destructive',
                             )}
+                          />
+                          {record.side === 'buy' ? '多' : '空'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="num px-2 py-1.5 text-right font-mono text-[11px] text-foreground/80">
+                        {fmtVolume(record.volume)}
+                      </TableCell>
+                      <TableCell className="num whitespace-nowrap px-3 py-1.5 text-right font-mono text-[11px] text-muted-foreground">
+                        {price(record.entry_price)} → {price(record.exit_price)}
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          'num whitespace-nowrap px-3 py-1.5 text-right font-mono font-medium',
+                          signedClass(record.profit),
+                        )}
+                      >
+                        {fmtSigned(record.profit)}
+                        {rMultiple != null && (
+                          <span className="ml-1.5 text-[10px] font-normal text-muted-foreground/60">
+                            {rMultiple >= 0 ? '+' : ''}
+                            {rMultiple.toFixed(2)}R
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="num whitespace-nowrap px-2 py-1.5 text-right font-mono text-[11px] text-muted-foreground">
+                        {fmtDuration(record.duration_sec)}
+                      </TableCell>
+                      <TableCell className="px-2 py-1.5" onClick={(event) => event.stopPropagation()}>
+                        {editing?.id === record.position_id ? (
+                          <Input
+                            autoFocus
+                            value={editing.value}
+                            maxLength={40}
+                            onChange={(event) =>
+                              setEditing({ id: record.position_id, value: event.target.value })
+                            }
+                            onBlur={() => void saveTag(record, editing.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') void saveTag(record, editing.value);
+                              if (event.key === 'Escape') setEditing(null);
+                            }}
+                            size="sm"
+                            className="w-24"
+                          />
+                        ) : (
+                          <Button
+                            onClick={() =>
+                              setEditing({ id: record.position_id, value: record.tag ?? '' })
+                            }
+                            variant="ghost"
+                            size="xs"
+                            className="h-6 max-w-[104px] justify-start px-1.5 text-[12px] text-foreground/80"
+                            title="点击修改策略标签"
+                          >
+                            <span className="truncate">
+                              {record.tag || <span className="text-muted-foreground/60">未标记</span>}
+                            </span>
+                          </Button>
+                        )}
+                      </TableCell>
+                      <TableCell className="px-2 py-1.5">
+                        <div className="flex items-center justify-end gap-0.5">
+                          {!!record.has_shot && (
                             <RowAction
-                              label="复盘"
-                              onClick={() => setReviewing(record.position_id)}
+                              label="截图"
+                              onClick={() => setShot({ record, tab: 'shot' })}
                             >
-                              <NotebookPen size={13} strokeWidth={1.6} />
+                              <Camera size={14} strokeWidth={1.6} />
                             </RowAction>
-                            <RowAction
-                              label="回放"
-                              onClick={() => replay.start(record)}
-                            >
-                              <Play size={13} strokeWidth={1.6} />
-                            </RowAction>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          )}
+                          <RowAction
+                            label="复盘"
+                            onClick={() => setReviewing(record.position_id)}
+                          >
+                            <NotebookPen size={13} strokeWidth={1.6} />
+                          </RowAction>
+                          <RowAction
+                            label="回放"
+                            onClick={() => replay.start(record)}
+                          >
+                            <Play size={13} strokeWidth={1.6} />
+                          </RowAction>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
             </div>
             {records.length > 0 && (
-              <div className="flex items-center justify-between border-t border-console-line bg-console-card/60 px-4 py-1.5 text-[11px] text-console-faint">
+              <div className="flex items-center justify-between border-t border-border bg-card/60 px-4 py-1.5 text-[11px] text-muted-foreground/60">
                 <span>
                   已显示 {shown.length} / {records.length} 条
                 </span>
                 {shown.length < records.length && (
-                  <button
+                  <Button
                     onClick={() => setVisible((value) => value + PAGE_SIZE)}
-                    className="h-7 rounded-md border border-console-line bg-console-card px-2.5 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover"
+                    variant="outline"
+                    size="xs"
                   >
                     显示更多
-                  </button>
+                  </Button>
                 )}
               </div>
             )}
-        </section>
+        </Card>
       </div>
 
       <TradeReviewDrawer
@@ -470,17 +489,26 @@ function RowAction({
   children: ReactNode;
 }) {
   return (
-    <button
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-      title={label}
-      aria-label={label}
-      className="flex h-6 w-6 items-center justify-center rounded-md text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
-    >
-      {children}
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            onClick={(event) => {
+              event.stopPropagation();
+              onClick();
+            }}
+            title={label}
+            aria-label={label}
+            size="icon-sm"
+            variant="ghost"
+            className="text-muted-foreground hover:text-foreground"
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup>{label}</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -497,11 +525,11 @@ function StatCard({
 }) {
   return (
     <div className="readout-cell">
-      <div className="text-[12px] text-console-muted">{label}</div>
-      <div className={clsx('num mt-1.5 font-mono text-[20px] font-medium leading-none tracking-[-0.01em]', tone)}>
+      <div className="text-[12px] text-muted-foreground">{label}</div>
+      <div className={cn('num mt-1.5 font-mono text-[20px] font-medium leading-none tracking-[-0.01em]', tone)}>
         {value}
       </div>
-      <div className="mt-2 truncate text-[11px] text-console-faint">{hint ?? ' '}</div>
+      <div className="mt-2 truncate text-[11px] text-muted-foreground/60">{hint ?? ' '}</div>
     </div>
   );
 }

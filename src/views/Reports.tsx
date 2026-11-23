@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { gateway } from '../gateway/client';
 import { RangeChips } from '../components/RangeChips';
 import { useApp } from '../store/useApp';
@@ -46,12 +48,12 @@ export function ReportsTab() {
   const [days, setDays] = useState(30);
 
   return (
-    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
+    <div className="console-scope h-full min-h-0 overflow-auto bg-sidebar">
       <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-[24px] font-medium tracking-[-0.01em]">报表</h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">
+            <p className="mt-1.5 text-[13px] text-muted-foreground">
               统计报表与执行质量共用同一区间
             </p>
           </div>
@@ -136,17 +138,17 @@ export function ReportsSection({ days }: { days: number }) {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-[16px] font-medium tracking-[-0.01em]">统计报表</h2>
-          <p className="mt-1.5 text-[13px] text-console-muted">
+          <p className="mt-1.5 text-[13px] text-muted-foreground">
             以已平仓交易为准，按区间汇总胜率、盈亏、R 与模板执行
           </p>
         </div>
-        <span className="text-[12px] text-console-faint">
+        <span className="text-[12px] text-muted-foreground/60">
           {days > 0 ? `最近 ${days} 天` : '全部历史'}
         </span>
       </header>
 
       {error && (
-        <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
+        <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive-foreground">
           读取统计失败：{error}
         </div>
       )}
@@ -204,7 +206,7 @@ export function ReportsSection({ days }: { days: number }) {
           <Metric
             label="R 回撤"
             value={r ? `${r.maxDrawdownR.toFixed(2)}R` : '—'}
-            tone={r && r.maxDrawdownR > 0 ? 'text-console-loss' : undefined}
+            tone={r && r.maxDrawdownR > 0 ? 'text-destructive-foreground' : undefined}
             hint="按累计 R 的峰值回落"
           />
           <Metric
@@ -215,43 +217,39 @@ export function ReportsSection({ days }: { days: number }) {
         </div>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(280px,1fr)]">
-          <section className="console-card overflow-hidden">
-            <div className="flex items-baseline justify-between gap-4 border-b border-console-line px-5 py-4">
+          <Card className="overflow-hidden">
+            <div className="flex items-baseline justify-between gap-4 border-b border-border px-5 py-4">
               <div>
                 <div className="flex items-center gap-2.5">
                   <span className="text-[13px] font-semibold">
                     {mode === 'pnl' ? '累计盈亏曲线' : '累计 R 曲线'}
                   </span>
-                  <div className="flex items-center gap-0.5 rounded-md border border-console-line p-0.5">
+                  <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
                     {(
                       [
                         ['pnl', '盈亏'],
                         ['r', 'R'],
                       ] as [CurveMode, string][]
                     ).map(([value, label]) => (
-                      <button
+                      <Button
                         key={value}
                         onClick={() => setMode(value)}
-                        className={clsx(
-                          'rounded px-2 py-0.5 text-[11px] transition-colors',
-                          mode === value
-                            ? 'bg-console-hover font-medium text-console-ink'
-                            : 'text-console-muted hover:text-console-ink',
-                        )}
+                        size="xs"
+                        variant={mode === value ? 'secondary' : 'ghost'}
                       >
                         {label}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 </div>
-                <div className="mt-1 text-[12px] text-console-muted">
+                <div className="mt-1 text-[12px] text-muted-foreground">
                   {mode === 'pnl' ? '按平仓顺序累计' : '按初始风险折算，仅统计带止损的交易'}
                 </div>
               </div>
-              <div className="flex items-baseline gap-4 text-[12px] text-console-muted">
+              <div className="flex items-baseline gap-4 text-[12px] text-muted-foreground">
                 <span>
                   最大回撤
-                  <span className="num ml-1.5 font-mono text-console-ink-2">
+                  <span className="num ml-1.5 font-mono text-foreground/80">
                     {mode === 'pnl'
                       ? summary
                         ? fmtMoney(summary.maxDrawdown)
@@ -260,7 +258,7 @@ export function ReportsSection({ days }: { days: number }) {
                   </span>
                 </span>
                 <span
-                  className={clsx(
+                  className={cn(
                     'num font-mono text-[13px] font-medium',
                     mode === 'pnl'
                       ? summary
@@ -282,7 +280,7 @@ export function ReportsSection({ days }: { days: number }) {
 
             <div className="px-5 pb-4 pt-4">
               {(mode === 'pnl' ? empty : noR) ? (
-                <div className="flex h-[260px] items-center justify-center px-8 text-center text-[12px] text-console-faint">
+                <div className="flex h-[260px] items-center justify-center px-8 text-center text-[12px] text-muted-foreground/60">
                   {loading
                     ? '读取中…'
                     : mode === 'pnl'
@@ -298,13 +296,13 @@ export function ReportsSection({ days }: { days: number }) {
                 />
               )}
             </div>
-          </section>
+          </Card>
 
-          <section className="console-card flex flex-col overflow-hidden">
-            <div className="border-b border-console-line px-5 py-4 text-[13px] font-semibold">
+          <Card className="flex flex-col overflow-hidden">
+            <div className="border-b border-border px-5 py-4 text-[13px] font-semibold">
               区间概览
             </div>
-            <div className="flex-1 divide-y divide-console-line/70 px-5">
+            <div className="flex-1 divide-y divide-border/70 px-5">
               <InfoRow label="交易笔数" value={summary ? String(summary.trades) : '—'} />
               <InfoRow
                 label="毛利 / 毛损"
@@ -331,7 +329,7 @@ export function ReportsSection({ days }: { days: number }) {
               <InfoRow
                 label="最大回撤"
                 value={summary ? fmtMoney(summary.maxDrawdown) : '—'}
-                tone={summary && summary.maxDrawdown > 0 ? 'text-console-loss' : undefined}
+                tone={summary && summary.maxDrawdown > 0 ? 'text-destructive-foreground' : undefined}
               />
               <InfoRow
                 label="R 覆盖"
@@ -340,11 +338,11 @@ export function ReportsSection({ days }: { days: number }) {
                     ? `${r?.trades ?? 0} / ${summary.trades} 笔 · ${fmtPct(r?.coverage)}`
                     : '—'
                 }
-                tone={r?.coverage != null && r.coverage < 50 ? 'text-console-warn' : undefined}
+                tone={r?.coverage != null && r.coverage < 50 ? 'text-warning-foreground' : undefined}
               />
               <InfoRow label="风险来源" value={sourceText} />
             </div>
-          </section>
+          </Card>
         </div>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -369,7 +367,7 @@ export function ReportsSection({ days }: { days: number }) {
           <BreakdownCard title="按持仓时长" rows={stats?.byDuration ?? []} loading={loading} />
         </div>
 
-      <p className="mt-4 text-[11px] text-console-faint">
+      <p className="mt-4 text-[11px] text-muted-foreground/60">
         统计区间按平仓时间、以复盘时区的自然日计算；时段按平仓时间换算到同一时区后的整点归桶。
         未标记策略的交易归入「未标记」。R 用初始止损距离折算：
         优先取成交订单的止损，其次持仓期记录的止损，最后用下单意图里的止损；
@@ -421,7 +419,7 @@ function CurveChart({
 
   if (!geometry) {
     return (
-      <div className="flex h-[260px] items-center justify-center text-[12px] text-console-faint">
+      <div className="flex h-[260px] items-center justify-center text-[12px] text-muted-foreground/60">
         {loading ? '读取中…' : '暂无曲线数据'}
       </div>
     );
@@ -445,7 +443,7 @@ function CurveChart({
             x2={W - PAD}
             y1={PAD + t * (H - PAD * 2)}
             y2={PAD + t * (H - PAD * 2)}
-            stroke="var(--color-console-line)"
+            stroke="var(--border)"
             strokeWidth="1"
             vectorEffect="non-scaling-stroke"
           />
@@ -455,27 +453,27 @@ function CurveChart({
           x2={W - PAD}
           y1={geometry.zeroY}
           y2={geometry.zeroY}
-          stroke="var(--color-console-line-2)"
+          stroke="var(--input)"
           strokeWidth="1"
           strokeDasharray="4 4"
           vectorEffect="non-scaling-stroke"
         />
         <polygon
           points={geometry.area}
-          fill={gain ? 'var(--color-console-gain-soft)' : 'var(--color-console-loss-soft)'}
+          fill={gain ? 'color-mix(in srgb, var(--success) 12%, transparent)' : 'color-mix(in srgb, var(--destructive) 12%, transparent)'}
           opacity="0.7"
         />
         <polyline
           points={geometry.line}
           fill="none"
-          stroke={gain ? 'var(--color-console-gain)' : 'var(--color-console-loss)'}
+          stroke={gain ? 'var(--success-foreground)' : 'var(--destructive-foreground)'}
           strokeWidth="2"
           strokeLinejoin="round"
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      <div className="mt-2 flex items-center justify-between text-[11px] text-console-faint">
+      <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground/60">
         <span className="font-mono" title="本机时区">
           {fmtLocalDay(geometry.first, serverOffset)}
         </span>
@@ -483,7 +481,7 @@ function CurveChart({
           {mode === 'pnl' ? '最高' : '最好'} {show(geometry.max)} ·{' '}
           {mode === 'pnl' ? '最低' : '最差'} {show(geometry.min)}
         </span>
-        <span className={clsx('num font-mono font-medium', signedClass(geometry.lastValue))}>
+        <span className={cn('num font-mono font-medium', signedClass(geometry.lastValue))}>
           {show(geometry.lastValue)}
         </span>
         <span className="font-mono" title="本机时区">
@@ -504,20 +502,20 @@ function TemplateCard({
   const planned = data?.planned ?? 0;
 
   return (
-    <section className="console-card flex flex-col overflow-hidden">
-      <div className="flex items-baseline justify-between gap-4 border-b border-console-line px-5 py-4">
+    <Card className="flex flex-col overflow-hidden">
+      <div className="flex items-baseline justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <div className="text-[13px] font-semibold">模板执行</div>
-          <div className="mt-1 text-[12px] text-console-muted">分批止盈计划实际走到了哪一步</div>
+          <div className="mt-1 text-[12px] text-muted-foreground">分批止盈计划实际走到了哪一步</div>
         </div>
-        <span className="num font-mono text-[11px] text-console-faint">{planned} 笔计划</span>
+        <span className="num font-mono text-[11px] text-muted-foreground/60">{planned} 笔计划</span>
       </div>
       {planned === 0 ? (
-        <div className="flex flex-1 items-center justify-center px-6 py-10 text-center text-[12px] text-console-faint">
+        <div className="flex flex-1 items-center justify-center px-6 py-10 text-center text-[12px] text-muted-foreground/60">
           {loading ? '读取中…' : '这个区间没有使用分批止盈模板的交易'}
         </div>
       ) : (
-        <div className="flex-1 divide-y divide-console-line/70 px-5">
+        <div className="flex-1 divide-y divide-border/70 px-5">
           <InfoRow label="到达 1R" value={`${data?.reached1R ?? 0} 笔`} />
           <InfoRow
             label="1R 后移保本"
@@ -534,7 +532,7 @@ function TemplateCard({
                 ? `${data.held} 笔 · ${fmtPct(data.heldRate)}`
                 : `${data?.held ?? 0} 笔`
             }
-            tone={data?.heldRate != null && data.heldRate >= 50 ? 'text-console-gain' : undefined}
+            tone={data?.heldRate != null && data.heldRate >= 50 ? 'text-success-foreground' : undefined}
           />
           <InfoRow
             label="计划交易平均 R"
@@ -543,10 +541,10 @@ function TemplateCard({
           />
         </div>
       )}
-      <p className="px-5 pb-4 pt-3 text-[11px] text-console-faint">
+      <p className="px-5 pb-4 pt-3 text-[11px] text-muted-foreground/60">
         来自下单时的分批止盈计划与模板执行事件；未带止损的交易不计入。
       </p>
-    </section>
+    </Card>
   );
 }
 
@@ -560,20 +558,20 @@ function ExecutionCrossCard({
   const matched = data?.matched ?? 0;
 
   return (
-    <section className="console-card flex flex-col overflow-hidden">
-      <div className="flex items-baseline justify-between gap-4 border-b border-console-line px-5 py-4">
+    <Card className="flex flex-col overflow-hidden">
+      <div className="flex items-baseline justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <div className="text-[13px] font-semibold">执行成本</div>
-          <div className="mt-1 text-[12px] text-console-muted">入场点差 / 滑点与输赢的对照</div>
+          <div className="mt-1 text-[12px] text-muted-foreground">入场点差 / 滑点与输赢的对照</div>
         </div>
-        <span className="num font-mono text-[11px] text-console-faint">{matched} 笔可对照</span>
+        <span className="num font-mono text-[11px] text-muted-foreground/60">{matched} 笔可对照</span>
       </div>
       {matched === 0 ? (
-        <div className="flex flex-1 items-center justify-center px-6 py-10 text-center text-[12px] text-console-faint">
+        <div className="flex flex-1 items-center justify-center px-6 py-10 text-center text-[12px] text-muted-foreground/60">
           {loading ? '读取中…' : '还没有可对照的入场执行记录'}
         </div>
       ) : (
-        <div className="flex-1 divide-y divide-console-line/70 px-5">
+        <div className="flex-1 divide-y divide-border/70 px-5">
           <InfoRow
             label={`盈利单 · ${data?.wins.trades ?? 0} 笔`}
             value={`滑点 ${fmtPoints(data?.wins.avgSlippage)} · 点差 ${fmtPoints(
@@ -589,10 +587,10 @@ function ExecutionCrossCard({
           <InfoRow label="对照覆盖" value={`${matched} 笔入场记录`} />
         </div>
       )}
-      <p className="px-5 pb-4 pt-3 text-[11px] text-console-faint">
+      <p className="px-5 pb-4 pt-3 text-[11px] text-muted-foreground/60">
         只统计有入场成交记录的市价单；样本较小时差异不足以说明问题。
       </p>
-    </section>
+    </Card>
   );
 }
 
@@ -610,51 +608,52 @@ function BreakdownCard({
   const max = rows.reduce((value, row) => Math.max(value, Math.abs(row.pnl)), 0);
 
   return (
-    <section className="console-card overflow-hidden">
-      <div className="flex items-baseline justify-between border-b border-console-line px-5 py-3.5">
+    <Card className="overflow-hidden">
+      <div className="flex items-baseline justify-between border-b border-border px-5 py-3.5">
         <span className="text-[13px] font-semibold">{title}</span>
-        <span className="num font-mono text-[11px] text-console-faint">
+        <span className="num font-mono text-[11px] text-muted-foreground/60">
           {onPick ? '点击行看明细' : `${rows.length} 组`}
         </span>
       </div>
       <div className="p-2">
         {rows.length === 0 && (
-          <div className="px-2 py-8 text-center text-[12px] text-console-faint">
+          <div className="px-2 py-8 text-center text-[12px] text-muted-foreground/60">
             {loading ? '读取中…' : '暂无数据'}
           </div>
         )}
         {rows.map((row) => (
-          <button
+          <Button
             key={row.key}
             type="button"
             disabled={!onPick}
             onClick={onPick ? () => onPick(row.key) : undefined}
             title={onPick ? `在交易日志中查看 ${row.key}` : undefined}
-            className={clsx(
-              'relative block w-full rounded-lg px-2.5 py-2 text-left',
-              onPick ? 'transition-colors hover:bg-console-hover/60' : 'cursor-default',
+            variant="ghost"
+            className={cn(
+              'relative block h-auto w-full justify-start rounded-lg px-2.5 py-2 text-left font-normal',
+              onPick ? 'transition-colors hover:bg-accent/60' : 'cursor-default',
             )}
           >
             <div
-              className={clsx(
+              className={cn(
                 'absolute inset-y-1 left-0 rounded-sm opacity-70',
-                row.pnl >= 0 ? 'bg-console-gain-soft' : 'bg-console-loss-soft',
+                row.pnl >= 0 ? 'bg-success/10' : 'bg-destructive/10',
               )}
               style={{ width: max > 0 ? `${(Math.abs(row.pnl) / max) * 100}%` : '0%' }}
             />
             <div className="relative">
               <div className="flex items-center gap-2 text-[12px]">
-                <span className="w-16 shrink-0 truncate font-medium text-console-ink">
+                <span className="w-16 shrink-0 truncate font-medium text-foreground">
                   {row.key}
                 </span>
-                <span className="num w-12 shrink-0 text-right font-mono text-[11px] text-console-muted">
+                <span className="num w-12 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
                   {row.trades} 笔
                 </span>
-                <span className="num w-10 shrink-0 text-right font-mono text-[11px] text-console-muted">
+                <span className="num w-10 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
                   {row.winRate.toFixed(0)}%
                 </span>
                 <span
-                  className={clsx(
+                  className={cn(
                     'num flex-1 text-right font-mono font-medium',
                     signedClass(row.pnl),
                   )}
@@ -662,15 +661,15 @@ function BreakdownCard({
                   {fmtSigned(row.pnl)}
                 </span>
               </div>
-              <div className="mt-0.5 flex items-center gap-1.5 pl-[72px] text-[10.5px] text-console-faint">
+              <div className="mt-0.5 flex items-center gap-1.5 pl-[72px] text-[10.5px] text-muted-foreground/60">
                 <span>每笔 {row.expectancy != null ? fmtSigned(row.expectancy) : '—'}</span>
                 {row.avgR != null && <span>· 均 {fmtR(row.avgR)}</span>}
               </div>
             </div>
-          </button>
+          </Button>
         ))}
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -687,16 +686,16 @@ function Metric({
 }) {
   return (
     <div className="readout-cell">
-      <div className="text-[12px] text-console-muted">{label}</div>
+      <div className="text-[12px] text-muted-foreground">{label}</div>
       <div
-        className={clsx(
+        className={cn(
           'num mt-1.5 font-mono text-[24px] font-medium leading-none tracking-[-0.01em]',
           tone,
         )}
       >
         {value}
       </div>
-      <div className="mt-2 truncate text-[11px] text-console-faint">{hint ?? ' '}</div>
+      <div className="mt-2 truncate text-[11px] text-muted-foreground/60">{hint ?? ' '}</div>
     </div>
   );
 }
@@ -704,8 +703,8 @@ function Metric({
 function InfoRow({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <div className="flex items-center justify-between py-3 text-[12px]">
-      <span className="text-console-muted">{label}</span>
-      <span className={clsx('num font-mono font-medium text-console-ink', tone)}>{value}</span>
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn('num font-mono font-medium text-foreground', tone)}>{value}</span>
     </div>
   );
 }

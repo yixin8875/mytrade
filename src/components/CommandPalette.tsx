@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { Search } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { settingsSnapshot } from '../lib/dataExport';
@@ -8,6 +8,8 @@ import { goReplayList, goReplaySession } from '../replay/route';
 import { useReplay } from '../replay/store';
 import { useApp, type Page } from '../store/useApp';
 import { SETTINGS_NAV } from './SettingsPanel';
+import { Dialog, DialogDescription, DialogPopup, DialogTitle } from './ui/dialog';
+import { Kbd } from './ui/kbd';
 
 const PAGE_LABELS: Record<Page, string> = {
   overview: '概览',
@@ -185,16 +187,24 @@ export function CommandPalette() {
   };
 
   return (
-    <div
-      data-modal
-      className="fixed inset-0 z-[100] flex items-start justify-center bg-black/35 px-4 pt-[12vh]"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) setOpen(false);
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) setOpen(false);
       }}
     >
-      <div className="w-[560px] max-w-full overflow-hidden rounded-xl border border-console-line bg-console-card shadow-2xl">
-        <div className="flex h-12 items-center gap-2.5 border-b border-console-line px-4">
-          <Search size={16} strokeWidth={1.5} className="shrink-0 text-console-muted" />
+      <DialogPopup
+        data-modal
+        showCloseButton={false}
+        className="mt-[10vh] w-[560px] max-w-full gap-0 self-start overflow-hidden rounded-xl p-0"
+      >
+        <DialogTitle className="sr-only">命令面板</DialogTitle>
+        <DialogDescription className="sr-only">
+          搜索并执行页面跳转、数据导出与设置命令
+        </DialogDescription>
+
+        <div className="flex h-12 items-center gap-2.5 border-b border-border px-4">
+          <Search size={16} strokeWidth={1.5} className="shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
             value={query}
@@ -216,41 +226,41 @@ export function CommandPalette() {
               }
             }}
             placeholder="跳转页面、导出数据、打开日历…"
-            className="h-full flex-1 bg-transparent text-[14px] text-console-ink outline-none placeholder:text-console-faint"
+            className="h-full flex-1 bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground/60"
           />
-          <kbd className="shrink-0 rounded border border-console-line-2 bg-console-canvas px-1.5 py-0.5 font-mono text-[10px] text-console-muted">
-            Esc
-          </kbd>
+          <Kbd className="shrink-0">Esc</Kbd>
         </div>
 
         <div className="max-h-[360px] overflow-auto p-2">
           {items.length === 0 && (
-            <div className="px-3 py-8 text-center text-[12px] text-console-muted">没有匹配的命令</div>
+            <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
+              没有匹配的命令
+            </div>
           )}
           {items.map((action, index) => (
             <button
               key={action.id}
               onMouseEnter={() => setSelected(index)}
               onClick={() => run(action)}
-              className={clsx(
+              className={cn(
                 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors',
-                index === selected ? 'bg-console-selected' : 'hover:bg-console-hover',
+                index === selected ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60',
               )}
             >
-              <span className="min-w-0 flex-1 truncate text-[13px] text-console-ink">
+              <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
                 {action.label}
               </span>
-              <span className="shrink-0 text-[11px] text-console-muted">{action.hint}</span>
+              <span className="shrink-0 text-[11px] text-muted-foreground">{action.hint}</span>
             </button>
           ))}
         </div>
 
-        <div className="flex items-center justify-end gap-3 border-t border-console-line px-4 py-2 text-[10.5px] text-console-faint">
+        <div className="flex items-center justify-end gap-3 border-t border-border px-4 py-2 text-[10.5px] text-muted-foreground/60">
           <span>↑↓ 选择</span>
           <span>Enter 执行</span>
           <span>Ctrl K 开关</span>
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }

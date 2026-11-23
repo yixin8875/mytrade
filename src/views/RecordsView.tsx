@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { PageTabs, useVisited } from '../components/PageTabs';
 import { useApp } from '../store/useApp';
 import { DiaryView } from './Diary';
@@ -16,16 +16,16 @@ export function RecordsView() {
   const seen = useVisited(tab);
 
   return (
-    <div className="console-scope flex h-full min-h-0 flex-col bg-console-canvas">
+    <div className="console-scope flex h-full min-h-0 flex-col bg-sidebar">
       <PageTabs tabs={TABS} value={tab} onChange={setTab} />
       <div className="relative min-h-0 flex-1">
         {seen.includes('list') && (
-          <div className={clsx('absolute inset-0', tab !== 'list' && 'hidden')}>
+          <div className={cn('absolute inset-0', tab !== 'list' && 'hidden')}>
             <JournalView />
           </div>
         )}
         {seen.includes('calendar') && (
-          <div className={clsx('absolute inset-0', tab !== 'calendar' && 'hidden')}>
+          <div className={cn('absolute inset-0', tab !== 'calendar' && 'hidden')}>
             <DiaryView />
           </div>
         )}

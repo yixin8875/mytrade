@@ -14,7 +14,7 @@ import {
   Search,
   Settings as SettingsIcon,
 } from 'lucide-react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { checkForUpdates, isUpdateUiAvailable } from '../lib/updater';
 import { fmtMoney } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
@@ -22,6 +22,10 @@ import { goReplayList, routeSessionId, useReplayRoute } from '../replay/route';
 import { sessionProgress, useReplaySession } from '../replay/store';
 import { Tape } from '../replay/Tape';
 import { useApp, type Page } from '../store/useApp';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Kbd } from './ui/kbd';
+import { Tooltip, TooltipPopup, TooltipTrigger } from './ui/tooltip';
 
 type NavItem = { page: Page; label: string; icon: typeof LayoutDashboard };
 
@@ -57,11 +61,11 @@ const RAIL_ITEMS: NavItem[] = NAV.flatMap((group) => group.items);
 function Mark() {
   return (
     <span className="relative flex h-[18px] items-center gap-[3px]" aria-hidden="true">
-      <span className="h-[15px] w-[3px] rounded-[1px] bg-console-ink" />
-      <span className="h-[15px] w-[3px] rounded-[1px] bg-console-ink" />
-      <span className="h-[15px] w-[3px] rounded-[1px] bg-console-ink" />
-      <span className="h-[15px] w-[3px] rounded-[1px] bg-console-ink" />
-      <span className="absolute left-[-4px] top-1/2 h-[2.5px] w-[26px] -translate-y-1/2 -rotate-[30deg] rounded-[1px] bg-console-accent" />
+      <span className="h-[15px] w-[3px] rounded-[1px] bg-foreground/70" />
+      <span className="h-[15px] w-[3px] rounded-[1px] bg-foreground/70" />
+      <span className="h-[15px] w-[3px] rounded-[1px] bg-foreground/70" />
+      <span className="h-[15px] w-[3px] rounded-[1px] bg-foreground/70" />
+      <span className="absolute left-[-4px] top-1/2 h-[2.5px] w-[26px] -translate-y-1/2 -rotate-[30deg] rounded-[1px] bg-brand" />
     </span>
   );
 }
@@ -88,7 +92,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   const mode = health?.tradeMode ?? 'readonly';
   const modeLabel = mode === 'readonly' ? '只读' : mode === 'demo' ? '模拟' : '实盘';
   const modeTone =
-    mode === 'live' ? 'bg-console-loss' : mode === 'demo' ? 'bg-console-gain' : 'bg-console-faint';
+    mode === 'live' ? 'bg-destructive' : mode === 'demo' ? 'bg-success' : 'bg-muted-foreground';
   const online = conn === 'open';
   const terminal = online && !!health?.connected;
   const updateAvailable = isUpdateUiAvailable();
@@ -107,59 +111,58 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
 
   /** 240px 完整导航；交易台钉住时作为浮层复用同一份内容 */
   const sidebar = (
-    <aside className="flex h-full w-[240px] shrink-0 flex-col border-r border-console-line bg-console-sidebar">
+    <aside className="flex h-full w-[240px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
       <div className="flex h-16 items-center gap-3 px-4">
         <Mark />
         <div className="min-w-0 flex-1">
           <div className="text-[15px] font-semibold leading-none">Tally</div>
-          <div className="mt-1 text-[11px] leading-none text-console-muted">MT5 交易终端</div>
+          <div className="mt-1 text-[11px] leading-none text-muted-foreground">MT5 交易终端</div>
         </div>
         {tradePage && (
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={() => setRailPinned(false)}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-console-muted hover:bg-console-hover hover:text-console-ink"
             title="收起导航"
             aria-label="收起导航"
           >
-            <PanelLeftClose size={15} strokeWidth={1.5} />
-          </button>
+            <PanelLeftClose strokeWidth={1.5} />
+          </Button>
         )}
       </div>
 
       <div className="px-3 pb-3">
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => setPaletteOpen(true)}
           title="搜索命令（Ctrl K）"
-          className="flex h-8 w-full items-center gap-2 rounded-lg border border-console-line bg-console-card px-2.5 text-[12px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+          className="w-full justify-start gap-2 px-2.5 font-normal text-muted-foreground"
         >
-          <Search size={14} strokeWidth={1.5} className="shrink-0" />
+          <Search strokeWidth={1.5} />
           <span className="flex-1 text-left">搜索命令</span>
-          <kbd className="rounded border border-console-line-2 px-1 py-0.5 font-mono text-[10px] text-console-faint">
-            Ctrl K
-          </kbd>
-        </button>
+          <Kbd>Ctrl K</Kbd>
+        </Button>
       </div>
 
-      <div className="border-y border-console-line px-4 py-3">
+      <div className="border-y border-sidebar-border px-4 py-3">
         {page === 'replay' ? (
           <>
-            <div className="flex items-center justify-between text-[11px] text-console-muted">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
               <span>复盘 · 模拟账户</span>
               <span className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-console-warn" />
+                <span className="h-1.5 w-1.5 rounded-full bg-warning" />
                 不连实盘
               </span>
             </div>
             {replaySession ? (
               <>
-                <div className="mt-1 truncate text-[12px] leading-tight text-console-ink">
-                  {replaySession.name}
-                </div>
+                <div className="mt-1 truncate text-[12px] leading-tight">{replaySession.name}</div>
                 <div className="mt-1.5 flex items-baseline justify-between gap-2">
                   <span className="num font-mono text-[19px] font-medium leading-none tracking-tight">
                     {fmtMoney(replaySession.equity)}
                   </span>
-                  <span className="num font-mono text-[10px] text-console-muted">
+                  <span className="num font-mono text-[10px] text-muted-foreground">
                     {Math.round(sessionProgress(replaySession) * 100)}%
                   </span>
                 </div>
@@ -171,24 +174,24 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
                 />
               </>
             ) : (
-              <div className="mt-1 text-[11px] text-console-muted">未选择复盘会话</div>
+              <div className="mt-1 text-[11px] text-muted-foreground">未选择复盘会话</div>
             )}
           </>
         ) : (
           <>
-            <div className="flex items-center justify-between text-[11px] text-console-muted">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
               <span>余额</span>
               <span className="flex items-center gap-1.5">
-                <span className={clsx('h-1.5 w-1.5 rounded-full', modeTone)} />
+                <span className={cn('h-1.5 w-1.5 rounded-full', modeTone)} />
                 {modeLabel}
               </span>
             </div>
             <div className="num mt-1 font-mono text-[20px] font-medium leading-none tracking-tight">
               {fmtMoney(account?.balance)}
             </div>
-            <div className="mt-2 flex items-center justify-between text-[11px] text-console-muted">
+            <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
               <span>净值</span>
-              <span className="num font-mono text-console-ink-2">{fmtMoney(account?.equity)}</span>
+              <span className="num font-mono text-foreground/80">{fmtMoney(account?.equity)}</span>
             </div>
           </>
         )}
@@ -197,10 +200,13 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
       <nav className="mt-5 px-3">
         {NAV.map((group, groupIndex) => (
           <div key={group.label} className={groupIndex > 0 ? 'mt-6' : undefined}>
-            <div className="console-label px-2.5 pb-2">{group.label}</div>
+            <div className="px-2.5 pb-2 text-[11px] font-medium text-muted-foreground">
+              {group.label}
+            </div>
             <div className="space-y-0.5">
               {group.items.map((item) => {
                 const Icon = item.icon;
+                const active = page === item.page;
                 const badge =
                   item.page === 'trade'
                     ? positions.length
@@ -208,26 +214,32 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
                       ? orders.length
                       : undefined;
                 return (
-                  <button
+                  <Button
                     key={item.page}
+                    variant="ghost"
                     onClick={() => go(item.page)}
-                    className={clsx('console-nav', page === item.page && 'console-nav-active')}
-                    aria-current={page === item.page ? 'page' : undefined}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'h-8.5 w-full justify-start gap-2.5 px-2.5 text-left text-[13px] font-normal',
+                      active && 'bg-accent font-medium text-accent-foreground',
+                    )}
                   >
                     <Icon
                       size={16}
                       strokeWidth={1.5}
-                      className={clsx(
+                      className={cn(
                         'shrink-0',
-                        page === item.page ? 'text-console-ink' : 'text-console-muted',
+                        active ? 'text-foreground' : 'text-muted-foreground',
                       )}
                     />
                     <span className="flex-1">{item.label}</span>
-                    {badge ? <span className="num text-[11px] text-console-faint">{badge}</span> : null}
-                    {item.page === 'trade' && risk?.halted ? (
-                      <span className="h-1.5 w-1.5 rounded-full bg-console-loss" title="已停机" />
+                    {badge ? (
+                      <span className="num text-[11px] text-muted-foreground/70">{badge}</span>
                     ) : null}
-                  </button>
+                    {item.page === 'trade' && risk?.halted ? (
+                      <span className="h-1.5 w-1.5 rounded-full bg-destructive" title="已停机" />
+                    ) : null}
+                  </Button>
                 );
               })}
             </div>
@@ -236,59 +248,68 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
       </nav>
 
       <div className="mt-auto px-3 pb-3">
-        <button
+        <Button
+          variant="ghost"
           onClick={() => setPrivacy(!privacy)}
-          className={clsx('console-nav mb-1', privacy && 'console-nav-active')}
+          className={cn(
+            'mb-1 h-8.5 w-full justify-start gap-2.5 px-2.5 text-[13px] font-normal',
+            privacy && 'bg-accent font-medium text-accent-foreground',
+          )}
           title="隐私模式下，复盘与报表页的金额显示为 ••••；交易台不受影响"
           aria-pressed={privacy}
         >
           {privacy ? (
-            <EyeOff size={16} strokeWidth={1.5} className="text-console-ink" />
+            <EyeOff size={16} strokeWidth={1.5} className="text-foreground" />
           ) : (
-            <Eye size={16} strokeWidth={1.5} className="text-console-muted" />
+            <Eye size={16} strokeWidth={1.5} className="text-muted-foreground" />
           )}
           <span className="flex-1">隐私模式</span>
-          <span className="text-[10px] text-console-faint">
+          <span className="text-[10px] text-muted-foreground/70">
             {privacy ? (masked ? '已遮金额' : '交易台不遮') : '关'}
           </span>
-        </button>
+        </Button>
 
-        <button
+        <Button
+          variant="ghost"
           onClick={() => setPage('settings')}
-          className={clsx('console-nav mb-1', page === 'settings' && 'console-nav-active')}
           aria-current={page === 'settings' ? 'page' : undefined}
+          className={cn(
+            'mb-1 h-8.5 w-full justify-start gap-2.5 px-2.5 text-[13px] font-normal',
+            page === 'settings' && 'bg-accent font-medium text-accent-foreground',
+          )}
         >
           <SettingsIcon
             size={16}
             strokeWidth={1.5}
-            className={page === 'settings' ? 'text-console-ink' : 'text-console-muted'}
+            className={page === 'settings' ? 'text-foreground' : 'text-muted-foreground'}
           />
           <span className="flex-1">设置</span>
-        </button>
+        </Button>
 
         {updateAvailable && (
-          <button
+          <Button
+            variant="ghost"
             onClick={() => void checkForUpdates(true)}
-            className="console-nav mb-1"
             title="检查 GitHub 上的新版本"
+            className="mb-1 h-8.5 w-full justify-start gap-2.5 px-2.5 text-[13px] font-normal"
           >
-            <RefreshCw size={16} strokeWidth={1.5} className="text-console-muted" />
+            <RefreshCw size={16} strokeWidth={1.5} className="text-muted-foreground" />
             <span className="flex-1">检查更新</span>
-          </button>
+          </Button>
         )}
 
-        <div className="mt-3 space-y-1.5 border-t border-console-line px-2.5 pt-3 text-[11px] text-console-muted">
+        <div className="mt-3 space-y-1.5 border-t border-sidebar-border px-2.5 pt-3 text-[11px] text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <span
-              className={clsx(
+              className={cn(
                 'h-1.5 w-1.5 rounded-full',
                 page === 'replay'
-                  ? 'bg-console-warn'
+                  ? 'bg-warning'
                   : terminal
-                    ? 'bg-console-gain'
+                    ? 'bg-success'
                     : online
-                      ? 'bg-console-warn'
-                      : 'bg-console-loss',
+                      ? 'bg-warning'
+                      : 'bg-destructive',
               )}
             />
             {page === 'replay'
@@ -300,10 +321,12 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
                   : '网关未连接'}
           </div>
           <div className="flex items-center justify-between">
-            <span className={risk?.halted && page !== 'replay' ? 'text-console-loss' : undefined}>
+            <span className={risk?.halted && page !== 'replay' ? 'text-destructive' : undefined}>
               {page === 'replay' ? '复盘不写实盘日志' : statusText}
             </span>
-            <span className="num font-mono text-console-faint">v{health?.version ?? '—'}</span>
+            <span className="num font-mono text-muted-foreground/70">
+              v{health?.version ?? '—'}
+            </span>
           </div>
         </div>
       </div>
@@ -312,7 +335,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
 
   /** 交易台的 56px 图标栏：把图表宽度让出来，钉住后浮出完整导航 */
   const rail = (
-    <aside className="relative z-30 flex w-14 shrink-0 flex-col items-center border-r border-console-line bg-console-sidebar">
+    <aside className="relative z-30 flex w-14 shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar">
       <div className="flex h-11 w-full items-center justify-center">
         <Mark />
       </div>
@@ -323,73 +346,89 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
           const badge =
             item.page === 'trade' ? positions.length : item.page === 'overview' ? orders.length : 0;
           return (
-            <button
-              key={item.page}
-              onClick={() => go(item.page)}
-              title={item.label}
-              aria-label={item.label}
-              aria-current={active ? 'page' : undefined}
-              className={clsx(
-                'relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
-                active
-                  ? 'bg-console-card text-console-ink shadow-[inset_0_0_0_1px_var(--color-console-line)]'
-                  : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
-              )}
-            >
-              <Icon size={17} strokeWidth={1.5} />
-              {badge > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-console-accent px-1 font-mono text-[9px] leading-none text-white">
-                  {badge > 99 ? '99' : badge}
-                </span>
-              )}
-              {item.page === 'trade' && risk?.halted ? (
-                <span className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-console-loss" />
-              ) : null}
-            </button>
+            <Tooltip key={item.page}>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant={active ? 'secondary' : 'ghost'}
+                    size="icon"
+                    onClick={() => go(item.page)}
+                    aria-label={item.label}
+                    aria-current={active ? 'page' : undefined}
+                    className="relative"
+                  />
+                }
+              >
+                <Icon size={17} strokeWidth={1.5} />
+                {badge > 0 && (
+                  <Badge
+                    size="sm"
+                    className="absolute -right-1 -top-1 h-4 min-w-4 rounded-full px-1 font-mono text-[9px] leading-none"
+                  >
+                    {badge > 99 ? '99' : badge}
+                  </Badge>
+                )}
+                {item.page === 'trade' && risk?.halted ? (
+                  <span className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-destructive" />
+                ) : null}
+              </TooltipTrigger>
+              <TooltipPopup side="right">{item.label}</TooltipPopup>
+            </Tooltip>
           );
         })}
       </div>
 
       <div className="mt-auto flex w-full flex-col items-center gap-1 px-1.5 pb-2">
-        <button
-          onClick={() => setPrivacy(!privacy)}
-          className={clsx(
-            'flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
-            privacy
-              ? 'bg-console-card text-console-ink'
-              : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
-          )}
-          title="隐私模式"
-          aria-label="隐私模式"
-          aria-pressed={privacy}
-        >
-          {privacy ? <EyeOff size={17} strokeWidth={1.5} /> : <Eye size={17} strokeWidth={1.5} />}
-        </button>
-        <button
-          onClick={() => setPage('settings')}
-          className={clsx(
-            'flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
-            page === 'settings'
-              ? 'bg-console-card text-console-ink'
-              : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
-          )}
-          title="设置"
-          aria-label="设置"
-        >
-          <SettingsIcon size={17} strokeWidth={1.5} />
-        </button>
-        <button
-          onClick={() => setRailPinned(!railPinned)}
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
-          title="展开导航"
-          aria-label="展开导航"
-        >
-          <PanelLeftOpen size={17} strokeWidth={1.5} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={privacy ? 'secondary' : 'ghost'}
+                size="icon"
+                onClick={() => setPrivacy(!privacy)}
+                aria-label="隐私模式"
+                aria-pressed={privacy}
+              />
+            }
+          >
+            {privacy ? <EyeOff size={17} strokeWidth={1.5} /> : <Eye size={17} strokeWidth={1.5} />}
+          </TooltipTrigger>
+          <TooltipPopup side="right">隐私模式</TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={page === 'settings' ? 'secondary' : 'ghost'}
+                size="icon"
+                onClick={() => setPage('settings')}
+                aria-label="设置"
+              />
+            }
+          >
+            <SettingsIcon size={17} strokeWidth={1.5} />
+          </TooltipTrigger>
+          <TooltipPopup side="right">设置</TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setRailPinned(!railPinned)}
+                aria-label="展开导航"
+              />
+            }
+          >
+            <PanelLeftOpen size={17} strokeWidth={1.5} />
+          </TooltipTrigger>
+          <TooltipPopup side="right">展开导航</TooltipPopup>
+        </Tooltip>
         <span
-          className={clsx(
+          className={cn(
             'mt-1 h-1.5 w-1.5 rounded-full',
-            terminal ? 'bg-console-gain' : online ? 'bg-console-warn' : 'bg-console-loss',
+            terminal ? 'bg-success' : online ? 'bg-warning' : 'bg-destructive',
           )}
           title={terminal ? '网关与终端已连接' : online ? '等待 MT5 终端' : '网关未连接'}
         />
@@ -399,17 +438,17 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
 
   if (tradePage) {
     return (
-      <div className="relative flex h-full min-h-0 bg-console-canvas text-console-ink">
+      <div className="relative flex h-full min-h-0 bg-background text-foreground">
         {rail}
         {railPinned && (
           <>
             <button
-              className="absolute inset-0 z-30 cursor-default bg-black/10"
+              className="absolute inset-0 z-30 cursor-default bg-black/20"
               onClick={() => setRailPinned(false)}
               aria-label="收起导航"
               tabIndex={-1}
             />
-            <div className="absolute inset-y-0 left-14 z-40 shadow-[8px_0_24px_rgba(0,0,0,0.10)]">
+            <div className="absolute inset-y-0 left-14 z-40 shadow-lg">
               {sidebar}
             </div>
           </>
@@ -420,7 +459,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 bg-console-canvas text-console-ink">
+    <div className="flex h-full min-h-0 bg-background text-foreground">
       {sidebar}
       <div className="flex min-w-0 flex-1 flex-col">{children}</div>
     </div>

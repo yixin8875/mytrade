@@ -22,6 +22,8 @@ import { useOrderPreview } from './order/useOrderPreview';
 import { useTemplateSync } from './order/useTemplateSync';
 import { TemplateBar } from './order/TemplateBar';
 import { Field, Kbd, PreviewRow, inputClass } from './order/primitives';
+import { Button } from './ui/button';
+import { SegmentedControl, SegmentedControlItem } from './ui/segmented-control';
 import type {
   DraftOrder,
   OrderType,
@@ -111,12 +113,17 @@ export function OrderTicket() {
   });
   const autoLots = templateArmed && risk.auto;
 
+  // 市价单的实时入场价：预览与自动手数随它刷新，挂单不跟报价
+  const liveEntry =
+    draft.type === 'market' ? ((draft.side === 'buy' ? quote?.ask : quote?.bid) ?? null) : null;
+
   const { previewError, sizing } = useOrderPreview({
     ready,
     info,
     symbol,
     draft,
     risk,
+    liveEntry,
     patchDraft,
     setPreview,
   });
@@ -465,55 +472,52 @@ export function OrderTicket() {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-tv-border px-3">
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-semibold text-tv-text">
+          <div className="truncate text-[13px] font-semibold text-foreground">
             {symbol || '下单'}
           </div>
-          <div className="truncate text-[10px] leading-tight text-tv-faint">
+          <div className="truncate text-[10px] leading-tight text-muted-foreground/60">
             {info?.description ?? (ready ? '选择品种' : '等待 MT5 连接')}
           </div>
         </div>
-        <button
+        <Button
+          variant={draft.active ? 'secondary' : 'outline'}
+          size="sm"
           onClick={() => (draft.active ? resetDraft() : activate())}
           disabled={!draft.active && (!ready || !info)}
-          className={clsx(
-            'h-7 shrink-0 rounded-lg border px-2 text-[11px] transition-colors',
-            draft.active
-              ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent hover:bg-tv-accent/15'
-              : 'border-tv-border bg-tv-panel text-tv-muted hover:bg-tv-hover hover:text-tv-text',
-            !draft.active && (!ready || !info) && 'cursor-not-allowed opacity-40',
-          )}
+          className="shrink-0 px-2 text-[11px]"
         >
           {draft.active ? '取消划线' : '画线'}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={() => setTicketOpen(false)}
           title="收起下单面板"
           aria-label="收起下单面板"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-tv-muted hover:bg-tv-hover hover:text-tv-text"
         >
           <X size={15} strokeWidth={1.5} />
-        </button>
+        </Button>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pb-4 pt-2">
         <div className="flex items-end justify-between gap-2">
           <div>
-            <div className="text-[10px] text-tv-faint">卖出 · Bid</div>
-            <div className="num font-mono text-[19px] font-medium leading-none text-tv-down">
+            <div className="text-[10px] text-muted-foreground/60">卖出 · Bid</div>
+            <div className="num font-mono text-[19px] font-medium leading-none text-destructive-foreground">
               {fmtPrice(bid, digits)}
             </div>
           </div>
-          <div className="pb-0.5 text-center text-[10px] leading-tight text-tv-faint">
+          <div className="pb-0.5 text-center text-[10px] leading-tight text-muted-foreground/60">
             <div>点差</div>
-            <div className="num font-mono text-[11px] text-tv-muted">
+            <div className="num font-mono text-[11px] text-muted-foreground">
               {preview ? `${preview.spreadPoints.toFixed(0)}` : '—'}
             </div>
           </div>
           <div className="text-right">
-            <div className="text-[10px] text-tv-faint">买入 · Ask</div>
-            <div className="num font-mono text-[19px] font-medium leading-none text-tv-up">
+            <div className="text-[10px] text-muted-foreground/60">买入 · Ask</div>
+            <div className="num font-mono text-[19px] font-medium leading-none text-success-foreground">
               {fmtPrice(ask, digits)}
             </div>
           </div>
@@ -524,18 +528,18 @@ export function OrderTicket() {
             onClick={() => setModeMenu(!modeMenu)}
             aria-haspopup="menu"
             aria-expanded={modeMenu}
-            className="flex h-8 w-full items-center justify-between rounded-lg border border-tv-border bg-tv-panel px-2.5 text-[12px] text-tv-text transition-colors hover:bg-tv-hover"
+            className="flex h-8 w-full items-center justify-between rounded-lg border border-border bg-card px-2.5 text-[12px] text-foreground transition-colors hover:bg-accent"
           >
             <span className="flex items-center gap-1.5">
-              <span className="text-tv-muted">下单模式</span>
+              <span className="text-muted-foreground">下单模式</span>
               <span className="font-medium">{entryModeLabel}</span>
             </span>
-            <ChevronDown size={13} strokeWidth={1.8} className="text-tv-muted" />
+            <ChevronDown size={13} strokeWidth={1.8} className="text-muted-foreground" />
           </button>
           {modeMenu && (
             <div
               role="menu"
-              className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-lg border border-tv-border bg-tv-panel py-1 shadow-[0_12px_32px_rgba(20,30,45,0.16)]"
+              className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-[0_12px_32px_rgba(20,30,45,0.16)]"
             >
               {(
                 [
@@ -548,19 +552,19 @@ export function OrderTicket() {
                   role="menuitemradio"
                   aria-checked={entryMode === value}
                   onClick={() => chooseMode(value)}
-                  className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left hover:bg-tv-hover"
+                  className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left hover:bg-accent"
                 >
                   <Check
                     size={13}
                     strokeWidth={2}
                     className={clsx(
                       'mt-0.5 shrink-0',
-                      entryMode === value ? 'text-tv-accent' : 'text-transparent',
+                      entryMode === value ? 'text-brand' : 'text-transparent',
                     )}
                   />
                   <span className="min-w-0">
-                    <span className="block text-[12px] text-tv-text">{label}</span>
-                    <span className="block text-[10px] leading-tight text-tv-muted">{hint}</span>
+                    <span className="block text-[12px] text-foreground">{label}</span>
+                    <span className="block text-[10px] leading-tight text-muted-foreground">{hint}</span>
                   </span>
                 </button>
               ))}
@@ -569,35 +573,33 @@ export function OrderTicket() {
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <button
+          <Button
             onClick={() => startMarket('sell')}
             className={clsx(
-              'flex h-14 flex-col items-center justify-center rounded-lg text-white transition-colors',
-              'bg-tv-down hover:bg-[#a93831]',
-              draft.side === 'sell' && 'ring-2 ring-tv-down/40 ring-offset-1',
+              'flex h-14 flex-col items-center justify-center rounded-lg bg-destructive text-white transition-colors hover:bg-destructive/90',
+              draft.side === 'sell' && 'ring-2 ring-destructive/40 ring-offset-1',
               mode === 'readonly' && 'opacity-60',
             )}
             title="以市价卖出"
           >
             <span className="text-[13px] font-medium">卖出</span>
             <span className="num font-mono text-[12px] opacity-90">{fmtPrice(bid, digits)}</span>
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => startMarket('buy')}
             className={clsx(
-              'flex h-14 flex-col items-center justify-center rounded-lg text-white transition-colors',
-              'bg-tv-up hover:bg-[#0c6a49]',
-              draft.side === 'buy' && 'ring-2 ring-tv-up/40 ring-offset-1',
+              'flex h-14 flex-col items-center justify-center rounded-lg bg-success text-white transition-colors hover:bg-success/90',
+              draft.side === 'buy' && 'ring-2 ring-success/40 ring-offset-1',
               mode === 'readonly' && 'opacity-60',
             )}
             title="以市价买入"
           >
             <span className="text-[13px] font-medium">买入</span>
             <span className="num font-mono text-[12px] opacity-90">{fmtPrice(ask, digits)}</span>
-          </button>
+          </Button>
         </div>
 
-        <div className="flex rounded-lg border border-tv-border bg-tv-raised p-0.5">
+        <SegmentedControl className="w-full">
           {(
             [
               [false, '市价订单'],
@@ -606,22 +608,17 @@ export function OrderTicket() {
           ).map(([pending, label]) => {
             const selected = pending === (draft.type !== 'market');
             return (
-              <button
+              <SegmentedControlItem
                 key={label}
                 onClick={() => setOrderMode(pending)}
                 aria-pressed={selected}
-                className={clsx(
-                  'h-7 flex-1 rounded-md text-[12px] transition-colors',
-                  selected
-                    ? 'bg-tv-panel text-tv-text shadow-[0_1px_2px_rgba(20,30,45,0.06)]'
-                    : 'text-tv-muted hover:text-tv-text',
-                )}
+                className="h-7 flex-1 text-[12px]"
               >
                 {label}
-              </button>
+              </SegmentedControlItem>
             );
           })}
-        </div>
+        </SegmentedControl>
 
         <OrderFields
           draft={draft}
@@ -695,7 +692,7 @@ export function OrderTicket() {
 
         <button
           onClick={() => setMoreOpen(!moreOpen)}
-          className="flex w-full items-center justify-between rounded-lg border border-dashed border-tv-border px-2.5 py-1.5 text-[11px] text-tv-muted transition-colors hover:border-tv-border hover:bg-tv-hover hover:text-tv-text"
+          className="flex w-full items-center justify-between rounded-lg border border-dashed border-border px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
         >
           <span>{moreOpen ? '收起附加设置' : '附加设置 · 策略标签 / 风险 / 计划'}</span>
           <ChevronDown
@@ -718,13 +715,13 @@ export function OrderTicket() {
         </Field>
         )}
 
-        <p className="text-[11px] leading-relaxed text-tv-muted">
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
           {draft.type === 'market'
             ? '市价单按当前报价成交，图上的虚线跟着现价走；按住线上 TP / SL 徽标向上或向下拉动即可设置保护，手数按模板自动计算。'
             : '挂单价格高于 / 低于市价时自动切换停损或限价；按住线上 TP / SL 徽标上下拖动即可设置保护。'}
         </p>
 
-        <div className="space-y-1.5 rounded-lg bg-tv-raised px-3 py-2.5 text-[12px]">
+        <div className="space-y-1.5 rounded-lg bg-muted px-3 py-2.5 text-[12px]">
           <PreviewRow label="保证金" value={fmtMoney(preview?.margin)} />
           <PreviewRow
             label="风险"
@@ -738,9 +735,9 @@ export function OrderTicket() {
           />
           <PreviewRow label="盈亏比" value={preview?.rr != null ? preview.rr.toFixed(2) : '—'} />
           <PreviewRow label="点差" value={preview ? `${preview.spreadPoints.toFixed(0)} 点` : '—'} />
-          {previewError && <div className="text-tv-warn">{previewError}</div>}
+          {previewError && <div className="text-warning-foreground">{previewError}</div>}
           {preview?.warnings.map((warning) => (
-            <div key={warning} className="text-tv-warn">
+            <div key={warning} className="text-warning-foreground">
               {warning}
             </div>
           ))}
@@ -760,7 +757,7 @@ export function OrderTicket() {
           title={riskNeedsSl ? '先填写止损价，手数会按风险金额自动算' : undefined}
           className={clsx(
             'mt-auto h-10 w-full rounded-lg text-[13px] font-medium text-white transition-colors',
-            draft.side === 'buy' ? 'bg-tv-up hover:bg-[#0c6a49]' : 'bg-tv-down hover:bg-[#a93831]',
+            draft.side === 'buy' ? 'bg-success hover:bg-[#0c6a49]' : 'bg-destructive hover:bg-[#a93831]',
             (!ready || !info || pendingBlocked || riskNeedsSl) &&
               'cursor-not-allowed opacity-40',
           )}
@@ -768,9 +765,9 @@ export function OrderTicket() {
           {buttonText}
         </button>
 
-        <div className="text-center text-[11px] leading-relaxed text-tv-muted">
+        <div className="text-center text-[11px] leading-relaxed text-muted-foreground">
           {mode === 'readonly' ? '只读模式不会发送任何订单' : '订单发送到本机 MT5，确认后成交'}
-          <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1 text-tv-faint">
+          <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1 text-muted-foreground/60">
             <Kbd>B</Kbd>
             <span>/</span>
             <Kbd>S</Kbd>

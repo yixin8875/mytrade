@@ -1,5 +1,35 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Card as CossCard,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPopup,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Kbd } from '@/components/ui/kbd';
+import { SegmentedControl, SegmentedControlItem } from '@/components/ui/segmented-control';
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import {
   ArchiveRestore,
   Bell,
@@ -234,12 +264,12 @@ export function SettingsPanel() {
   return (
     <div
       data-page="settings"
-      className="console-scope flex h-full min-h-0 bg-console-canvas text-console-ink"
+      className="console-scope flex h-full min-h-0 bg-sidebar text-foreground"
     >
-      <aside className="flex w-[208px] shrink-0 flex-col border-r border-console-line bg-console-sidebar px-3 py-5">
+      <aside className="flex w-[208px] shrink-0 flex-col border-r border-border bg-sidebar px-3 py-5">
         <div className="px-2.5">
-          <div className="text-[13px] font-semibold text-console-ink">设置</div>
-          <div className="mt-0.5 text-[11px] text-console-muted">Tally · MT5</div>
+          <div className="text-[13px] font-semibold text-foreground">设置</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">Tally · MT5</div>
         </div>
 
         <nav className="mt-5 space-y-0.5">
@@ -248,20 +278,24 @@ export function SettingsPanel() {
             const showGroup = index === 0 || NAV[index - 1].group !== item.group;
             return (
               <div key={item.id}>
-                {showGroup && <div className="console-label px-2.5 pb-1.5 pt-3">{item.group}</div>}
+                {showGroup && (
+                  <div className="px-2.5 pb-1.5 pt-3 text-[11px] font-medium text-muted-foreground">
+                    {item.group}
+                  </div>
+                )}
                 <button
                   onClick={() => setSection(item.id)}
                   className={clsx(
                     'flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left transition-colors',
                     section === item.id
-                      ? 'bg-console-selected font-medium text-console-ink'
-                      : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
+                      ? 'bg-accent font-medium text-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                   )}
                 >
                   <Icon size={16} strokeWidth={1.5} className="shrink-0" />
                   <span className="flex-1 truncate text-[13px]">{item.label}</span>
                   {section === item.id && (
-                    <span className="h-1.5 w-1.5 rounded-full bg-console-accent" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-brand" />
                   )}
                 </button>
               </div>
@@ -270,26 +304,28 @@ export function SettingsPanel() {
         </nav>
 
         <div className="mt-auto space-y-2 px-1">
-          <div className="rounded-lg border border-console-line bg-console-card px-3 py-2.5 text-[11px] leading-relaxed text-console-muted">
+          <div className="rounded-lg border border-border bg-card px-3 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
             设置保存在本机，不会上传。
           </div>
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setPage(settingsReturn ?? 'overview')}
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-console-line bg-console-card text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
+            className="w-full text-[12px] font-normal"
           >
             <X size={14} strokeWidth={1.5} />
             返回
-          </button>
+          </Button>
         </div>
       </aside>
 
       <main className="min-w-0 flex-1 overflow-auto">
         <div className="mx-auto max-w-[820px] px-8 py-8">
           <header className="mb-6">
-            <h1 className="text-[24px] font-medium tracking-[-0.01em] text-console-ink">
+            <h1 className="text-[24px] font-medium tracking-[-0.01em] text-foreground">
               {active.label}
             </h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">{active.hint}</p>
+            <p className="mt-1.5 text-[13px] text-muted-foreground">{active.hint}</p>
           </header>
 
           {section === 'appearance' && <AppearanceSection />}
@@ -460,7 +496,7 @@ function DataSection() {
         description="导出到本机数据目录，CSV 带 UTF-8 BOM，Excel 直接打开不乱码。"
       >
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[12px] text-console-muted">区间</span>
+          <span className="text-[12px] text-muted-foreground">区间</span>
           <Segmented
             value={String(days)}
             options={[
@@ -475,36 +511,39 @@ function DataSection() {
 
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           {EXPORTS.map((item) => (
-            <button
+            <Button
               key={item.kind}
+              variant="outline"
               onClick={() => void exportData(item.kind)}
               disabled={busy !== null}
-              className="flex items-start gap-2.5 rounded-lg border border-console-line bg-console-card px-3 py-2.5 text-left transition-colors hover:bg-console-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-auto items-start justify-start gap-2.5 whitespace-normal px-3 py-2.5 text-left font-normal"
             >
-              <Download size={15} strokeWidth={1.5} className="mt-0.5 shrink-0 text-console-muted" />
+              <Download size={15} strokeWidth={1.5} className="mt-0.5 shrink-0 text-muted-foreground" />
               <span className="min-w-0">
-                <span className="block text-[12px] font-medium text-console-ink">
+                <span className="block text-[12px] font-medium text-foreground">
                   {busy === item.kind ? '导出中…' : item.label}
                 </span>
-                <span className="mt-0.5 block text-[11px] text-console-muted">{item.hint}</span>
+                <span className="mt-0.5 block text-[11px] text-muted-foreground">{item.hint}</span>
               </span>
-            </button>
+            </Button>
           ))}
         </div>
 
         {result && (
-          <div className="mt-4 flex items-center gap-2 rounded-lg border border-console-line bg-console-canvas px-3 py-2 text-[11px] text-console-ink-2">
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-muted px-3 py-2 text-[11px] text-foreground/82">
             <span className="min-w-0 flex-1 truncate font-mono">
               {result.name} · {result.rows} 行 · {fmtBytes(result.bytes)}
             </span>
             {desktop && (
-              <button
+              <Button
+                variant="ghost"
+                size="xs"
                 onClick={() => void reveal(result.path)}
-                className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+                className="shrink-0 text-[11px] font-normal text-muted-foreground"
               >
                 <FolderOpen size={13} strokeWidth={1.5} />
                 定位文件
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -515,77 +554,79 @@ function DataSection() {
         description="把交易库、审计日志、截图和设置打包成 zip，存放在本机 backups 目录。"
       >
         <div className="flex flex-wrap items-center gap-2">
-          <button
+          <Button
+            size="sm"
             onClick={() => void createBackup()}
             disabled={busy !== null || restoring}
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-console-ink px-3 text-[12px] font-medium text-console-card transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="text-[12px]"
           >
             <ArchiveRestore size={14} strokeWidth={1.5} />
             {busy === 'backup' ? '备份中…' : '创建备份'}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => void exportDiagnostics()}
             disabled={busy !== null || restoring}
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-console-line px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className="text-[12px] font-normal"
           >
             <Bug size={14} strokeWidth={1.5} />
             {busy === 'diagnostics' ? '导出中…' : '导出诊断'}
-          </button>
-          <span className="text-[11px] text-console-muted">
+          </Button>
+          <span className="text-[11px] text-muted-foreground">
             {backups.length > 0 ? `已有 ${backups.length} 个备份` : '还没有备份'}
           </span>
         </div>
 
-        <div className="mt-4 divide-y divide-console-line/70">
+        <div className="mt-4 divide-y divide-border/70">
           {backups.length === 0 && (
-            <div className="py-6 text-center text-[12px] text-console-muted">
+            <div className="py-6 text-center text-[12px] text-muted-foreground">
               备份会保存在本机，不含 MT5 登录凭据。
             </div>
           )}
           {backups.map((item) => (
             <div key={item.name} className="flex items-center gap-2 py-2.5">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[11.5px] text-console-ink">
+                <div className="flex items-center gap-1.5 truncate font-mono text-[11.5px] text-foreground">
                   {item.name}
                   {item.auto && (
-                    <span className="ml-1.5 rounded bg-console-accent-soft px-1.5 py-0.5 font-sans text-[10px] text-console-accent">
+                    <Badge variant="info" size="sm" className="font-sans text-[10px]">
                       自动
-                    </span>
+                    </Badge>
                   )}
                 </div>
-                <div className="mt-0.5 text-[11px] text-console-muted">
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
                   {fmtWhen(item.createdAt)} · {fmtBytes(item.bytes)}
                 </div>
               </div>
               {desktop && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="xs"
                   onClick={() => void reveal(item.path)}
-                  className="h-7 shrink-0 rounded-lg px-2 text-[11px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+                  className="shrink-0 text-[11px] font-normal text-muted-foreground"
                 >
                   定位
-                </button>
+                </Button>
               )}
-              <button
+              <Button
+                variant={confirmRestore === item.name ? 'destructive' : 'outline'}
+                size="xs"
                 onClick={() => void restore(item.name)}
                 disabled={!desktop || restoring}
-                className={clsx(
-                  'h-7 shrink-0 rounded-lg border px-2.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-                  confirmRestore === item.name
-                    ? 'border-console-loss bg-console-loss text-white'
-                    : 'border-console-line text-console-ink-2 hover:bg-console-hover',
-                )}
+                className="shrink-0 text-[11px] font-normal"
               >
                 {restoring && confirmRestore !== item.name
                   ? '恢复中…'
                   : confirmRestore === item.name
                     ? '确认恢复？'
                     : '恢复'}
-              </button>
+              </Button>
             </div>
           ))}
         </div>
 
-        <p className="mt-4 text-[11px] leading-relaxed text-console-muted">
+        <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
           恢复会先停止网关、用备份替换数据库并重启，旧数据保留为 data.old-* 目录。
           {!desktop && ' 恢复和文件定位只能在桌面版使用。'}
         </p>
@@ -597,32 +638,36 @@ function DataSection() {
         footer={
           desktop && paths ? (
             <div className="flex flex-wrap gap-2">
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => void reveal(paths.exports)}
-                className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
+                className="text-[12px] font-normal"
               >
                 打开导出目录
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => void reveal(paths.backups)}
-                className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
+                className="text-[12px] font-normal"
               >
                 打开备份目录
-              </button>
+              </Button>
             </div>
           ) : undefined
         }
       >
-        <div className="space-y-1.5 rounded-lg border border-console-line bg-console-canvas px-3 py-2.5 font-mono text-[11px] text-console-ink-2">
+        <div className="space-y-1.5 rounded-lg border border-border bg-muted px-3 py-2.5 font-mono text-[11px] text-foreground/82">
           <div className="truncate">{paths?.dir ?? '读取中…'}</div>
           {paths && (
             <>
-              <div className="truncate text-console-muted">exports: {paths.exports}</div>
-              <div className="truncate text-console-muted">backups: {paths.backups}</div>
+              <div className="truncate text-muted-foreground">exports: {paths.exports}</div>
+              <div className="truncate text-muted-foreground">backups: {paths.backups}</div>
             </>
           )}
         </div>
-        <p className="mt-3 text-[11px] leading-relaxed text-console-muted">
+        <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
           备份不包含 config.json 与 MT5 登录凭据；换机后重新登录账户即可。审计日志是 JSONL，
           每行一个事件，便于外部分析。
         </p>
@@ -643,14 +688,20 @@ function Card({
   footer?: ReactNode;
 }) {
   return (
-    <section className="mb-4 rounded-xl border border-console-line bg-console-card p-5">
-      <div className="text-[13px] font-semibold text-console-ink">{title}</div>
-      {description && (
-        <p className="mt-1.5 text-[12px] leading-relaxed text-console-muted">{description}</p>
-      )}
+    <CossCard className="mb-4 gap-0 p-5">
+      <CardHeader className="p-0">
+        <CardTitle className="font-sans text-[13px] font-semibold leading-normal text-card-foreground">
+          {title}
+        </CardTitle>
+        {description && (
+          <CardDescription className="mt-1.5 text-[12px] leading-relaxed">
+            {description}
+          </CardDescription>
+        )}
+      </CardHeader>
       <div className="mt-5">{children}</div>
-      {footer && <div className="mt-5 border-t border-console-line pt-4">{footer}</div>}
-    </section>
+      {footer && <div className="mt-5 border-t border-border pt-4">{footer}</div>}
+    </CossCard>
   );
 }
 
@@ -664,13 +715,17 @@ function Row({
   children: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-6 border-t border-console-line/70 py-3.5 first:border-t-0 first:pt-0 last:pb-0">
+    <Field className="flex-row items-center justify-between gap-6 border-t border-border/70 py-3.5 first:border-t-0 first:pt-0 last:pb-0">
       <div className="min-w-0">
-        <div className="text-[12px] text-console-ink">{label}</div>
-        {hint && <div className="mt-1 text-[11px] leading-relaxed text-console-muted">{hint}</div>}
+        <FieldLabel className="text-[12px] font-normal leading-normal text-foreground">
+          {label}
+        </FieldLabel>
+        {hint && (
+          <FieldDescription className="mt-1 text-[11px] leading-relaxed">{hint}</FieldDescription>
+        )}
       </div>
       <div className="shrink-0">{children}</div>
-    </div>
+    </Field>
   );
 }
 
@@ -684,22 +739,22 @@ function Segmented<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="flex rounded-lg border border-console-line bg-console-canvas p-0.5">
-      {options.map((item) => (
-        <button
-          key={item.value}
-          onClick={() => onChange(item.value)}
-          className={clsx(
-            'h-7 rounded-md px-3 text-[12px] transition-colors',
-            value === item.value
-              ? 'bg-console-card text-console-ink shadow-[0_1px_2px_rgba(33,28,22,0.06)]'
-              : 'text-console-muted hover:text-console-ink',
-          )}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl>
+      {options.map((item) => {
+        const active = value === item.value;
+        return (
+          <SegmentedControlItem
+            key={item.value}
+            data-checked={active ? '' : undefined}
+            aria-pressed={active}
+            onClick={() => onChange(item.value)}
+            className="px-3 text-[12px]"
+          >
+            {item.label}
+          </SegmentedControlItem>
+        );
+      })}
+    </SegmentedControl>
   );
 }
 
@@ -710,45 +765,15 @@ function Toggle({
   checked: boolean;
   onChange: (value: boolean) => void;
 }) {
-  return (
-    <button
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={clsx(
-        'relative h-[22px] w-10 rounded-full transition-colors duration-150',
-        checked ? 'bg-console-ink' : 'bg-console-line-2',
-      )}
-    >
-      <span
-        className={clsx(
-          'absolute left-0.5 top-0.5 h-[18px] w-[18px] rounded-full bg-console-card shadow-sm transition-transform duration-150',
-          checked && 'translate-x-[18px]',
-        )}
-      />
-    </button>
-  );
+  return <Switch checked={checked} onCheckedChange={(value) => onChange(value)} />;
 }
 
 function StatusPill({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <span
-      className={clsx(
-        'inline-flex items-center gap-1.5 text-[12px]',
-        ok ? 'text-console-gain' : 'text-console-loss',
-      )}
-    >
-      <span className={clsx('h-1.5 w-1.5 rounded-full', ok ? 'bg-console-gain' : 'bg-console-loss')} />
+    <Badge variant={ok ? 'success' : 'error'} size="sm" className="gap-1.5 text-[12px]">
+      <span className={cn('h-1.5 w-1.5 rounded-full', ok ? 'bg-success' : 'bg-destructive')} />
       {label}
-    </span>
-  );
-}
-
-function Kbd({ children }: { children: ReactNode }) {
-  return (
-    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-console-line-2 bg-console-card px-1 font-mono text-[11px] text-console-ink-2">
-      {children}
-    </kbd>
+    </Badge>
   );
 }
 
@@ -806,15 +831,17 @@ function AppearanceSection() {
         <div className="grid grid-cols-3 gap-3">
           {THEMES.map((value) => {
             const preview = THEME_PREVIEWS[value];
+            const selected = theme === value;
             return (
-              <button
+              <CossCard
                 key={value}
-                onClick={() => setTheme(value)}
-                className={clsx(
-                  'rounded-xl border p-3 text-left transition-colors',
-                  theme === value
-                    ? 'border-console-accent ring-1 ring-console-accent'
-                    : 'border-console-line hover:border-console-line-2',
+                render={<button type="button" onClick={() => setTheme(value)} />}
+                aria-pressed={selected}
+                className={cn(
+                  'gap-0 rounded-xl p-3 text-left transition-colors',
+                  selected
+                    ? 'border-brand ring-1 ring-brand'
+                    : 'hover:border-input',
                 )}
               >
                 <div
@@ -837,12 +864,12 @@ function AppearanceSection() {
                   </div>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-medium text-console-ink">{preview.label}</span>
-                  {theme === value && (
-                    <Check size={13} strokeWidth={1.5} className="text-console-accent" />
+                  <span className="text-[12px] font-medium text-foreground">{preview.label}</span>
+                  {selected && (
+                    <Check size={13} strokeWidth={1.5} className="text-brand" />
                   )}
                 </div>
-              </button>
+              </CossCard>
             );
           })}
         </div>
@@ -856,39 +883,40 @@ function AppearanceSection() {
           {ACCENT_PRESETS.map((preset) => {
             const active = accentColor === preset.value;
             return (
-              <button
+              <Button
                 key={preset.value}
+                variant="outline"
+                size="sm"
+                aria-pressed={active}
                 onClick={() => setAccentColor(preset.value)}
-                className={clsx(
-                  'flex h-9 items-center gap-2 rounded-lg border px-2.5 transition-colors',
-                  active
-                    ? 'border-console-ink bg-console-hover'
-                    : 'border-console-line hover:border-console-line-2',
+                className={cn(
+                  'h-9 gap-2 px-2.5 text-[12px] font-normal sm:h-9',
+                  active && 'border-foreground bg-accent',
                 )}
               >
                 <span
                   className="h-4 w-4 rounded-full ring-1 ring-black/10"
                   style={{ backgroundColor: accentForTheme(preset.value, theme) }}
                 />
-                <span className="text-[12px] text-console-ink-2">{preset.name}</span>
-                {active && <Check size={12} strokeWidth={2} className="text-console-ink" />}
-              </button>
+                <span className="text-foreground/82">{preset.name}</span>
+                {active && <Check size={12} strokeWidth={2} className="text-foreground" />}
+              </Button>
             );
           })}
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-console-line pt-3">
-          <label className="flex items-center gap-2 text-[12px] text-console-muted">
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3">
+          <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
             自定义
             <input
               type="color"
               value={accentColor}
               onChange={(event) => setAccentColor(event.target.value)}
-              className="h-8 w-10 cursor-pointer rounded border border-console-line bg-console-card p-0.5"
+              className="h-8 w-10 cursor-pointer rounded border border-border bg-card p-0.5"
               aria-label="自定义强调色"
             />
           </label>
-          <input
+          <Input
             value={hexDraft}
             onChange={(event) => setHexDraft(event.target.value)}
             onBlur={(event) => commitHex(event.target.value)}
@@ -896,15 +924,17 @@ function AppearanceSection() {
               if (event.key === 'Enter') commitHex(event.currentTarget.value);
             }}
             spellCheck={false}
-            className="console-input w-28 font-mono uppercase"
+            className="w-28 font-mono text-[12px] uppercase"
             aria-label="强调色十六进制值"
           />
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setAccentColor(DEFAULT_ACCENT)}
-            className="console-btn console-btn-secondary"
+            className="text-[12px] font-normal"
           >
             恢复默认
-          </button>
+          </Button>
         </div>
       </Card>
     </>
@@ -923,25 +953,30 @@ function ChartSection() {
         title="图表布局"
         description="单图到 6 图都可选；多图时可让品种、周期、十字线和可视区间在所有图表间同步。"
       >
-        <div className="rounded-lg border border-console-line bg-console-canvas/60 p-3">
+        <div className="rounded-lg border border-border bg-muted/60 p-3">
           <LayoutGallery value={layout} onChange={setLayout} />
-          <div className="mt-3 border-t border-console-line pt-3">
-            <div className="mb-2 text-[11px] font-medium text-console-muted">同步到所有图表</div>
+          <div className="mt-3 border-t border-border pt-3">
+            <div className="mb-2 text-[11px] font-medium text-muted-foreground">同步到所有图表</div>
             <SyncToggles />
           </div>
         </div>
         <Row label="默认周期" hint="切换后主图立即生效，下次启动沿用。">
-          <select
+          <Select
             value={resolution}
-            onChange={(event) => setResolution(event.target.value)}
-            className="h-8 rounded-lg border border-console-line bg-console-card px-2 text-[12px] text-console-ink outline-none focus:border-console-accent"
+            onValueChange={(value) => setResolution(String(value))}
+            items={FRAMES.map(([value, label]) => ({ value, label }))}
           >
-            {FRAMES.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger aria-label="默认周期" className="w-[92px] min-w-0 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              {FRAMES.map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
         </Row>
       </Card>
     </>
@@ -972,45 +1007,51 @@ function TemplateSection() {
               className={clsx(
                 'flex items-center gap-2 rounded-lg border px-3 py-2 transition-colors',
                 item.id === template.id
-                  ? 'border-console-accent bg-console-canvas/70'
-                  : 'border-console-line',
+                  ? 'border-brand bg-muted/70'
+                  : 'border-border',
               )}
             >
               <button
                 onClick={() => setActiveTemplate(item.id)}
                 className="min-w-0 flex-1 text-left"
               >
-                <div className="text-[12px] text-console-ink">{item.name}</div>
-                <div className="mt-0.5 text-[11px] leading-relaxed text-console-muted">
+                <div className="text-[12px] text-foreground">{item.name}</div>
+                <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
                   {fmtNum(item.riskPercent)}% 风险 ·{' '}
                   {item.rewardR > 0 ? `止盈 ${fmtNum(item.rewardR)}R` : '不自动设止盈'} ·{' '}
                   {templateStepsSummary(item)}
                 </div>
               </button>
-              <button
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => deleteTemplate(item.id)}
                 disabled={templates.length <= 1}
                 title={templates.length <= 1 ? '至少保留一个模板' : '删除模板'}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-console-muted transition-colors hover:bg-console-hover hover:text-console-loss disabled:cursor-not-allowed disabled:opacity-30"
+                className="shrink-0 text-muted-foreground hover:text-destructive-foreground"
               >
                 <Trash2 size={14} strokeWidth={1.5} />
-              </button>
+              </Button>
             </div>
           ))}
         </div>
-        <div className="mt-4 flex gap-2 border-t border-console-line pt-4">
-          <button
+        <div className="mt-4 flex gap-2 border-t border-border pt-4">
+          <Button
+            variant="outline"
+            size="sm"
             onClick={createTemplate}
-            className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
+            className="text-[12px] font-normal"
           >
             新建空白模板
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={addTemplate}
-            className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink"
+            className="text-[12px] font-normal"
           >
             复制当前模板
-          </button>
+          </Button>
         </div>
       </Card>
 
@@ -1022,7 +1063,7 @@ function TemplateSection() {
       </Card>
 
       <Card title="模板怎么执行" description="点「启用」后带入这一单；成交后的阶段由网关管理。">
-        <ul className="space-y-2 text-[12px] leading-relaxed text-console-muted">
+        <ul className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
           <li>· 风险改为净值百分比，并打开自动手数；设好止损后手数自动算。</li>
           <li>
             · 已有委托价时保留限价/停损，否则准备市价草稿；图纸上拖出止损后，止盈按 R 倍数自动放置。
@@ -1109,7 +1150,7 @@ function DisciplineSection() {
   if (!config) {
     return (
       <Card title="开仓纪律门禁" description="连接网关后可以在这里配置下单前的清单。">
-        <div className="text-[12px] text-console-muted">等待网关连接…</div>
+        <div className="text-[12px] text-muted-foreground">等待网关连接…</div>
       </Card>
     );
   }
@@ -1121,6 +1162,15 @@ function DisciplineSection() {
   const overrideDirty = overrideMode !== accountOverride;
   const dirty = globalDirty || overrideDirty;
   const activeBook = books.find((book) => book.id === playbook);
+  const modeLabel = DISCIPLINE_MODES.find((item) => item.value === mode)?.label ?? '关闭';
+  const overrideOptions = [
+    { value: '', label: `跟随全局（${modeLabel}）` },
+    ...DISCIPLINE_MODES.map((item) => ({ value: item.value, label: item.label })),
+  ];
+  const playbookOptions = [
+    { value: '', label: '不指定' },
+    ...books.map((book) => ({ value: book.id, label: book.name })),
+  ];
 
   const save = async () => {
     setSaving(true);
@@ -1168,52 +1218,52 @@ function DisciplineSection() {
       description="只拦新开仓；平仓、改单、保本与移动止损永远不受影响，回放里的模拟下单也不经过这里。"
       footer={
         <div className="flex items-center justify-between gap-3">
-          <div className="text-[11px] text-console-muted">
+          <div className="text-[11px] text-muted-foreground">
             {dirty ? '有未保存的修改' : '当前配置已生效'}
           </div>
-          <button
+          <Button
+            size="sm"
             onClick={() => void save()}
             disabled={!dirty || saving}
-            className={clsx(
-              'h-8 rounded-lg px-3 text-[12px] font-medium transition-colors',
-              dirty && !saving
-                ? 'bg-console-ink text-console-canvas hover:opacity-90'
-                : 'cursor-not-allowed bg-console-hover text-console-faint',
-            )}
+            className="text-[12px]"
           >
             {saving ? '保存中…' : '保存'}
-          </button>
+          </Button>
         </div>
       }
     >
       <div className="space-y-5">
         <div>
-          <div className="text-[12px] text-console-ink">模式</div>
+          <div className="text-[12px] text-foreground">模式</div>
           <div className="mt-2 grid grid-cols-3 gap-2">
-            {DISCIPLINE_MODES.map((item) => (
-              <button
-                key={item.value}
-                onClick={() => setMode(item.value)}
-                className={clsx(
-                  'rounded-lg border px-3 py-2.5 text-left transition-colors',
-                  mode === item.value
-                    ? 'border-console-accent/50 bg-console-selected'
-                    : 'border-console-line bg-console-card hover:bg-console-hover',
-                )}
-              >
-                <span
-                  className={clsx(
-                    'block text-[12px] font-medium',
-                    mode === item.value ? 'text-console-ink' : 'text-console-ink-2',
+            {DISCIPLINE_MODES.map((item) => {
+              const selected = mode === item.value;
+              return (
+                <CossCard
+                  key={item.value}
+                  render={<button type="button" onClick={() => setMode(item.value)} />}
+                  aria-pressed={selected}
+                  className={cn(
+                    'gap-0 rounded-lg px-3 py-2.5 text-left transition-colors',
+                    selected
+                      ? 'border-brand/50 bg-accent'
+                      : 'hover:bg-accent',
                   )}
                 >
-                  {item.label}
-                </span>
-                <span className="mt-1 block text-[10px] leading-4 text-console-muted">
-                  {item.hint}
-                </span>
-              </button>
-            ))}
+                  <span
+                    className={cn(
+                      'block text-[12px] font-medium',
+                      selected ? 'text-foreground' : 'text-foreground/82',
+                    )}
+                  >
+                    {item.label}
+                  </span>
+                  <span className="mt-1 block text-[10px] leading-4 text-muted-foreground">
+                    {item.hint}
+                  </span>
+                </CossCard>
+              );
+            })}
           </div>
         </div>
 
@@ -1222,24 +1272,27 @@ function DisciplineSection() {
             label={`账户覆盖 · ${activeAccount.label}`}
             hint="只影响当前账户；其他账户继续跟随全局。切换账户后按各自的设置生效。"
           >
-            <select
+            <Select
               value={overrideMode}
-              onChange={(event) =>
-                setOverrideMode(event.target.value as DisciplineMode | '')
+              onValueChange={(value) =>
+                setOverrideMode((value ?? '') as DisciplineMode | '')
               }
-              aria-label="当前账户的门禁模式"
-              className="h-8 w-[220px] rounded-lg border border-console-line bg-console-card px-2 text-[12px] text-console-ink outline-none focus:border-console-accent"
+              items={overrideOptions}
             >
-              <option value="">
-                跟随全局（
-                {DISCIPLINE_MODES.find((item) => item.value === mode)?.label ?? '关闭'}）
-              </option>
-              {DISCIPLINE_MODES.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                aria-label="当前账户的门禁模式"
+                className="h-8 min-h-8 w-[220px] min-w-0 px-2 text-[12px]"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {overrideOptions.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           </Row>
         )}
 
@@ -1247,28 +1300,34 @@ function DisciplineSection() {
           label="默认清单"
           hint="下单确认弹窗里可以临时改选；未指定时按「无清单」处理。"
         >
-          <select
+          <Select
             value={playbook}
-            onChange={(event) => setPlaybook(event.target.value)}
+            onValueChange={(value) => setPlaybook(value ?? '')}
+            items={playbookOptions}
             disabled={booksLoading}
-            aria-label="默认开仓清单"
-            className="h-8 w-[220px] rounded-lg border border-console-line bg-console-card px-2 text-[12px] text-console-ink outline-none focus:border-console-accent disabled:opacity-50"
           >
-            <option value="">不指定</option>
-            {books.map((book) => (
-              <option key={book.id} value={book.id}>
-                {book.name}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger
+              aria-label="默认开仓清单"
+              className="h-8 min-h-8 w-[220px] min-w-0 px-2 text-[12px]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              {playbookOptions.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
         </Row>
 
         {activeBook && activeBook.rules.length > 0 && (
-          <div className="rounded-lg border border-console-line bg-console-canvas px-3 py-2.5">
-            <div className="text-[11px] text-console-muted">
+          <div className="rounded-lg border border-border bg-muted px-3 py-2.5">
+            <div className="text-[11px] text-muted-foreground">
               清单规则 · {activeBook.rules.length} 条
             </div>
-            <ul className="mt-1 space-y-0.5 text-[11px] leading-5 text-console-ink-2">
+            <ul className="mt-1 space-y-0.5 text-[11px] leading-5 text-foreground/82">
               {activeBook.rules.map((rule) => (
                 <li key={rule}>· {rule}</li>
               ))}
@@ -1277,7 +1336,7 @@ function DisciplineSection() {
         )}
 
         {!booksLoading && books.length === 0 && (
-          <div className="text-[11px] leading-5 text-console-muted">
+          <div className="text-[11px] leading-5 text-muted-foreground">
             还没有策略清单：先到「策略」页创建规则，再回来选择。
           </div>
         )}
@@ -1325,7 +1384,7 @@ function RiskSection() {
   if (!config || !form) {
     return (
       <Card title="交易与风控" description="连接网关后可以在这里查看和修改风控参数。">
-        <div className="text-[12px] text-console-muted">等待网关连接…</div>
+        <div className="text-[12px] text-muted-foreground">等待网关连接…</div>
       </Card>
     );
   }
@@ -1457,11 +1516,11 @@ function RiskSection() {
         }
         footer={
           <div className="flex items-center justify-between gap-3">
-            <div className="text-[11px] text-console-muted">
+            <div className="text-[11px] text-muted-foreground">
               {error ? (
-                <span className="text-console-loss">{error}</span>
+                <span className="text-destructive-foreground">{error}</span>
               ) : scope === 'account' && !canEditAccount ? (
-                <span className="text-console-loss">当前网关版本不支持账户级风控</span>
+                <span className="text-destructive-foreground">当前网关版本不支持账户级风控</span>
               ) : dirty ? (
                 '有未保存的修改'
               ) : scope === 'account' && overrideKeys.length > 0 ? (
@@ -1472,37 +1531,37 @@ function RiskSection() {
             </div>
             <div className="flex items-center gap-2">
               {scope === 'account' && overrideKeys.length > 0 && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={resetAllToGlobal}
-                  className="h-8 rounded-lg px-2.5 text-[12px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+                  className="text-[12px] font-normal text-muted-foreground"
                 >
                   全部跟随全局
-                </button>
+                </Button>
               )}
               {dirty && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => {
                     setForm(base);
                     setCleared([]);
                   }}
-                  className="h-8 rounded-lg px-2.5 text-[12px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+                  className="text-[12px] font-normal text-muted-foreground"
                 >
                   撤销
-                </button>
+                </Button>
               )}
-              <button
+              <Button
+                size="sm"
                 onClick={() => setConfirm(true)}
                 disabled={!dirty || !!error || saving || (scope === 'account' && !canEditAccount)}
-                className={clsx(
-                  'flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-colors',
-                  dirty && !error && (scope !== 'account' || canEditAccount)
-                    ? 'bg-console-ink text-console-card hover:opacity-90'
-                    : 'cursor-not-allowed bg-console-hover text-console-faint',
-                )}
+                className="text-[12px]"
               >
                 <Save size={14} strokeWidth={1.5} />
                 保存风控
-              </button>
+              </Button>
             </div>
           </div>
         }
@@ -1521,7 +1580,7 @@ function RiskSection() {
         {RISK_FIELDS.map((field) => (
           <Row key={field.key} label={field.label} hint={field.hint}>
             <div className="flex items-center gap-1.5">
-              <input
+              <Input
                 type="number"
                 min={field.min}
                 max={field.max}
@@ -1529,21 +1588,24 @@ function RiskSection() {
                 value={form[field.key]}
                 disabled={scope === 'account' && !canEditAccount}
                 onChange={(event) => setValue(field.key, Number(event.target.value))}
-                className="h-8 w-24 rounded-lg border border-console-line bg-console-canvas px-2 text-right font-mono text-[12px] text-console-ink outline-none focus:border-console-accent disabled:opacity-50"
+                aria-label={field.label}
+                className="w-24 text-right font-mono text-[12px]"
               />
-              {field.suffix && <span className="text-[11px] text-console-muted">{field.suffix}</span>}
+              {field.suffix && <span className="text-[11px] text-muted-foreground">{field.suffix}</span>}
               {scope === 'account' &&
                 canEditAccount &&
                 (overrideKeys.includes(field.key) && !cleared.includes(field.key) ? (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={() => useGlobal(field.key)}
                     title={`恢复跟随全局：${config[field.key]}${field.suffix ?? ''}`}
-                    className="h-8 rounded-lg px-2 text-[11px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+                    className="text-[11px] font-normal text-muted-foreground"
                   >
                     用全局
-                  </button>
+                  </Button>
                 ) : (
-                  <span className="text-[11px] text-console-faint">
+                  <span className="text-[11px] text-muted-foreground/60">
                     {cleared.includes(field.key) ? '恢复全局' : '跟随全局'}
                   </span>
                 ))}
@@ -1551,8 +1613,8 @@ function RiskSection() {
           </Row>
         ))}
 
-        <div className="mt-4 flex items-start gap-2 rounded-lg border border-console-warn/30 bg-console-warn-soft px-3 py-2.5 text-[11px] leading-relaxed text-console-ink-2">
-          <Info size={14} strokeWidth={1.5} className="mt-0.5 shrink-0 text-console-warn" />
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-[11px] leading-relaxed text-foreground/82">
+          <Info size={14} strokeWidth={1.5} className="mt-0.5 shrink-0 text-warning-foreground" />
           <span>
             当前生效：单笔上限 {base.max_lot} 手、单笔风险 {base.max_risk_pct}%。这些是 Tally
             的风控值，不是券商限制；自动手数会被截到上限，手动超过会被网关拒绝。
@@ -1569,23 +1631,24 @@ function RiskSection() {
           hint="0 = 只在开仓价保本。按成本折算：每点价值 × 点数 ≈ 往返手续费 + 负隔夜利息 + 预估滑点。"
         >
           <div className="flex items-center gap-1.5">
-            <input
+            <Input
               type="number"
               min={0}
               max={500}
               step={1}
               value={breakevenOffset}
               onChange={(event) => setBreakevenOffset(Number(event.target.value))}
-              className="h-8 w-24 rounded-lg border border-console-line bg-console-canvas px-2 text-right font-mono text-[12px] text-console-ink outline-none focus:border-console-accent"
+              aria-label="保本偏移点数"
+              className="w-24 text-right font-mono text-[12px]"
             />
-            <span className="text-[11px] text-console-muted">点</span>
+            <span className="text-[11px] text-muted-foreground">点</span>
           </div>
         </Row>
         <Row
           label="适用范围"
           hint="「保本」「平掉一半」立即使用；分批档位的「移保本」在添加档位时记录，之后新增的档位使用新值。"
         >
-          <span className="text-[12px] text-console-muted">多单加在开仓价上方，空单减在下方</span>
+          <span className="text-[12px] text-muted-foreground">多单加在开仓价上方，空单减在下方</span>
         </Row>
       </Card>
 
@@ -1594,7 +1657,7 @@ function RiskSection() {
         description="交易模式由顶部按钮切换；实盘开关打开后，实盘/美分账户才能从只读切到实盘交易。"
       >
         <Row label="当前模式">
-          <span className="text-[12px] text-console-ink">
+          <span className="text-[12px] text-foreground">
             {health?.tradeMode === 'readonly'
               ? '只读'
               : health?.tradeMode === 'demo'
@@ -1607,28 +1670,24 @@ function RiskSection() {
             <span
               className={clsx(
                 'text-[12px]',
-                config.allow_live ? 'text-console-loss' : 'text-console-muted',
+                config.allow_live ? 'text-destructive-foreground' : 'text-muted-foreground',
               )}
             >
               {config.allow_live ? '已允许' : '关闭'}
             </span>
-            <button
+            <Button
+              variant={config.allow_live ? 'outline' : 'destructive-outline'}
+              size="sm"
               onClick={() => (config.allow_live ? void setAllowLive(false) : setLiveConfirm(true))}
               disabled={liveSaving}
-              className={clsx(
-                'h-8 rounded-lg border px-3 text-[12px] font-medium transition-colors',
-                config.allow_live
-                  ? 'border-console-line bg-console-card text-console-ink-2 hover:bg-console-hover'
-                  : 'border-console-loss/35 text-console-loss hover:bg-console-loss-soft',
-                liveSaving && 'cursor-wait opacity-50',
-              )}
+              className="text-[12px] font-medium"
             >
               {liveSaving ? '保存中…' : config.allow_live ? '关闭实盘' : '开启实盘'}
-            </button>
+            </Button>
           </div>
         </Row>
         <Row label="告警通道">
-          <span className="text-[12px] text-console-muted">
+          <span className="text-[12px] text-muted-foreground">
             {config.alert_channel_names?.length
               ? config.alert_channel_names.join('、')
               : '未配置第三方通道'}
@@ -1636,69 +1695,66 @@ function RiskSection() {
         </Row>
       </Card>
 
-      {confirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-[420px] max-w-full rounded-xl border border-console-line bg-console-card p-5 shadow-[0_24px_60px_-12px_rgba(33,28,22,0.28)]">
-            <div className="text-[14px] font-medium text-console-ink">
+      <Dialog open={confirm} onOpenChange={setConfirm}>
+        <DialogPopup showCloseButton={false} className="max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="text-[14px] font-medium">
               {scope === 'account' ? `确认修改「${accountLabel}」的风控？` : '确认修改全局风控默认值？'}
-            </div>
-            <div className="mt-1.5 text-[12px] leading-relaxed text-console-muted">
+            </DialogTitle>
+            <DialogDescription className="text-[12px] leading-relaxed">
               {scope === 'account'
                 ? '保存后只对当前账户立即生效；标为「恢复跟随全局」的项会删除账户覆盖。'
                 : '保存后立即生效，所有未单独覆盖的账户都会使用新的默认值。'}
-            </div>
-            <div className="mt-4 max-h-40 space-y-1.5 overflow-auto rounded-lg border border-console-line bg-console-canvas p-3 text-[11px] leading-relaxed text-console-ink-2">
-              {changes.map((line) => (
-                <div key={line}>{line}</div>
-              ))}
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                onClick={() => setConfirm(false)}
-                className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => void save()}
-                disabled={saving}
-                className="h-8 rounded-lg bg-console-ink px-3 text-[12px] font-medium text-console-card transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
-              >
-                {saving ? '保存中…' : '确认保存'}
-              </button>
-            </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mx-6 max-h-40 space-y-1.5 overflow-auto rounded-lg border border-border bg-muted p-3 text-[11px] leading-relaxed text-foreground/82">
+            {changes.map((line) => (
+              <div key={line}>{line}</div>
+            ))}
           </div>
-        </div>
-      )}
+          <DialogFooter variant="bare">
+            <Button variant="outline" size="sm" onClick={() => setConfirm(false)} className="text-[12px]">
+              取消
+            </Button>
+            <Button size="sm" onClick={() => void save()} disabled={saving} className="text-[12px]">
+              {saving ? '保存中…' : '确认保存'}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
 
-      {liveConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-[420px] max-w-full rounded-xl border border-console-line bg-console-card p-5 shadow-[0_24px_60px_-12px_rgba(33,28,22,0.28)]">
-            <div className="text-[14px] font-medium text-console-ink">打开实盘交易开关？</div>
-            <div className="mt-1.5 text-[12px] leading-relaxed text-console-muted">
+      <Dialog open={liveConfirm} onOpenChange={setLiveConfirm}>
+        <DialogPopup showCloseButton={false} className="max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="text-[14px] font-medium">打开实盘交易开关？</DialogTitle>
+            <DialogDescription className="text-[12px] leading-relaxed">
               打开后，顶部可以把实盘（含美分）账户从「只读」切到「实盘交易」，下单将使用真实资金。
               风控上限、日亏限制和急停仍然生效。
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                onClick={() => setLiveConfirm(false)}
-                className="h-8 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => {
-                  setLiveConfirm(false);
-                  void setAllowLive(true);
-                }}
-                className="h-8 rounded-lg bg-console-loss px-3 text-[12px] font-medium text-console-card transition-opacity hover:opacity-90"
-              >
-                确认打开
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter variant="bare">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLiveConfirm(false)}
+              className="text-[12px]"
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                setLiveConfirm(false);
+                void setAllowLive(true);
+              }}
+              className="text-[12px]"
+            >
+              确认打开
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </>
   );
 }
@@ -1789,9 +1845,6 @@ function AiSection() {
     setBaseUrl('');
   };
 
-  const inputClass =
-    'h-8 w-full rounded-lg border border-console-line bg-console-canvas px-2 text-[12px] text-console-ink outline-none focus:border-console-accent';
-
   return (
     <>
       <Card
@@ -1811,11 +1864,11 @@ function AiSection() {
           />
         </Row>
         <Row label="模型" hint="换成你账号可用的模型名，例如 claude-sonnet-5-5">
-          <input
+          <Input
             value={model}
             onChange={(event) => setModel(event.target.value)}
             spellCheck={false}
-            className={clsx(inputClass, 'w-56 font-mono')}
+            className="w-56 font-mono text-[12px]"
             aria-label="模型名"
           />
         </Row>
@@ -1827,12 +1880,12 @@ function AiSection() {
               : '留空使用官方地址；只有走代理时才需要改'
           }
         >
-          <input
+          <Input
             value={baseUrl}
             onChange={(event) => setBaseUrl(event.target.value)}
             spellCheck={false}
             placeholder={provider === 'compatible' ? 'https://…/v1' : '默认'}
-            className={clsx(inputClass, 'w-56 font-mono')}
+            className="w-56 font-mono text-[12px]"
             aria-label="Base URL"
           />
         </Row>
@@ -1845,24 +1898,25 @@ function AiSection() {
           }
         >
           <div className="flex items-center gap-1.5">
-            <input
+            <Input
               type="password"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
               placeholder={status?.hasKey ? '已保存' : '粘贴 Key'}
               spellCheck={false}
               autoComplete="off"
-              className={clsx(inputClass, 'w-56 font-mono')}
+              className="w-56 font-mono text-[12px]"
               aria-label="API Key"
             />
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => void save(apiKey ? { apiKey } : {})}
               disabled={busy}
-              className="console-btn console-btn-secondary h-8"
             >
               <KeyRound size={14} strokeWidth={1.5} />
               保存 Key
-            </button>
+            </Button>
           </div>
         </Row>
       </Card>
@@ -1872,28 +1926,25 @@ function AiSection() {
         description="切换提供方或模型后需要保存；勾选启用前必须先保存 Key。"
       >
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => void save()}
-            disabled={busy}
-            className="console-btn console-btn-primary"
-          >
+          <Button onClick={() => void save()} disabled={busy} size="sm">
             <Save size={14} strokeWidth={1.5} />
             {busy ? '保存中…' : '保存设置'}
-          </button>
+          </Button>
           {status?.hasKey && (
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => void save({ apiKey: '', enabled: false })}
               disabled={busy}
-              className="console-btn console-btn-secondary"
             >
               <Trash2 size={14} strokeWidth={1.5} />
               清除 Key
-            </button>
+            </Button>
           )}
-          {message && <span className="text-[11px] text-console-gain">{message}</span>}
+          {message && <span className="text-[11px] text-success-foreground">{message}</span>}
         </div>
-        {error && <div className="mt-3 text-[11px] text-console-warn">{error}</div>}
-        <div className="mt-4 space-y-1 text-[11px] leading-relaxed text-console-faint">
+        {error && <div className="mt-3 text-[11px] text-warning-foreground">{error}</div>}
+        <div className="mt-4 space-y-1 text-[11px] leading-relaxed text-muted-foreground/60">
           <div>· 每次生成前可以在复盘面板展开「将发送哪些字段」预览。</div>
           <div>· 笔记默认不发，必须勾选才会带上，并截断到 500 字/条。</div>
           <div>· 输出只作建议，不写回交易数据，也不影响下单。</div>
@@ -1911,22 +1962,19 @@ function UpdatesSection() {
     <>
       <Card title="版本" description="桌面版通过 GitHub Releases 检查更新。">
         <Row label="网关版本">
-          <span className="font-mono text-[12px] text-console-ink-2">v{health?.version ?? '—'}</span>
+          <span className="font-mono text-[12px] text-foreground/82">v{health?.version ?? '—'}</span>
         </Row>
         <Row label="手动检查">
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => void checkForUpdates(true)}
             disabled={!available}
-            className={clsx(
-              'flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[12px] transition-colors',
-              available
-                ? 'border-console-line bg-console-card text-console-ink-2 hover:bg-console-hover'
-                : 'cursor-not-allowed border-console-line bg-console-canvas text-console-faint',
-            )}
+            className="text-[12px] font-normal"
           >
             <RefreshCw size={14} strokeWidth={1.5} />
             检查更新
-          </button>
+          </Button>
         </Row>
       </Card>
 
@@ -1935,7 +1983,7 @@ function UpdatesSection() {
           title="开发模式"
           description="当前在浏览器里运行，更新功能只在 Tauri 桌面版可用。"
         >
-          <div className="text-[12px] text-console-muted">打包后的桌面版会自动显示更新提示。</div>
+          <div className="text-[12px] text-muted-foreground">打包后的桌面版会自动显示更新提示。</div>
         </Card>
       )}
     </>
@@ -1954,12 +2002,12 @@ function AboutSection() {
           <StatusPill ok={!!health?.connected} label={health?.connected ? '已连接' : '未连接'} />
         </Row>
         <Row label="终端">
-          <span className="text-[12px] text-console-muted">
+          <span className="text-[12px] text-muted-foreground">
             {terminal ? `${terminal.company} · ${terminal.name} (build ${terminal.build})` : '未连接'}
           </span>
         </Row>
         <Row label="账户类型">
-          <span className="text-[12px] text-console-ink">
+          <span className="text-[12px] text-foreground">
             {account?.accountType === 'real'
               ? '实盘'
               : account?.accountType === 'demo'
@@ -1968,7 +2016,7 @@ function AboutSection() {
           </span>
         </Row>
         <Row label="交易模式">
-          <span className="text-[12px] text-console-ink">
+          <span className="text-[12px] text-foreground">
             {health?.tradeMode === 'readonly'
               ? '只读'
               : health?.tradeMode === 'demo'
@@ -1980,37 +2028,37 @@ function AboutSection() {
 
       <Card title="本机数据" description="以下内容只保存在本机，不会上传。">
         <Row label="交易日志与截图">
-          <span className="font-mono text-[11px] text-console-muted">gateway/data（截图按账户号分目录）</span>
+          <span className="font-mono text-[11px] text-muted-foreground">gateway/data（截图按账户号分目录）</span>
         </Row>
         <Row label="账户凭据">
-          <span className="font-mono text-[11px] text-console-muted">
+          <span className="font-mono text-[11px] text-muted-foreground">
             gateway/data/credentials.json（DPAPI）
           </span>
         </Row>
         <Row label="审计日志">
-          <span className="font-mono text-[11px] text-console-muted">gateway/audit</span>
+          <span className="font-mono text-[11px] text-muted-foreground">gateway/audit</span>
         </Row>
         <Row label="风控配置">
-          <span className="font-mono text-[11px] text-console-muted">gateway/config.json</span>
+          <span className="font-mono text-[11px] text-muted-foreground">gateway/config.json</span>
         </Row>
       </Card>
 
       <Card title="快捷键">
         <div className="grid grid-cols-[64px_1fr] gap-x-3 gap-y-2.5 text-[12px]">
           <Kbd>B</Kbd>
-          <span className="text-console-muted">建立买入市价草稿</span>
+          <span className="text-muted-foreground">建立买入市价草稿</span>
           <Kbd>S</Kbd>
-          <span className="text-console-muted">建立卖出市价草稿</span>
+          <span className="text-muted-foreground">建立卖出市价草稿</span>
           <Kbd>Esc</Kbd>
-          <span className="text-console-muted">关闭弹窗 / 清除划线草稿</span>
+          <span className="text-muted-foreground">关闭弹窗 / 清除划线草稿</span>
           <Kbd>Ctrl K</Kbd>
-          <span className="text-console-muted">打开命令面板</span>
+          <span className="text-muted-foreground">打开命令面板</span>
           <Kbd>Ctrl \</Kbd>
-          <span className="text-console-muted">折叠 / 展开交易台左侧行情列</span>
+          <span className="text-muted-foreground">折叠 / 展开交易台左侧行情列</span>
           <Kbd>Ctrl J</Kbd>
-          <span className="text-console-muted">折叠 / 展开交易台底部订单托盘</span>
+          <span className="text-muted-foreground">折叠 / 展开交易台底部订单托盘</span>
           <Kbd>Shift</Kbd>
-          <span className="text-console-muted">拖动价格时吸附整数点位</span>
+          <span className="text-muted-foreground">拖动价格时吸附整数点位</span>
         </div>
       </Card>
     </>
@@ -2067,7 +2115,7 @@ function PineSection() {
         title="Pine 脚本（实验）"
         description="在本地运行原生 Pine v5/v6 indicator 脚本，行情只来自当前 MT5 网关。"
       >
-        <div className="space-y-2 text-[12px] leading-relaxed text-console-muted">
+        <div className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
           <p>
             支持 plot / hline 折线、ta.*、input.* 和常用逻辑；暂不支持 plotshape、bgcolor、
             绘图对象（box/line/label）、strategy 和外部数据源，计算结果也不保证与
@@ -2075,48 +2123,54 @@ function PineSection() {
           </p>
           <p>保存或删除脚本后需要刷新图表：指标元信息只在图表创建时生成。</p>
         </div>
-        <textarea
+        <Textarea
           value={source}
           onChange={(event) => setSource(event.target.value)}
           spellCheck={false}
           placeholder={'//@version=6\nindicator("EMA 示例", overlay=true)\nlen = input.int(20, "长度")\nplot(ta.ema(close, len), "EMA", color=color.orange)'}
-          className="mt-4 h-56 w-full resize-y rounded-lg border border-console-line bg-console-canvas p-3 font-mono text-[12px] leading-relaxed text-console-ink outline-none placeholder:text-console-faint focus:border-console-accent"
+          aria-label="Pine 脚本源码"
+          className="mt-4 font-mono text-[12px] leading-relaxed [&_textarea]:h-56 [&_textarea]:resize-y"
         />
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
+          <Button
+            size="sm"
             onClick={() => void save()}
             disabled={busy || !source.trim()}
-            className="h-8 rounded-lg bg-console-ink px-3 text-[12px] font-medium text-console-card transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="text-[12px]"
           >
             {busy ? '解析中…' : '保存脚本'}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setSource('')}
-            className="h-8 rounded-lg px-2.5 text-[12px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+            className="text-[12px] font-normal text-muted-foreground"
           >
             清空
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => window.location.reload()}
-            className="ml-auto flex h-8 items-center gap-1.5 rounded-lg border border-console-line bg-console-card px-3 text-[12px] text-console-ink-2 transition-colors hover:bg-console-hover"
+            className="ml-auto text-[12px] font-normal"
           >
             <RefreshCw size={14} strokeWidth={1.5} />
             刷新图表
-          </button>
+          </Button>
         </div>
         {message && (
           <div
             className={clsx(
               'mt-3 rounded-lg px-3 py-2 text-[11px] leading-relaxed',
               message.ok
-                ? 'bg-console-gain-soft text-console-gain'
-                : 'bg-console-loss-soft text-console-loss',
+                ? 'bg-success/10 text-success-foreground'
+                : 'bg-destructive/10 text-destructive-foreground',
             )}
           >
             {message.text}
           </div>
         )}
-        <p className="mt-4 text-[11px] leading-relaxed text-console-faint">
+        <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground/60">
           Piner 是独立的第三方运行时（AGPL-3.0），与 TradingView 无关联；
           对外分发此功能前需要确认授权方式。
         </p>
@@ -2127,28 +2181,30 @@ function PineSection() {
         description="在图表「指标」窗口搜索脚本名称即可添加；删除后已添加的指标会失效。"
       >
         {scripts.length === 0 ? (
-          <p className="text-[12px] text-console-muted">还没有保存的脚本。</p>
+          <p className="text-[12px] text-muted-foreground">还没有保存的脚本。</p>
         ) : (
-          <div className="divide-y divide-console-line/70">
+          <div className="divide-y divide-border/70">
             {scripts.map((script) => (
               <div key={script.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[12px] text-console-ink">{script.title}</div>
-                  <div className="mt-1 text-[11px] text-console-muted">
+                  <div className="truncate text-[12px] text-foreground">{script.title}</div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">
                     {script.plots.length} 条曲线 · {script.inputs.length} 个参数
                     {script.warning ? ` · ${script.warning}` : ''}
                   </div>
                 </div>
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={() => {
                     deletePineScript(script.id);
                     notify('success', `已删除「${script.title}」，刷新图表后生效`);
                   }}
                   title="删除脚本"
-                  className="rounded-lg p-2 text-console-muted transition-colors hover:bg-console-hover hover:text-console-loss"
+                  className="text-muted-foreground hover:text-destructive-foreground"
                 >
                   <Trash2 size={14} strokeWidth={1.5} />
-                </button>
+                </Button>
               </div>
             ))}
           </div>

@@ -1379,20 +1379,20 @@ export function ChartPanel({
       {chart && <DrawingTemplates chart={chart} slot={slot} />}
       {chart && <StudyTemplates chart={chart} slot={slot} />}
       {error && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-tv-bg/90 px-6 text-center text-sm text-tv-down">
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-background/90 px-6 text-center text-sm text-destructive-foreground">
           {error}
         </div>
       )}
       {waiting && !error && (
-        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-1 bg-tv-bg/60 text-center">
-          <div className="text-sm text-tv-text">
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-1 bg-background/60 text-center">
+          <div className="text-sm text-foreground">
             {conn !== 'open'
               ? '正在连接本地网关…'
               : !health?.connected
                 ? '等待 MT5 终端…'
                 : '请选择品种'}
           </div>
-          <div className="max-w-md text-[11px] text-tv-muted">
+          <div className="max-w-md text-[11px] text-muted-foreground">
             {conn !== 'open'
               ? '正在自动启动网关；若持续失败，请查看 %LOCALAPPDATA%\\MyTrade\\gateway\\gateway.log'
               : (health?.lastError?.message ?? '请打开并登录 MetaTrader 5')}
@@ -1402,7 +1402,7 @@ export function ChartPanel({
       {draftHere && draft.active && (
         <button
           onClick={() => patchDraft({ active: false })}
-          className="absolute right-3 top-14 z-30 rounded-lg border border-tv-border bg-tv-panel/95 px-2.5 py-1.5 text-[11px] text-tv-text shadow-[0_6px_16px_-8px_rgba(0,0,0,0.3)] transition-colors hover:bg-tv-hover"
+          className="absolute right-3 top-14 z-30 rounded-lg border border-border bg-card/95 px-2.5 py-1.5 text-[11px] text-foreground shadow-sm transition-colors hover:bg-accent"
         >
           清除划线
         </button>

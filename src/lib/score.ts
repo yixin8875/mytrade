@@ -3,10 +3,10 @@
 import type { ScoreComponent } from '../gateway/types';
 
 export function scoreTone(score: number | null): string {
-  if (score == null) return 'text-console-faint';
-  if (score >= 75) return 'text-console-gain';
-  if (score >= 50) return 'text-console-accent';
-  return 'text-console-warn';
+  if (score == null) return 'text-muted-foreground/60';
+  if (score >= 75) return 'text-success-foreground';
+  if (score >= 50) return 'text-brand';
+  return 'text-warning-foreground';
 }
 
 export function scoreWords(score: number | null): string {

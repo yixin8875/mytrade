@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { clsx } from 'clsx';
 import { Check, ChevronDown, Pencil, Plus, Settings2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { fmtMoney, fmtPrice } from '../../lib/format';
 import { fmtNum, templateSummary } from '../../lib/template';
 import type { RiskSettings, TradeSizing, TradeTemplate } from '../../gateway/types';
+import { Button } from '../ui/button';
 import { TemplateEditor } from '../TemplateEditor';
 
 export function TemplateBar({
@@ -90,7 +91,9 @@ export function TemplateBar({
   return (
     <div className="relative" ref={templateWrapRef}>
       <div className="flex gap-1.5">
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => {
             setTemplateMenu((open) => !open);
             setEditorOpen(false);
@@ -98,70 +101,62 @@ export function TemplateBar({
           title={planTitle}
           aria-haspopup="listbox"
           aria-expanded={templateMenu}
-          className={clsx(
-            'flex h-9 min-w-0 flex-1 items-center gap-1.5 rounded-lg border px-2.5 text-left transition-colors',
-            armed
-              ? 'border-tv-accent/40 bg-tv-accent-soft'
-              : 'border-tv-border bg-tv-panel hover:bg-tv-hover',
+          className={cn(
+            'h-9 min-w-0 flex-1 justify-start gap-1.5 rounded-lg px-2.5 text-left font-normal',
+            armed && 'border-brand/40 bg-brand/10 hover:bg-brand/10',
           )}
         >
           <span className="min-w-0 flex-1">
             <span
-              className={clsx(
+              className={cn(
                 'block truncate text-[12px] font-medium',
-                armed ? 'text-tv-accent' : 'text-tv-text',
+                armed ? 'text-brand' : 'text-foreground',
               )}
             >
               {template.name}
             </span>
-            <span className="block truncate text-[10px] text-tv-muted">{summary}</span>
+            <span className="block truncate text-[10px] text-muted-foreground">{summary}</span>
           </span>
           <ChevronDown
             size={13}
             strokeWidth={1.8}
-            className={clsx('shrink-0', armed ? 'text-tv-accent/70' : 'text-tv-muted')}
+            className={cn('shrink-0', armed ? 'text-brand/70' : 'text-muted-foreground')}
           />
-        </button>
-        <button
+        </Button>
+        <Button
+          variant={armed ? 'default' : 'outline'}
+          size="sm"
           onClick={onApply}
           disabled={disabled}
+          aria-pressed={armed}
           title={
             armed
               ? '停用模板：已填入的风险、手数与止损止盈保持不变'
               : '启用模板：带入风险比例、止盈与阶段计划'
           }
-          className={clsx(
-            'h-9 w-[62px] shrink-0 rounded-lg border text-[12px] transition-colors',
-            armed
-              ? 'border-tv-accent bg-tv-accent text-white hover:bg-tv-accent/90'
-              : 'border-tv-border bg-tv-panel text-tv-text hover:bg-tv-hover',
-            disabled && 'cursor-not-allowed opacity-40',
-          )}
+          className="h-9 w-[62px] shrink-0 text-[12px]"
         >
           {armed ? '已启用' : '启用'}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant={editorOpen ? 'secondary' : 'outline'}
+          size="icon-sm"
           onClick={() => {
             setEditorOpen((open) => !open);
             setTemplateMenu(false);
           }}
           title="编辑当前模板：风险 %、止盈 R、分批止盈"
           aria-label="编辑当前模板"
-          className={clsx(
-            'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors',
-            editorOpen
-              ? 'border-tv-accent/40 bg-tv-accent-soft text-tv-accent'
-              : 'border-tv-border bg-tv-panel text-tv-muted hover:bg-tv-hover hover:text-tv-text',
-          )}
+          className="h-9 w-9 shrink-0"
         >
           <Pencil size={13} strokeWidth={1.7} />
-        </button>
+        </Button>
       </div>
 
       {templateMenu && (
         <div
           data-modal
-          className="absolute left-0 right-0 top-full z-30 mt-1 rounded-lg border border-tv-border bg-tv-panel p-1 shadow-[0_12px_32px_rgba(20,30,45,0.16)]"
+          className="absolute left-0 right-0 top-full z-30 mt-1 rounded-lg border border-border bg-popover p-1 shadow-lg/5"
         >
           <div className="max-h-56 overflow-y-auto">
             {templates.map((item) => (
@@ -171,32 +166,32 @@ export function TemplateBar({
                   setTemplateMenu(false);
                   onSelect(item.id);
                 }}
-                className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-tv-hover"
+                className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent"
               >
                 <Check
                   size={13}
                   strokeWidth={2}
-                  className={clsx(
+                  className={cn(
                     'mt-0.5 shrink-0',
-                    item.id === template.id ? 'text-tv-accent' : 'text-transparent',
+                    item.id === template.id ? 'text-brand' : 'text-transparent',
                   )}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12px] text-tv-text">{item.name}</span>
-                  <span className="block truncate text-[10px] text-tv-muted">
+                  <span className="block truncate text-[12px] text-foreground">{item.name}</span>
+                  <span className="block truncate text-[10px] text-muted-foreground">
                     {templateSummary(item)}
                   </span>
                 </span>
               </button>
             ))}
           </div>
-          <div className="my-1 border-t border-tv-border" />
+          <div className="my-1 border-t border-border" />
           <button
             onClick={() => {
               setTemplateMenu(false);
               onCreate();
             }}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <Plus size={13} strokeWidth={1.8} />
             新建模板
@@ -207,7 +202,7 @@ export function TemplateBar({
               setEditorOpen(false);
               onOpenSettings();
             }}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <Settings2 size={13} strokeWidth={1.6} />
             管理模板（设置页）
@@ -218,30 +213,32 @@ export function TemplateBar({
       {editorOpen && (
         <div
           data-modal
-          className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[70vh] overflow-y-auto rounded-xl border border-tv-border bg-tv-panel p-3 shadow-[0_16px_48px_rgba(20,30,45,0.18)]"
+          className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-popover p-3 shadow-lg/5"
         >
           <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="truncate text-[12px] font-medium text-tv-text">
+            <span className="truncate text-[12px] font-medium text-foreground">
               编辑「{template.name}」
             </span>
-            <button
+            <Button
+              variant="outline"
+              size="xs"
               onClick={() => setEditorOpen(false)}
-              className="h-6 shrink-0 rounded-md border border-tv-border px-2 text-[11px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+              className="h-6 shrink-0 px-2 text-[11px] font-normal"
             >
               完成
-            </button>
+            </Button>
           </div>
           <TemplateEditor templateId={template.id} tone="tv" compact />
         </div>
       )}
 
       {armed && (
-        <div className="mt-3 rounded-lg border border-tv-accent/25 bg-tv-accent-soft/50 px-2.5 py-2 text-[11px] leading-relaxed">
+        <div className="mt-3 rounded-lg border border-brand/25 bg-brand/5 px-2.5 py-2 text-[11px] leading-relaxed">
           <div className="flex items-center justify-between gap-2">
-            <span className="truncate text-[12px] font-medium text-tv-accent">{template.name}</span>
-            <span className="shrink-0 text-tv-muted">{summary}</span>
+            <span className="truncate text-[12px] font-medium text-brand">{template.name}</span>
+            <span className="shrink-0 text-muted-foreground">{summary}</span>
           </div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-tv-muted">
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground">
             <span>
               风险 {fmtNum(risk.value)}%
               {sizing ? ` ≈ ${fmtMoney(sizing.targetRisk)}${currency}` : ''}
@@ -254,15 +251,15 @@ export function TemplateBar({
               <span>不自动设止盈</span>
             )}
           </div>
-          <div className="mt-0.5 text-tv-muted">{steps}</div>
-          {pending && <div className="mt-0.5 text-tv-muted">挂单成交后自动登记阶段计划</div>}
+          <div className="mt-0.5 text-muted-foreground">{steps}</div>
+          {pending && <div className="mt-0.5 text-muted-foreground">挂单成交后自动登记阶段计划</div>}
           {paused && (
-            <div className="mt-0.5 text-tv-warn">
+            <div className="mt-0.5 text-warning-foreground">
               阶段已暂停：{readonly ? '只读模式' : '风控急停'}，恢复可交易后继续
             </div>
           )}
           {riskDeviated && (
-            <div className="mt-1 flex items-center justify-between gap-2 text-tv-warn">
+            <div className="mt-1 flex items-center justify-between gap-2 text-warning-foreground">
               <span>
                 已偏离模板：风险{' '}
                 {risk.mode === 'percent'
@@ -270,23 +267,27 @@ export function TemplateBar({
                   : `固定 ${fmtMoney(risk.value)}`}
                 {risk.auto ? '' : ' · 手动手数'}
               </span>
-              <button
+              <Button
+                variant="outline"
+                size="xs"
                 onClick={onRestoreRisk}
-                className="shrink-0 rounded border border-tv-warn/40 px-1.5 py-0.5 text-[10px] text-tv-warn transition-colors hover:bg-tv-warn-soft"
+                className="h-auto shrink-0 rounded border-warning/40 bg-transparent px-1.5 py-0.5 text-[10px] font-normal text-warning-foreground hover:bg-warning/12"
               >
                 恢复
-              </button>
+              </Button>
             </div>
           )}
           {tpManual && tpTarget != null && (
-            <div className="mt-1 flex items-center justify-between gap-2 text-tv-warn">
+            <div className="mt-1 flex items-center justify-between gap-2 text-warning-foreground">
               <span>止盈已手动调整（模板 {fmtPrice(tpTarget, digits)}）</span>
-              <button
+              <Button
+                variant="outline"
+                size="xs"
                 onClick={onUseTemplateTp}
-                className="shrink-0 rounded border border-tv-warn/40 px-1.5 py-0.5 text-[10px] text-tv-warn transition-colors hover:bg-tv-warn-soft"
+                className="h-auto shrink-0 rounded border-warning/40 bg-transparent px-1.5 py-0.5 text-[10px] font-normal text-warning-foreground hover:bg-warning/12"
               >
                 用模板止盈
-              </button>
+              </Button>
             </div>
           )}
         </div>

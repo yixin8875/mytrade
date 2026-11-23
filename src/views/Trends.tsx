@@ -1,5 +1,15 @@
 import { useMemo, useState } from 'react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { gateway } from '../gateway/client';
 import { fmtR } from '../lib/review';
 import { fmtSigned, signedClass } from '../lib/format';
@@ -54,7 +64,7 @@ export function TrendsSection({
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-[16px] font-medium tracking-[-0.01em]">绩效趋势</h2>
-          <p className="mt-1.5 text-[13px] text-console-muted">
+          <p className="mt-1.5 text-[13px] text-muted-foreground">
             最近 {days} 天 · {trades.length} 笔 · 其中 {rTrades.length} 笔有止损可折算 R
             {activeLogin ? ` · 账户 ${activeLogin}` : ''}
           </p>
@@ -94,7 +104,7 @@ export function TrendsSection({
 
       <ScatterCard trades={trades} points={scatter} notice={scatterNotice} loading={loading} />
 
-      <p className="mt-4 text-[11px] leading-relaxed text-console-faint">
+      <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground/60">
         滚动窗口按平仓时间排序；胜率以盈亏 ±0.005 为分界，期望是窗口内平均每笔盈亏。
         R 只用带止损的交易折算，没有止损的交易不参与 R 曲线与散点。
       </p>
@@ -124,29 +134,29 @@ function RollCard({
   const last = series.length > 0 ? series[series.length - 1].value : null;
 
   return (
-    <section className="console-card overflow-hidden">
-      <div className="flex items-baseline justify-between border-b border-console-line px-4 py-3">
+    <Card className="overflow-hidden">
+      <div className="flex items-baseline justify-between border-b border-border px-4 py-3">
         <div>
           <div className="text-[13px] font-medium">{title}</div>
-          <div className="mt-0.5 text-[11px] text-console-faint">{hint}</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground/60">{hint}</div>
         </div>
         <span
-          className={clsx(
+          className={cn(
             'num font-mono text-[15px]',
-            tone === 'signed' && last != null ? signedClass(last) : 'text-console-ink',
+            tone === 'signed' && last != null ? signedClass(last) : 'text-foreground',
           )}
         >
           {last == null ? '—' : format(last)}
         </span>
       </div>
       {notice ? (
-        <div className="flex h-[150px] items-center justify-center px-5 text-center text-[12px] leading-relaxed text-console-faint">
+        <div className="flex h-[150px] items-center justify-center px-5 text-center text-[12px] leading-relaxed text-muted-foreground/60">
           {loading ? '读取中…' : notice}
         </div>
       ) : (
         <MiniLine series={series} fixedRange={fixedRange} tone={tone} />
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -175,9 +185,9 @@ function MiniLine({
   const color =
     tone === 'signed'
       ? lastValue >= 0
-        ? 'var(--color-console-gain)'
-        : 'var(--color-console-loss)'
-      : 'var(--color-console-accent)';
+        ? 'var(--success-foreground)'
+        : 'var(--destructive-foreground)'
+      : 'var(--brand)';
   const zero = Math.min(Math.max(0, min), max);
 
   return (
@@ -193,7 +203,7 @@ function MiniLine({
         x2={W - PAD}
         y1={y(zero)}
         y2={y(zero)}
-        stroke="var(--color-console-line-2)"
+        stroke="var(--input)"
         strokeDasharray="4 4"
         strokeWidth="1"
         vectorEffect="non-scaling-stroke"
@@ -259,43 +269,47 @@ function ScatterCard({
   const recent = trades.filter((trade) => trade.r != null).slice(-12).reverse();
 
   return (
-    <section className="console-card mt-4 overflow-hidden">
-      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-console-line px-5 py-3">
+    <Card className="mt-4 overflow-hidden">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-5 py-3">
         <div>
           <h2 className="text-[13px] font-medium">交易散点</h2>
-          <p className="mt-0.5 text-[11px] text-console-faint">
+          <p className="mt-0.5 text-[11px] text-muted-foreground/60">
             横轴持仓时长（平方根刻度），纵轴实现 R；绿点盈利，红点亏损
           </p>
         </div>
-        <span className="num font-mono text-[11px] text-console-muted">{points.length} 个点</span>
+        <span className="num font-mono text-[11px] text-muted-foreground">{points.length} 个点</span>
       </div>
 
       {notice ? (
         <div className="px-5 py-6">
-          <p className="text-[12px] text-console-faint">{loading ? '读取中…' : notice}</p>
+          <p className="text-[12px] text-muted-foreground/60">{loading ? '读取中…' : notice}</p>
           {recent.length > 0 && (
-            <table className="mt-3 w-full text-[11px]">
-              <thead>
-                <tr className="text-left text-console-faint">
-                  <th className="py-1 font-normal">交易</th>
-                  <th className="py-1 font-normal">时长</th>
-                  <th className="py-1 text-right font-normal">R</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="mt-3 w-full text-[11px]">
+              <TableHeader>
+                <TableRow className="border-0 text-left text-muted-foreground/60 hover:bg-transparent">
+                  <TableHead className="h-auto py-1 font-normal">交易</TableHead>
+                  <TableHead className="h-auto py-1 font-normal">时长</TableHead>
+                  <TableHead className="h-auto py-1 text-right font-normal">R</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {recent.map((trade) => (
-                  <tr key={trade.positionId} className="border-t border-console-line/50">
-                    <td className="py-1">
+                  <TableRow key={trade.positionId} className="border-t border-border/50">
+                    <TableCell className="py-1">
                       {trade.symbol} · {trade.side === 'buy' ? '多' : '空'}
-                    </td>
-                    <td className="py-1 font-mono">{formatMinutes(trade.durationSec)}</td>
-                    <td className={clsx('py-1 text-right font-mono', signedClass(trade.r ?? 0))}>
+                    </TableCell>
+                    <TableCell className="py-1 font-mono">
+                      {formatMinutes(trade.durationSec)}
+                    </TableCell>
+                    <TableCell
+                      className={cn('py-1 text-right font-mono', signedClass(trade.r ?? 0))}
+                    >
                       {fmtR(trade.r)}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </div>
       ) : (
@@ -314,7 +328,7 @@ function ScatterCard({
                 x2={W - PAD_X}
                 y1={PAD_Y + t * (H - PAD_Y * 2)}
                 y2={PAD_Y + t * (H - PAD_Y * 2)}
-                stroke="var(--color-console-line)"
+                stroke="var(--border)"
                 strokeWidth="1"
                 vectorEffect="non-scaling-stroke"
               />
@@ -326,7 +340,7 @@ function ScatterCard({
                   x2={W - PAD_X}
                   y1={geometry.y(0)}
                   y2={geometry.y(0)}
-                  stroke="var(--color-console-line-2)"
+                  stroke="var(--input)"
                   strokeDasharray="4 4"
                   strokeWidth="1"
                   vectorEffect="non-scaling-stroke"
@@ -338,7 +352,7 @@ function ScatterCard({
                     x2={geometry.x(tick.minutes)}
                     y1={PAD_Y}
                     y2={H - PAD_Y}
-                    stroke="var(--color-console-line)"
+                    stroke="var(--border)"
                     strokeWidth="1"
                     strokeDasharray="2 6"
                     vectorEffect="non-scaling-stroke"
@@ -364,7 +378,7 @@ function ScatterCard({
                       cx={geometry.x(point.minutes)}
                       cy={geometry.y(point.r)}
                       r={selectedId === point.positionId ? 5 : 3}
-                      fill={point.win ? 'var(--color-console-gain)' : 'var(--color-console-loss)'}
+                      fill={point.win ? 'var(--success-foreground)' : 'var(--destructive-foreground)'}
                       opacity={selectedId === point.positionId ? 1 : 0.75}
                     />
                   </g>
@@ -372,7 +386,7 @@ function ScatterCard({
               </>
             )}
           </svg>
-          <div className="mt-2 flex items-center justify-between text-[10px] text-console-faint">
+          <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground/60">
             <div className="flex gap-3">
               {geometry &&
                 durationTicks(geometry.maxMinutes).map((tick) => (
@@ -387,31 +401,31 @@ function ScatterCard({
             </div>
           </div>
           {selected ? (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-console-line bg-console-canvas px-3 py-2">
-              <div className="text-[11px] text-console-muted">
-                <span className="font-medium text-console-ink">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-border bg-sidebar px-3 py-2">
+              <div className="text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground">
                   {selected.symbol} · {selected.side === 'buy' ? '多' : '空'}
                 </span>{' '}
                 · 持仓 {formatMinutes(selected.durationSec)} · R {fmtR(selected.r)} ·{' '}
                 <span className={signedClass(selected.profit)}>{fmtSigned(selected.profit)}</span>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => setSelectedId(null)} className="console-chip">
+                <Button onClick={() => setSelectedId(null)} size="xs" variant="outline">
                   收起
-                </button>
-                <button onClick={() => void openReplay()} className="console-chip">
+                </Button>
+                <Button onClick={() => void openReplay()} size="xs" variant="outline">
                   在回放中打开
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
-            <p className="mt-2 text-[10px] text-console-faint">
+            <p className="mt-2 text-[10px] text-muted-foreground/60">
               点一个散点查看这笔交易，并可直接打开当时的回放。
             </p>
           )}
         </div>
       )}
-    </section>
+    </Card>
   );
 }
 

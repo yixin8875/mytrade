@@ -1,261 +1,352 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist-mono";
 
 /*
- * 两套介质，一个系统：
- * - 实时台（浅色冷光）：仪器面、报价、下单、持仓
- * - 复盘页（暖纸）：日志、报表、执行质量、设置
- * 同一套字号、间距、圆角和一个强调色。涨跌绿红只做语义，强调蓝只做选中与焦点。
+ * coss ui 主题层
+ * ------------------------------------------------------------------
+ * 组件来自 coss ui（Base UI + Tailwind v4），颜色全部走语义 token。
+ * 主题仍由 index.html / App.tsx 的 data-theme 切换：
+ *   light = 冷灰画布 + 白卡片（默认）
+ *   white = 纯白画布 + 白卡片
+ *   dark  = 深灰画布 + 近黑卡片
+ * 旧的 tv-* / console-* 类名保留为别名，统一指向语义 token，
+ * 这样迁移中的页面不需要逐行改类名就能跟随新视觉。
  */
-@theme {
-  /* 实时台：冷光仪器面 */
-  --color-tv-bg: #eef1f5;
-  --color-tv-panel: #ffffff;
-  --color-tv-raised: #f4f6f9;
-  --color-tv-border: #e3e8ee;
-  --color-tv-text: #1a222c;
-  --color-tv-muted: #64707f;
-  --color-tv-faint: #8b96a5;
-  --color-tv-up: #0f7a55;
-  --color-tv-down: #c2413a;
-  --color-tv-warn: #a9691a;
-  --color-tv-accent: #1f5fd6;
-  --color-tv-accent-soft: #e9effc;
-  --color-tv-up-soft: #e7f4ee;
-  --color-tv-down-soft: #fbecea;
-  --color-tv-warn-soft: #fbf3e6;
-  --color-tv-hover: #eef2f6;
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-  /* 复盘页：暖纸 */
-  --color-console-canvas: #f6f3ec;
-  --color-console-sidebar: #f1ece2;
-  --color-console-card: #fffdf8;
-  --color-console-ink: #211c16;
-  --color-console-ink-2: #4e473d;
-  --color-console-muted: #6f675b;
-  --color-console-faint: #9a9183;
-  --color-console-line: #e5dfd4;
-  --color-console-line-2: #d5cec0;
-  --color-console-hover: #eee8dd;
-  --color-console-selected: #e9e1d3;
-  --color-console-accent: #1f5fd6;
-  --color-console-accent-soft: #e9effc;
-  --color-console-gain: #0f7a55;
-  --color-console-loss: #c2413a;
-  --color-console-warn: #a9691a;
-  --color-console-gain-soft: #e7f4ee;
-  --color-console-loss-soft: #fbecea;
-  --color-console-warn-soft: #fbf3e6;
+@theme inline {
+  /* coss 语义色 */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-code: var(--code);
+  --color-code-foreground: var(--code-foreground);
+  --color-code-highlight: var(--code-highlight);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
 
-  --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, "Microsoft YaHei", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "Cascadia Mono", ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+  /* 品牌强调色：设置页可换色，默认取 coss info 蓝 */
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
 
-  --radius-control: 8px;
-  --radius-card: 12px;
-  --radius-panel: 16px;
+  /* 旧别名：实时台 */
+  --color-tv-bg: var(--sidebar);
+  --color-tv-panel: var(--card);
+  --color-tv-raised: color-mix(in srgb, var(--foreground) 4%, var(--card));
+  --color-tv-border: var(--border);
+  --color-tv-text: var(--foreground);
+  --color-tv-muted: var(--muted-foreground);
+  --color-tv-faint: color-mix(in srgb, var(--muted-foreground) 62%, transparent);
+  --color-tv-up: var(--success-foreground);
+  --color-tv-down: var(--destructive-foreground);
+  --color-tv-warn: var(--warning-foreground);
+  --color-tv-accent: var(--brand);
+  --color-tv-accent-soft: var(--brand-soft);
+  --color-tv-up-soft: color-mix(in srgb, var(--success) 12%, transparent);
+  --color-tv-down-soft: color-mix(in srgb, var(--destructive) 12%, transparent);
+  --color-tv-warn-soft: color-mix(in srgb, var(--warning) 14%, transparent);
+  --color-tv-hover: var(--accent);
+
+  /* 旧别名：复盘页（coss 视觉下与实时台同源，不再保留暖纸） */
+  --color-console-canvas: var(--sidebar);
+  --color-console-sidebar: var(--sidebar);
+  --color-console-card: var(--card);
+  --color-console-ink: var(--foreground);
+  --color-console-ink-2: color-mix(in srgb, var(--foreground) 82%, var(--muted-foreground));
+  --color-console-muted: var(--muted-foreground);
+  --color-console-faint: color-mix(in srgb, var(--muted-foreground) 62%, transparent);
+  --color-console-line: var(--border);
+  --color-console-line-2: var(--input);
+  --color-console-hover: var(--accent);
+  --color-console-selected: var(--accent);
+  --color-console-accent: var(--brand);
+  --color-console-accent-soft: var(--brand-soft);
+  --color-console-gain: var(--success-foreground);
+  --color-console-loss: var(--destructive-foreground);
+  --color-console-warn: var(--warning-foreground);
+  --color-console-gain-soft: color-mix(in srgb, var(--success) 12%, transparent);
+  --color-console-loss-soft: color-mix(in srgb, var(--destructive) 12%, transparent);
+  --color-console-warn-soft: color-mix(in srgb, var(--warning) 14%, transparent);
+
+  --font-sans: "Inter Variable", "Segoe UI", -apple-system, BlinkMacSystemFont,
+    "Microsoft YaHei", "PingFang SC", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: "Geist Mono Variable", "Cascadia Mono", ui-monospace, "SF Mono", Consolas,
+    "Liberation Mono", monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-control: var(--radius-md);
+  --radius-card: var(--radius-lg);
+  --radius-panel: var(--radius-xl);
+
+  --animate-skeleton: skeleton 2s -1s infinite linear;
+  --animate-caret-blink: 1s ease-out infinite caret-blink;
+  --animate-toast-success-odd: toast-success-odd 0.32s cubic-bezier(0.5, 1, 0.89, 1);
+  --animate-toast-success-even: toast-success-even 0.32s cubic-bezier(0.5, 1, 0.89, 1);
+  --animate-toast-error-odd: toast-error-odd 0.28s cubic-bezier(0.5, 1, 0.89, 1);
+  --animate-toast-error-even: toast-error-even 0.28s cubic-bezier(0.5, 1, 0.89, 1);
+
+  @keyframes skeleton {
+    to {
+      background-position: -200% 0;
+    }
+  }
+  @keyframes caret-blink {
+    0%, 70%, to {
+      opacity: 1;
+    }
+    20%, 50% {
+      opacity: 0;
+    }
+  }
+  @keyframes toast-success-odd {
+    0% { scale: 1; }
+    30% { scale: 1.025; }
+    60% { scale: 0.99; }
+    100% { scale: 1; }
+  }
+  @keyframes toast-error-odd {
+    0% { translate: 0 0; }
+    25% { translate: -3px 0; }
+    50% { translate: 3px 0; }
+    75% { translate: -3px 0; }
+    100% { translate: 0 0; }
+  }
+  @keyframes toast-success-even {
+    0% { scale: 1; }
+    30% { scale: 1.025; }
+    60% { scale: 0.99; }
+    100% { scale: 1; }
+  }
+  @keyframes toast-error-even {
+    0% { translate: 0 0; }
+    25% { translate: -3px 0; }
+    50% { translate: 3px 0; }
+    75% { translate: -3px 0; }
+    100% { translate: 0 0; }
+  }
 }
 
-/* 白色：纯白底材，只靠发丝线分面；语义色与强调色和浅色一致 */
+/* 浅色（默认）：冷灰画布 + 白卡片 */
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+
+  --background: var(--color-white);
+  --foreground: var(--color-neutral-800);
+  --card: var(--color-white);
+  --card-foreground: var(--color-neutral-800);
+  --popover: var(--color-white);
+  --popover-foreground: var(--color-neutral-800);
+  --primary: var(--color-neutral-800);
+  --primary-foreground: var(--color-neutral-50);
+  --secondary: --alpha(var(--color-black) / 4%);
+  --secondary-foreground: var(--color-neutral-800);
+  --muted: --alpha(var(--color-black) / 4%);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
+  --accent: --alpha(var(--color-black) / 4%);
+  --accent-foreground: var(--color-neutral-800);
+  --destructive: var(--color-red-500);
+  --destructive-foreground: var(--color-red-700);
+  --info: var(--color-blue-500);
+  --info-foreground: var(--color-blue-700);
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-700);
+  --warning: var(--color-amber-500);
+  --warning-foreground: var(--color-amber-700);
+  --border: --alpha(var(--color-black) / 8%);
+  --input: --alpha(var(--color-black) / 10%);
+  --ring: var(--color-neutral-400);
+  --sidebar: var(--color-neutral-50);
+  --sidebar-foreground: color-mix(in srgb, var(--color-neutral-800) 64%, var(--sidebar));
+  --sidebar-primary: var(--color-neutral-800);
+  --sidebar-primary-foreground: var(--color-neutral-50);
+  --sidebar-accent: --alpha(var(--color-black) / 4%);
+  --sidebar-accent-foreground: var(--color-neutral-800);
+  --sidebar-border: --alpha(var(--color-black) / 6%);
+  --sidebar-ring: var(--color-neutral-400);
+  --code: var(--color-white);
+  --code-foreground: var(--foreground);
+  --code-highlight: --alpha(var(--color-black) / 4%);
+  --chart-1: var(--color-orange-600);
+  --chart-2: var(--color-teal-600);
+  --chart-3: var(--color-cyan-900);
+  --chart-4: var(--color-amber-400);
+  --chart-5: var(--color-amber-500);
+  --brand: #1f5fd6;
+  --brand-soft: color-mix(in srgb, #1f5fd6 11%, #ffffff);
+}
+
+/* 纯白：画布与卡片同为白色，只靠发丝线分面 */
 html[data-theme="white"] {
-  --color-tv-bg: #ffffff;
-  --color-tv-panel: #ffffff;
-  --color-tv-raised: #f6f7f9;
-  --color-tv-border: #e5e9ee;
-  --color-tv-text: #161b22;
-  --color-tv-muted: #5f6b7a;
-  --color-tv-faint: #8a94a2;
-  --color-tv-up: #0f7a55;
-  --color-tv-down: #c2413a;
-  --color-tv-warn: #a9691a;
-  --color-tv-accent: #1f5fd6;
-  --color-tv-accent-soft: #e9effc;
-  --color-tv-up-soft: #e7f4ee;
-  --color-tv-down-soft: #fbecea;
-  --color-tv-warn-soft: #fbf3e6;
-  --color-tv-hover: #f3f5f7;
-
-  /* 复盘页也换成中性白纸，不再带暖调 */
-  --color-console-canvas: #fbfbfa;
-  --color-console-sidebar: #f6f6f4;
-  --color-console-card: #ffffff;
-  --color-console-ink: #1b1b19;
-  --color-console-ink-2: #4b4b47;
-  --color-console-muted: #6e6e68;
-  --color-console-faint: #9a9a92;
-  --color-console-line: #e8e8e3;
-  --color-console-line-2: #d9d9d3;
-  --color-console-hover: #f2f2ef;
-  --color-console-selected: #edede9;
-  --color-console-accent: #1f5fd6;
-  --color-console-accent-soft: #e9effc;
-  --color-console-gain: #0f7a55;
-  --color-console-loss: #c2413a;
-  --color-console-warn: #a9691a;
-  --color-console-gain-soft: #e7f4ee;
-  --color-console-loss-soft: #fbecea;
-  --color-console-warn-soft: #fbf3e6;
+  --background: var(--color-white);
+  --card: var(--color-white);
+  --popover: var(--color-white);
+  --sidebar: var(--color-white);
+  --sidebar-border: --alpha(var(--color-black) / 8%);
 }
 
-/* 深色仍是可选项：同一套角色，换成墨色阶梯，不改变任何布局 */
+/* 深色：coss neutral 深色阶梯 */
 html[data-theme="dark"] {
-  --color-tv-bg: #14161b;
-  --color-tv-panel: #1a1d23;
-  --color-tv-raised: #22262e;
-  --color-tv-border: #2a2f38;
-  --color-tv-text: #e7eaef;
-  --color-tv-muted: #98a2b0;
-  --color-tv-faint: #6d7787;
-  --color-tv-up: #3ecf9a;
-  --color-tv-down: #ff7b73;
-  --color-tv-warn: #e0a94a;
-  --color-tv-accent: #7ba1ff;
-  --color-tv-accent-soft: #1e2a45;
-  --color-tv-up-soft: #17312a;
-  --color-tv-down-soft: #37201f;
-  --color-tv-warn-soft: #362b18;
-  --color-tv-hover: #232833;
+  color-scheme: dark;
 
-  /* 复盘页在深色下换成暖石墨，而不是把纸面反相 */
-  --color-console-canvas: #16130f;
-  --color-console-sidebar: #1b1712;
-  --color-console-card: #211c16;
-  --color-console-ink: #f2ede3;
-  --color-console-ink-2: #cfc6b6;
-  --color-console-muted: #a29888;
-  --color-console-faint: #7c7365;
-  --color-console-line: #332c23;
-  --color-console-line-2: #463d31;
-  --color-console-hover: #2a241c;
-  --color-console-selected: #332b21;
-  --color-console-accent: #7ba1ff;
-  --color-console-accent-soft: #1e2638;
-  --color-console-gain: #4cc79a;
-  --color-console-loss: #f07d74;
-  --color-console-warn: #d9a24a;
-  --color-console-gain-soft: #1a2e26;
-  --color-console-loss-soft: #33201d;
-  --color-console-warn-soft: #322818;
+  --background: color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white));
+  --foreground: var(--color-neutral-100);
+  --card: color-mix(in srgb, var(--background) 98%, var(--color-white));
+  --card-foreground: var(--color-neutral-100);
+  --popover: color-mix(in srgb, var(--background) 98%, var(--color-white));
+  --popover-foreground: var(--color-neutral-100);
+  --primary: var(--color-neutral-100);
+  --primary-foreground: var(--color-neutral-800);
+  --secondary: --alpha(var(--color-white) / 4%);
+  --secondary-foreground: var(--color-neutral-100);
+  --muted: --alpha(var(--color-white) / 4%);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
+  --accent: --alpha(var(--color-white) / 4%);
+  --accent-foreground: var(--color-neutral-100);
+  --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
+  --destructive-foreground: var(--color-red-400);
+  --info: var(--color-blue-500);
+  --info-foreground: var(--color-blue-400);
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-400);
+  --warning: var(--color-amber-500);
+  --warning-foreground: var(--color-amber-400);
+  --border: --alpha(var(--color-white) / 6%);
+  --input: --alpha(var(--color-white) / 8%);
+  --ring: var(--color-neutral-500);
+  --sidebar: color-mix(in srgb, var(--color-neutral-950) 97%, var(--color-white));
+  --sidebar-foreground: color-mix(in srgb, var(--color-neutral-100) 64%, var(--sidebar));
+  --sidebar-primary: var(--color-neutral-100);
+  --sidebar-primary-foreground: var(--color-neutral-800);
+  --sidebar-accent: --alpha(var(--color-white) / 4%);
+  --sidebar-accent-foreground: var(--color-neutral-100);
+  --sidebar-border: --alpha(var(--color-white) / 5%);
+  --sidebar-ring: var(--color-neutral-400);
+  --code: color-mix(in srgb, var(--background) 98%, var(--color-white));
+  --code-foreground: var(--foreground);
+  --code-highlight: --alpha(var(--color-white) / 6%);
+  --chart-1: var(--color-blue-700);
+  --chart-2: var(--color-emerald-500);
+  --chart-3: var(--color-amber-500);
+  --chart-4: var(--color-purple-500);
+  --chart-5: var(--color-rose-500);
+  --brand: #7ba1ff;
+  --brand-soft: #1e2a45;
 }
 
-html[data-theme="dark"] ::-webkit-scrollbar-thumb {
-  background: #3a404c;
+/* ------------------------------ 基础样式 ------------------------------ */
+/* 必须放在 base 层：无层级样式会盖过 Tailwind 的 utilities，
+   例如 * { border-color } 会让 ghost 按钮的 border-transparent 失效。 */
+@layer base {
+  * {
+    box-sizing: border-box;
+    border-color: var(--border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--sidebar);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+  }
+
+  /* Base UI 弹层需要独立层叠上下文，避免被页面内容压住 */
+  #root {
+    isolation: isolate;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--brand) 22%, transparent);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 6px;
+    background-clip: content-box;
+    background-color: color-mix(in srgb, var(--foreground) 18%, transparent);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--foreground) 30%, transparent);
+  }
+
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
 }
 
-html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
-  background: #4a515e;
-}
+/* ---------------------- 旧样式类（迁移过渡期） ---------------------- */
 
-/*
- * 复盘页有自己的暖色底材：浅色是纸，深色是暖石墨。
- * 局部重映射 tv-*，设置页等沿用旧类名的组件不必逐个改。
- */
-.console-scope {
-  --color-tv-bg: var(--color-console-canvas);
-  --color-tv-panel: var(--color-console-card);
-  --color-tv-raised: var(--color-console-sidebar);
-  --color-tv-border: var(--color-console-line);
-  --color-tv-text: var(--color-console-ink);
-  --color-tv-muted: var(--color-console-muted);
-  --color-tv-faint: var(--color-console-faint);
-  --color-tv-up: var(--color-console-gain);
-  --color-tv-down: var(--color-console-loss);
-  --color-tv-warn: var(--color-console-warn);
-  --color-tv-accent: var(--color-console-accent);
-  --color-tv-accent-soft: var(--color-console-accent-soft);
-  --color-tv-up-soft: var(--color-console-gain-soft);
-  --color-tv-down-soft: var(--color-console-loss-soft);
-  --color-tv-warn-soft: var(--color-console-warn-soft);
-  --color-tv-hover: var(--color-console-hover);
-  color: var(--color-console-ink);
-}
-
-.console-scope ::-webkit-scrollbar-thumb {
-  background: var(--color-console-line-2);
-}
-
-.console-scope ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-console-faint);
-}
-
-.console-card {
-  border: 1px solid var(--color-console-line);
-  border-radius: var(--radius-card);
-  background: var(--color-console-card);
-}
-
-/* 读数条：一组同级数字，用发丝线分隔，而不是一叠同宽卡片 */
 .readout {
   display: grid;
   gap: 1px;
   overflow: hidden;
-  border: 1px solid var(--color-console-line);
-  border-radius: var(--radius-card);
-  background: var(--color-console-line);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--border);
 }
 
 .readout-cell {
-  background: var(--color-console-card);
+  background: var(--card);
   padding: 16px 20px;
-}
-
-.console-nav {
-  display: flex;
-  width: 100%;
-  height: 34px;
-  align-items: center;
-  gap: 10px;
-  border-radius: var(--radius-control);
-  padding: 0 10px;
-  text-align: left;
-  font-size: 13px;
-  color: var(--color-console-ink-2);
-  transition: background-color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
-    color 0.15s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.console-nav:hover {
-  background: var(--color-console-hover);
-}
-
-.console-nav-active {
-  background: var(--color-console-selected);
-  font-weight: 500;
-  color: var(--color-console-ink);
-}
-
-.console-btn {
-  display: inline-flex;
-  height: 32px;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-radius: var(--radius-control);
-  padding: 0 14px;
-  font-size: 12.5px;
-  font-weight: 500;
-  white-space: nowrap;
-  transition: background-color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
-    color 0.15s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.console-btn-primary {
-  background: var(--color-console-ink);
-  color: var(--color-console-card);
-}
-
-.console-btn-primary:hover {
-  opacity: 0.9;
-}
-
-.console-btn-secondary {
-  border: 1px solid var(--color-console-line);
-  background: var(--color-console-card);
-  color: var(--color-console-ink);
-}
-
-.console-btn-secondary:hover {
-  background: var(--color-console-hover);
 }
 
 .console-chip {
@@ -263,56 +354,32 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   height: 28px;
   align-items: center;
   gap: 4px;
-  border-radius: var(--radius-control);
-  border: 1px solid var(--color-console-line);
-  background: var(--color-console-card);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--card);
   padding: 0 10px;
   font-size: 12px;
-  color: var(--color-console-muted);
-  transition: color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
+  color: var(--muted-foreground);
+  transition:
+    color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
     border-color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
     background-color 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .console-chip:hover {
-  border-color: var(--color-console-line-2);
-  color: var(--color-console-ink);
+  border-color: var(--input);
+  color: var(--foreground);
 }
 
 .console-chip-active {
-  border-color: var(--color-console-ink);
-  background: var(--color-console-ink);
-  color: var(--color-console-card);
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
 }
 
 .console-chip-active:hover {
-  border-color: var(--color-console-ink);
-  color: var(--color-console-card);
-}
-
-.console-input {
-  height: 32px;
-  border-radius: var(--radius-control);
-  border: 1px solid var(--color-console-line);
-  background: var(--color-console-card);
-  padding: 0 10px;
-  font-size: 12.5px;
-  color: var(--color-console-ink);
-  outline: none;
-  transition: border-color 0.15s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.15s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.console-input:focus {
-  border-color: var(--color-console-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-console-accent) 14%, transparent);
-}
-
-/* 分组标签：句首大写，不做宽字距全大写 */
-.console-label {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-console-muted);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
 }
 
 .num {
@@ -324,67 +391,18 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   font-feature-settings: "tnum" 1;
 }
 
-/* 键盘焦点：一个环，一种颜色 */
-:where(button, a, input, select, textarea, summary):focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-tv-accent) 55%, transparent);
-  outline-offset: 2px;
-}
-
-html,
-body,
-#root {
-  height: 100%;
-}
-
-body {
-  margin: 0;
-  background: var(--color-tv-bg);
-  color: var(--color-tv-text);
-  font-family: var(--font-sans);
-  font-size: 12px;
-  -webkit-font-smoothing: antialiased;
-  overflow: hidden;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  border-radius: 6px;
-  background-clip: content-box;
-  background-color: #c3cbd6;
-}
-::-webkit-scrollbar-thumb:hover {
-  background-color: #aab4c1;
-}
-
-input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
 /* 图表顶部的自绘小块：只做表面和发丝线 */
 .chart-chip {
   display: inline-flex;
   height: 22px;
   align-items: center;
   gap: 6px;
-  border: 1px solid var(--color-tv-border);
-  border-radius: 6px;
-  background: var(--color-tv-panel);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-md) - 2px);
+  background: var(--card);
   padding: 0 6px;
   font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--color-tv-text);
+  color: var(--foreground);
 }

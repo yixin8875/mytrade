@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { clsx } from 'clsx';
+import { useState } from 'react';
+import { cn } from '@/lib/utils';
 import { Check, ChevronDown, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import type { AccountOption, SwitchAccountResult } from '../gateway/types';
@@ -12,27 +14,10 @@ export function AccountSwitcher() {
   const notify = useApp((s) => s.notify);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
 
   const accounts = health?.accounts ?? [];
   const activeId = health?.activeAccountId ?? '';
   const active = accounts.find((item) => item.id === activeId) ?? accounts[0] ?? null;
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointer = (event: MouseEvent) => {
-      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('mousedown', onPointer);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onPointer);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
 
   if (!active) return null;
 
@@ -75,86 +60,85 @@ export function AccountSwitcher() {
   const connected = !!health?.connected;
 
   return (
-    <div ref={boxRef} className="relative shrink-0">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
+    <Menu open={open} onOpenChange={setOpen}>
+      <MenuTrigger
         disabled={busy}
         title={
           active.server
             ? `${active.label} · ${active.login || '未指定登录号'}@${active.server}`
             : `${active.label} · ${active.login || '未指定登录号'}`
         }
-        className={clsx(
-          'flex h-7 items-center gap-2 rounded-lg border border-tv-border bg-tv-raised px-2 text-[12px] text-tv-text transition-colors',
-          busy ? 'cursor-wait opacity-70' : 'hover:bg-tv-hover',
-        )}
+        render={
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              'h-7 shrink-0 gap-2 px-2 text-[12px] font-normal',
+              busy && 'cursor-wait opacity-70',
+            )}
+          />
+        }
       >
         <span
-          className={clsx(
+          className={cn(
             'h-1.5 w-1.5 rounded-full',
-            connected && active.connected ? 'bg-tv-up' : 'bg-tv-faint',
+            connected && active.connected ? 'bg-success' : 'bg-muted-foreground/40',
           )}
         />
         <span className="max-w-[104px] truncate">{active.label}</span>
-        <span className="num font-mono text-[11px] text-tv-muted">{active.login || '—'}</span>
+        <span className="font-mono text-[11px] text-muted-foreground">{active.login || '—'}</span>
         {busy ? (
-          <Loader2 size={14} className="animate-spin text-tv-muted" />
+          <Loader2 size={14} className="animate-spin text-muted-foreground" />
         ) : (
           <ChevronDown
             size={14}
             strokeWidth={1.5}
-            className={clsx(
-              'text-tv-muted transition-transform duration-150',
+            className={cn(
+              'text-muted-foreground transition-transform duration-150',
               open && 'rotate-180',
             )}
           />
         )}
-      </button>
+      </MenuTrigger>
 
-      {open && (
-        <div className="absolute right-0 top-9 z-50 w-72 overflow-hidden rounded-xl border border-tv-border bg-tv-panel shadow-[0_12px_32px_rgba(20,30,45,0.12)]">
-          <div className="border-b border-tv-border px-3 py-2.5 text-[11px] text-tv-muted">
-            切换 MT5 账户
-          </div>
-          <div className="max-h-72 overflow-auto p-1">
-            {accounts.map((item) => {
-              const current = item.id === activeId;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => void switchTo(item)}
-                  disabled={busy}
-                  className={clsx(
-                    'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors',
-                    current ? 'bg-tv-raised' : 'hover:bg-tv-hover',
-                    busy && 'cursor-wait',
-                  )}
-                >
-                  <span
-                    className={clsx(
-                      'h-1.5 w-1.5 shrink-0 rounded-full',
-                      item.active && item.connected ? 'bg-tv-up' : 'bg-tv-faint',
-                    )}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12px] text-tv-text">{item.label}</span>
-                    <span className="block truncate font-mono text-[11px] text-tv-muted">
-                      {item.login || '未指定登录号'}
-                      {item.server ? ` · ${item.server}` : ''}
-                    </span>
-                  </span>
-                  {current && <Check size={14} strokeWidth={1.5} className="shrink-0 text-tv-accent" />}
-                </button>
-              );
-            })}
-          </div>
-          <div className="border-t border-tv-border px-3 py-2.5 text-[11px] leading-relaxed text-tv-muted">
-            在「设置 → MT5 账户」里添加、修改或删除账户；保存后无需重启网关。
-          </div>
+      <MenuPopup align="end" sideOffset={6} className="w-72">
+        <div className="px-2 py-1.5 text-[11px] text-muted-foreground">切换 MT5 账户</div>
+        {accounts.map((item) => {
+          const current = item.id === activeId;
+          return (
+            <MenuItem
+              key={item.id}
+              onClick={() => void switchTo(item)}
+              disabled={busy}
+              closeOnClick={false}
+              className={cn(
+                'gap-2.5 rounded-lg px-2.5 py-2 sm:py-2',
+                current && 'bg-accent',
+                busy && 'cursor-wait',
+              )}
+            >
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 shrink-0 rounded-full',
+                  item.active && item.connected ? 'bg-success' : 'bg-muted-foreground/40',
+                )}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[12px] text-foreground">{item.label}</span>
+                <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                  {item.login || '未指定登录号'}
+                  {item.server ? ` · ${item.server}` : ''}
+                </span>
+              </span>
+              {current && <Check size={14} strokeWidth={1.5} className="shrink-0 text-brand" />}
+            </MenuItem>
+          );
+        })}
+        <MenuSeparator />
+        <div className="px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
+          在「设置 → MT5 账户」里添加、修改或删除账户；保存后无需重启网关。
         </div>
-      )}
-    </div>
+      </MenuPopup>
+    </Menu>
   );
 }

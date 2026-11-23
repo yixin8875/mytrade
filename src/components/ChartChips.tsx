@@ -641,7 +641,7 @@ export function ChartChips({
         <>
           <div
             data-ghost="price"
-            className="pointer-events-none absolute border-t border-dashed border-tv-accent/50"
+            className="pointer-events-none absolute border-t border-dashed border-brand/50"
             style={{
               top: layout.ghost.y,
               left: layout.ghost.left,
@@ -651,7 +651,7 @@ export function ChartChips({
           {layout.ghost.vx != null && (
             <div
               data-ghost="time"
-              className="pointer-events-none absolute border-l border-dashed border-tv-accent/30"
+              className="pointer-events-none absolute border-l border-dashed border-brand/30"
               style={{
                 left: layout.ghost.vx,
                 top: layout.ghost.top,
@@ -691,7 +691,7 @@ export function ChartChips({
                   className="absolute inset-x-0 border-t border-white/15"
                   style={{ top: mark.y - pos.top }}
                 >
-                  <span className="absolute left-2 -top-[9px] font-mono text-[11px] text-tv-muted">
+                  <span className="absolute left-2 -top-[9px] font-mono text-[11px] text-muted-foreground">
                     {mark.text}
                   </span>
                   {/* 贴住价格轴一侧的短横线：明确点出这个 R 对应的价位 */}
@@ -705,7 +705,7 @@ export function ChartChips({
                   {mark.priceText && !tight && (
                     <span
                       data-r-price={mark.text}
-                      className="absolute right-9 -top-[7px] whitespace-nowrap font-mono text-[10px] tabular-nums text-tv-muted"
+                      className="absolute right-9 -top-[7px] whitespace-nowrap font-mono text-[10px] tabular-nums text-muted-foreground"
                     >
                       {mark.priceText}
                     </span>

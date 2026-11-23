@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
-import { clsx } from 'clsx';
 import { Plus, Search, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useApp } from '../store/useApp';
 import { fmtPrice } from '../lib/format';
+import { Button } from './ui/button';
 
 /**
  * 交易台顶部品种标签：最近看过的品种一直留着，切换不用再开面板。
@@ -70,11 +71,11 @@ export function SymbolTabs() {
           return (
             <div
               key={name}
-              className={clsx(
+              className={cn(
                 'group flex h-8 shrink-0 items-center rounded-md border pr-1 transition-colors',
                 active
-                  ? 'border-tv-border bg-tv-raised text-tv-text'
-                  : 'border-transparent text-tv-muted hover:bg-tv-hover hover:text-tv-text',
+                  ? 'border-border bg-muted text-foreground'
+                  : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
             >
               <button
@@ -82,15 +83,19 @@ export function SymbolTabs() {
                 className="flex h-full items-center gap-2 pl-2.5 text-[12px]"
                 title={infoFor(name)?.description ?? name}
               >
-                <span className={clsx('font-medium', active && 'text-tv-text')}>{name}</span>
-                <span className="num font-mono text-[11px] text-tv-muted">
+                <span className={cn('font-medium', active && 'text-foreground')}>{name}</span>
+                <span className="num font-mono text-[11px] text-muted-foreground">
                   {fmtPrice(bid, digits)}
                 </span>
                 {change != null && (
                   <span
-                    className={clsx(
+                    className={cn(
                       'num font-mono text-[10px]',
-                      change > 0 ? 'text-tv-up' : change < 0 ? 'text-tv-down' : 'text-tv-faint',
+                      change > 0
+                        ? 'text-success-foreground'
+                        : change < 0
+                          ? 'text-destructive-foreground'
+                          : 'text-muted-foreground/60',
                     )}
                   >
                     {change > 0 ? '+' : ''}
@@ -98,30 +103,34 @@ export function SymbolTabs() {
                   </span>
                 )}
               </button>
-              <button
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => closeOpenSymbol(name)}
-                className={clsx(
-                  'ml-0.5 flex h-5 w-5 items-center justify-center rounded text-tv-faint hover:bg-tv-border/60 hover:text-tv-text',
+                className={cn(
+                  'ml-0.5 h-5 w-5 text-muted-foreground/60 hover:bg-border/60 hover:text-foreground',
                   active ? 'opacity-70' : 'opacity-0 group-hover:opacity-70',
                 )}
                 aria-label={`关闭 ${name}`}
                 title="关闭标签"
               >
-                <X size={12} strokeWidth={1.5} />
-              </button>
+                <X size={12} strokeWidth={1.5} className="size-3" />
+              </Button>
             </div>
           );
         })}
 
-        <button
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
           aria-label="添加品种"
           title="添加品种"
           aria-expanded={menuOpen}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-tv-muted hover:bg-tv-hover hover:text-tv-text"
+          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
         >
           <Plus size={15} strokeWidth={1.5} />
-        </button>
+        </Button>
       </div>
 
       {menuOpen && (
@@ -132,9 +141,9 @@ export function SymbolTabs() {
             aria-label="关闭品种列表"
             tabIndex={-1}
           />
-          <div className="absolute left-0 top-9 z-50 w-[320px] overflow-hidden rounded-lg border border-tv-border bg-tv-panel shadow-[0_12px_32px_rgba(0,0,0,0.14)]">
-            <div className="flex items-center gap-2 border-b border-tv-border px-3 py-2">
-              <Search size={14} strokeWidth={1.5} className="text-tv-faint" />
+          <div className="absolute left-0 top-9 z-50 w-[320px] overflow-hidden rounded-lg border border-border bg-popover shadow-lg/5">
+            <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+              <Search size={14} strokeWidth={1.5} className="text-muted-foreground/60" />
               <input
                 ref={inputRef}
                 value={query}
@@ -145,12 +154,12 @@ export function SymbolTabs() {
                 }}
                 placeholder="搜索品种 / 名称"
                 aria-label="搜索品种"
-                className="h-6 flex-1 bg-transparent text-[12px] text-tv-text outline-none placeholder:text-tv-faint"
+                className="h-6 flex-1 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground/60"
               />
             </div>
             <div className="max-h-72 overflow-y-auto py-1">
               {matches.length === 0 && (
-                <div className="px-3 py-4 text-center text-[12px] text-tv-muted">没有匹配的品种</div>
+                <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">没有匹配的品种</div>
               )}
               {matches.map((item) => {
                 const row = rowFor(item.name);
@@ -159,24 +168,24 @@ export function SymbolTabs() {
                   <button
                     key={item.name}
                     onClick={() => choose(item.name)}
-                    className={clsx(
-                      'flex w-full items-center gap-3 px-3 py-1.5 text-left text-[12px] hover:bg-tv-hover',
-                      active && 'bg-tv-raised',
+                    className={cn(
+                      'flex w-full items-center gap-3 px-3 py-1.5 text-left text-[12px] hover:bg-accent',
+                      active && 'bg-muted',
                     )}
                   >
-                    <span className="w-[76px] shrink-0 font-medium text-tv-text">{item.name}</span>
-                    <span className="min-w-0 flex-1 truncate text-[11px] text-tv-muted">
+                    <span className="w-[76px] shrink-0 font-medium text-foreground">{item.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
                       {item.description}
                     </span>
                     {row?.changePct != null && (
                       <span
-                        className={clsx(
+                        className={cn(
                           'num shrink-0 font-mono text-[11px]',
                           row.changePct > 0
-                            ? 'text-tv-up'
+                            ? 'text-success-foreground'
                             : row.changePct < 0
-                              ? 'text-tv-down'
-                              : 'text-tv-faint',
+                              ? 'text-destructive-foreground'
+                              : 'text-muted-foreground/60',
                         )}
                       >
                         {row.changePct > 0 ? '+' : ''}

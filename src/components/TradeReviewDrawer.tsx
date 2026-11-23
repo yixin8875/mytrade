@@ -1,10 +1,21 @@
 import { useEffect, useState } from 'react';
-import { clsx } from 'clsx';
 import { Check, Minus, Star, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { gateway } from '../gateway/client';
 import { fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import { fmtR, fmtReviewTime } from '../lib/review';
 import { useApp } from '../store/useApp';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
+import { Sheet, SheetPopup, SheetTitle } from './ui/sheet';
+import { Textarea } from './ui/textarea';
 import type { DisciplineGateState, RuleCheck, TradeNoteDetail } from '../gateway/types';
 
 const PRE_TRADE_LABEL: Record<DisciplineGateState, string> = {
@@ -16,11 +27,11 @@ const PRE_TRADE_LABEL: Record<DisciplineGateState, string> = {
 };
 
 const PRE_TRADE_TONE: Record<DisciplineGateState, string> = {
-  passed: 'text-console-gain',
-  overridden: 'text-console-warn',
-  skipped: 'text-console-muted',
-  pending: 'text-console-muted',
-  blocked: 'text-console-loss',
+  passed: 'text-success-foreground',
+  overridden: 'text-warning-foreground',
+  skipped: 'text-muted-foreground',
+  pending: 'text-muted-foreground',
+  blocked: 'text-destructive-foreground',
 };
 
 /**
@@ -160,57 +171,66 @@ export function TradeReviewDrawer({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex justify-end bg-black/45" onClick={onClose}>
-      <aside
-        className="flex h-full w-full max-w-[440px] flex-col border-l border-console-line bg-console-card text-console-ink shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-label="单笔复盘"
+    <Sheet
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <SheetPopup
+        side="right"
+        showCloseButton={false}
+        className="h-full max-w-[440px] gap-0 border-l border-border p-0"
       >
-        <header className="flex items-start justify-between gap-3 border-b border-console-line px-5 py-4">
+        <SheetTitle className="sr-only">单笔复盘</SheetTitle>
+        <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0">
-            <div className="text-[11px] text-console-muted">单笔复盘 · #{positionId}</div>
+            <div className="text-[11px] text-muted-foreground">单笔复盘 · #{positionId}</div>
             {detail ? (
               <div className="mt-1 flex flex-wrap items-baseline gap-2">
                 <span className="text-[18px] font-medium">{detail.trade.symbol}</span>
                 <span
-                  className={clsx(
+                  className={cn(
                     'text-[12px]',
-                    detail.trade.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
+                    detail.trade.side === 'buy'
+                      ? 'text-success-foreground'
+                      : 'text-destructive-foreground',
                   )}
                 >
                   {detail.trade.side === 'buy' ? '多' : '空'} {fmtVolume(detail.trade.volume)}
                 </span>
-                <span className={clsx('num font-mono text-[16px]', signedClass(detail.trade.profit))}>
+                <span className={cn('num font-mono text-[16px]', signedClass(detail.trade.profit))}>
                   {fmtSigned(detail.trade.profit)}
                 </span>
-                <span className="num font-mono text-[12px] text-console-muted">
+                <span className="num font-mono text-[12px] text-muted-foreground">
                   {fmtR(detail.trade.r)}
                 </span>
               </div>
             ) : (
-              <div className="mt-1 text-[13px] text-console-muted">
+              <div className="mt-1 text-[13px] text-muted-foreground">
                 {loading ? '读取中…' : '未找到这笔交易'}
               </div>
             )}
             {detail && (
-              <div className="num mt-1 font-mono text-[11px] text-console-faint">
+              <div className="num mt-1 font-mono text-[11px] text-muted-foreground/60">
                 {fmtReviewTime(detail.trade.openTime, serverOffset, true)} →{' '}
                 {fmtReviewTime(detail.trade.closeTime, serverOffset, true)}
               </div>
             )}
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={onClose}
-            className="rounded-md p-1 text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
             aria-label="关闭"
           >
             <X size={18} strokeWidth={1.6} />
-          </button>
+          </Button>
         </header>
 
         {error && (
-          <div className="mx-5 mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
+          <div className="mx-5 mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive-foreground">
             {error}
           </div>
         )}
@@ -218,58 +238,69 @@ export function TradeReviewDrawer({
         {detail && (
           <div className="min-h-0 flex-1 space-y-6 overflow-auto px-5 py-5">
             <section>
-              <div className="console-label mb-2">策略</div>
-              <select
+              <div className="mb-2 text-[11px] font-medium text-muted-foreground">策略</div>
+              <Select
                 value={playbookId ?? ''}
-                onChange={(event) => {
-                  const next = event.target.value || null;
-                  setPlaybookId(next);
+                onValueChange={(next) => {
+                  const value = next == null ? '' : String(next);
+                  const nextId = value || null;
+                  setPlaybookId(nextId);
                   setDetail({
                     ...detail,
                     rules:
-                      next && next === detail.playbookId
+                      nextId && nextId === detail.playbookId
                         ? detail.rules
                         : detail.playbooks
-                            .find((book) => book.id === next)
+                            .find((book) => book.id === nextId)
                             ?.rules.map((rule) => ({ rule, followed: null })) ?? [],
                   });
                 }}
-                className="console-input w-full"
+                items={[
+                  { value: '', label: '未关联策略' },
+                  ...detail.playbooks.map((book) => ({ value: book.id, label: book.name })),
+                ]}
               >
-                <option value="">未关联策略</option>
-                {detail.playbooks.map((book) => (
-                  <option key={book.id} value={book.id}>
-                    {book.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger aria-label="策略" className="h-8 w-full text-[12px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  <SelectItem value="">未关联策略</SelectItem>
+                  {detail.playbooks.map((book) => (
+                    <SelectItem key={book.id} value={book.id}>
+                      {book.name}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
               {detail.playbooks.length === 0 && (
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-console-faint">
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground/60">
                   <span>还没有策略手册。</span>
-                  <button
+                  <Button
+                    variant="outline"
+                    size="xs"
                     onClick={openStrategyNew}
-                    className="rounded border border-console-line px-2 py-0.5 text-console-ink-2 transition-colors hover:bg-console-hover"
+                    className="h-auto px-2 py-0.5 text-[11px] font-normal"
                   >
                     新建一本
-                  </button>
+                  </Button>
                 </div>
               )}
               {selectedBook?.description && (
-                <p className="mt-2 text-[12px] leading-relaxed text-console-muted">
+                <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
                   {selectedBook.description}
                 </p>
               )}
             </section>
 
             {detail.preTrade && (
-              <section className="border-t border-console-line pt-5">
+              <section className="border-t border-border pt-5">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="console-label">开仓时清单</span>
-                  <span className={clsx('text-[11px]', PRE_TRADE_TONE[detail.preTrade.state])}>
+                  <span className="text-[11px] font-medium text-muted-foreground">开仓时清单</span>
+                  <span className={cn('text-[11px]', PRE_TRADE_TONE[detail.preTrade.state])}>
                     {PRE_TRADE_LABEL[detail.preTrade.state]}
                   </span>
                 </div>
-                <div className="text-[11px] text-console-muted">
+                <div className="text-[11px] text-muted-foreground">
                   {detail.preTrade.playbookName ?? '未关联清单'} ·{' '}
                   {detail.preTrade.mode === 'block' ? '强制拦截' : '二次确认'}
                 </div>
@@ -278,28 +309,38 @@ export function TradeReviewDrawer({
                     {detail.preTrade.rules.map((item) => (
                       <div key={item.rule} className="flex items-center gap-2 text-[12px]">
                         {item.followed === true ? (
-                          <Check size={13} strokeWidth={2} className="shrink-0 text-console-gain" />
+                          <Check
+                            size={13}
+                            strokeWidth={2}
+                            className="size-3.5 shrink-0 text-success-foreground"
+                          />
                         ) : item.followed === false ? (
-                          <X size={13} strokeWidth={2} className="shrink-0 text-console-loss" />
+                          <X
+                            size={13}
+                            strokeWidth={2}
+                            className="size-3.5 shrink-0 text-destructive-foreground"
+                          />
                         ) : (
                           <Minus
                             size={13}
                             strokeWidth={2}
-                            className={clsx(
-                              'shrink-0',
-                              item.evaluated ? 'text-console-muted' : 'text-console-faint',
+                            className={cn(
+                              'size-3.5 shrink-0',
+                              item.evaluated ? 'text-muted-foreground' : 'text-muted-foreground/60',
                             )}
                           />
                         )}
                         <span
-                          className={clsx(
+                          className={cn(
                             'min-w-0 flex-1 truncate',
-                            item.followed === false ? 'text-console-loss' : 'text-console-ink-2',
+                            item.followed === false
+                              ? 'text-destructive-foreground'
+                              : 'text-foreground/80',
                           )}
                         >
                           {item.rule}
                         </span>
-                        <span className="shrink-0 text-[10px] text-console-faint">
+                        <span className="shrink-0 text-[10px] text-muted-foreground/60">
                           {item.followed === true
                             ? '遵守'
                             : item.followed === false
@@ -312,14 +353,14 @@ export function TradeReviewDrawer({
                     ))}
                   </div>
                 ) : (
-                  <p className="mt-2 text-[11px] text-console-faint">当时没有可用的清单规则。</p>
+                  <p className="mt-2 text-[11px] text-muted-foreground/60">当时没有可用的清单规则。</p>
                 )}
                 {detail.preTrade.reason && (
-                  <p className="mt-2 text-[11px] text-console-warn">
+                  <p className="mt-2 text-[11px] text-warning-foreground">
                     破例理由：{detail.preTrade.reason}
                   </p>
                 )}
-                <p className="mt-2 text-[10px] leading-4 text-console-faint">
+                <p className="mt-2 text-[10px] leading-4 text-muted-foreground/60">
                   这是下单时的只读快照，之后修改或归档清单不会改变这里。
                 </p>
               </section>
@@ -328,8 +369,8 @@ export function TradeReviewDrawer({
             {rules.length > 0 && (
               <section>
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="console-label">规则执行</span>
-                  <span className="num font-mono text-[11px] text-console-faint">
+                  <span className="text-[11px] font-medium text-muted-foreground">规则执行</span>
+                  <span className="num font-mono text-[11px] text-muted-foreground/60">
                     遵守 {followed} · 违反 {broken} · 未评估 {rules.length - followed - broken}
                   </span>
                 </div>
@@ -347,89 +388,95 @@ export function TradeReviewDrawer({
             )}
 
             <section>
-              <div className="console-label mb-2">执行评分</div>
+              <div className="mb-2 text-[11px] font-medium text-muted-foreground">执行评分</div>
               <div className="flex items-center gap-1">
                 {[1, 2, 3, 4, 5].map((value) => (
-                  <button
+                  <Button
                     key={value}
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => setRating(rating === value ? null : value)}
-                    className="rounded-md p-1 transition-colors hover:bg-console-hover"
+                    className="h-7 w-7 rounded-md"
                     aria-label={`${value} 分`}
                   >
                     <Star
                       size={18}
                       strokeWidth={1.5}
-                      className={clsx(
+                      className={cn(
+                        'size-4.5',
                         rating != null && value <= rating
-                          ? 'fill-console-warn text-console-warn'
-                          : 'text-console-faint',
+                          ? 'fill-warning text-warning-foreground'
+                          : 'text-muted-foreground/60',
                       )}
                     />
-                  </button>
+                  </Button>
                 ))}
-                <span className="ml-2 text-[11px] text-console-faint">
+                <span className="ml-2 text-[11px] text-muted-foreground/60">
                   {rating ? `${rating} / 5` : '未评分'}
                 </span>
               </div>
             </section>
 
             <section>
-              <div className="console-label mb-2">错误标签</div>
-              <input
+              <div className="mb-2 text-[11px] font-medium text-muted-foreground">错误标签</div>
+              <Input
                 value={mistakes}
                 onChange={(event) => setMistakes(event.target.value)}
                 placeholder="追单、提前离场、移动止损…（顿号或逗号分隔）"
-                className="console-input w-full"
+                className="h-8 text-[12px]"
                 maxLength={200}
               />
             </section>
 
             <section>
-              <div className="console-label mb-2">复盘笔记</div>
-              <textarea
+              <div className="mb-2 text-[11px] font-medium text-muted-foreground">复盘笔记</div>
+              <Textarea
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
                 placeholder="当时看到了什么？按计划做了吗？下次怎么改？"
                 rows={5}
                 maxLength={4000}
-                className="console-input w-full resize-y py-2 leading-relaxed"
+                className="text-[12px] [&_textarea]:min-h-24 [&_textarea]:resize-y [&_textarea]:leading-relaxed"
               />
             </section>
           </div>
         )}
 
-        <footer className="flex items-center justify-between gap-3 border-t border-console-line px-5 py-3">
-          <div className="flex min-w-0 items-center gap-2 text-[11px] text-console-faint">
+        <footer className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
+          <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground/60">
             <span className="truncate">
               {detail?.reviewedAt
                 ? `已复盘 ${fmtReviewTime(detail.reviewedAt, 0, true)}`
                 : '只记事实，不改成交'}
             </span>
             {detail && (
-              <button
+              <Button
+                variant="outline"
+                size="xs"
                 onClick={() => void toggleReviewed()}
                 disabled={saving}
-                className="shrink-0 rounded border border-console-line px-2 py-0.5 text-console-ink-2 transition-colors hover:bg-console-hover disabled:opacity-50"
+                className="h-auto shrink-0 px-2 py-0.5 text-[11px] font-normal"
               >
                 {detail.reviewedAt ? '取消标记' : '标记已复盘'}
-              </button>
+              </Button>
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={onClose} className="console-btn console-btn-secondary">
+            <Button variant="outline" size="sm" onClick={onClose} className="h-8 text-[12px]">
               关闭
-            </button>
-            <button
+            </Button>
+            <Button
+              size="sm"
               onClick={() => void save()}
               disabled={!detail || saving}
-              className="console-btn console-btn-primary"
+              className="h-8 text-[12px]"
             >
               {saving ? '保存中…' : '保存复盘'}
-            </button>
+            </Button>
           </div>
         </footer>
-      </aside>
-    </div>
+      </SheetPopup>
+    </Sheet>
   );
 }
 
@@ -448,32 +495,34 @@ function RuleRow({
     { key: 'no', label: '违反', value: false, icon: X },
   ];
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-console-line px-2.5 py-2">
-      <span className="min-w-0 flex-1 text-[12px] leading-snug text-console-ink-2">{rule}</span>
-      <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-console-line p-0.5">
+    <div className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-2">
+      <span className="min-w-0 flex-1 text-[12px] leading-snug text-foreground/80">{rule}</span>
+      <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-border p-0.5">
         {options.map((option) => {
           const Icon = option.icon;
           const active = value === option.value;
           return (
-            <button
+            <Button
               key={option.key}
+              variant="ghost"
+              size="xs"
               onClick={() => onChange(option.value)}
               title={option.label}
               aria-pressed={active}
-              className={clsx(
-                'flex h-6 items-center gap-1 rounded px-1.5 text-[11px] transition-colors',
+              className={cn(
+                'h-6 gap-1 rounded px-1.5 text-[11px] font-normal',
                 active
                   ? option.value === true
-                    ? 'bg-console-gain-soft font-medium text-console-gain'
+                    ? 'bg-success/10 font-medium text-success-foreground hover:bg-success/10'
                     : option.value === false
-                      ? 'bg-console-loss-soft font-medium text-console-loss'
-                      : 'bg-console-selected font-medium text-console-ink'
-                  : 'text-console-faint hover:bg-console-hover hover:text-console-ink',
+                      ? 'bg-destructive/10 font-medium text-destructive-foreground hover:bg-destructive/10'
+                      : 'bg-accent font-medium text-foreground hover:bg-accent'
+                  : 'text-muted-foreground/60 hover:bg-accent hover:text-foreground',
               )}
             >
-              <Icon size={12} strokeWidth={2} />
+              <Icon size={12} strokeWidth={2} className="size-3" />
               <span className="hidden sm:inline">{option.label}</span>
-            </button>
+            </Button>
           );
         })}
       </div>

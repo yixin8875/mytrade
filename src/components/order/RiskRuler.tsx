@@ -39,12 +39,12 @@ export function RiskRuler({
   return (
     <div aria-label="风险尺">
       <div className="flex items-baseline justify-between text-[11px]">
-        <span className="text-tv-muted">风险尺 · 止损为 1R</span>
-        <span className="num font-mono text-tv-faint">入场 {fmtPrice(entry, digits)}</span>
+        <span className="text-muted-foreground">风险尺 · 止损为 1R</span>
+        <span className="num font-mono text-muted-foreground/60">入场 {fmtPrice(entry, digits)}</span>
       </div>
-      <div className="relative mt-2 h-1.5 rounded-full bg-tv-raised">
+      <div className="relative mt-2 h-1.5 rounded-full bg-muted">
         <span
-          className="absolute inset-y-0 rounded-full bg-tv-down/70"
+          className="absolute inset-y-0 rounded-full bg-destructive/70"
           style={{
             left: `${Math.min(entryPct, slPct)}%`,
             width: `${Math.abs(entryPct - slPct)}%`,
@@ -52,7 +52,7 @@ export function RiskRuler({
         />
         {tpPct != null && (
           <span
-            className="absolute inset-y-0 rounded-full bg-tv-up/70"
+            className="absolute inset-y-0 rounded-full bg-success/70"
             style={{
               left: `${Math.min(entryPct, tpPct)}%`,
               width: `${Math.abs(entryPct - tpPct)}%`,
@@ -60,15 +60,15 @@ export function RiskRuler({
           />
         )}
         <span
-          className="absolute -top-1 h-3.5 w-px bg-tv-text"
+          className="absolute -top-1 h-3.5 w-px bg-foreground"
           style={{ left: `${entryPct}%` }}
         />
       </div>
       <div className="mt-1.5 flex items-baseline justify-between gap-3 text-[11px]">
-        <span className="num font-mono text-tv-down">
+        <span className="num font-mono text-destructive-foreground">
           止损 {fmtPrice(sl, digits)} · -1.0R
         </span>
-        <span className="num font-mono text-tv-up">
+        <span className="num font-mono text-success-foreground">
           {tp != null ? `止盈 ${fmtPrice(tp, digits)} · +${tpR?.toFixed(1)}R` : '未设止盈'}
         </span>
       </div>

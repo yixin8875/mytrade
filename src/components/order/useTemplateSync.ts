@@ -59,7 +59,8 @@ export function useTemplateSync({
     setTpTouched(false);
   }, [template.id]);
 
-  // 模板：止损设定后按设置的 R 倍数自动放止盈；用户手动改过就不抢回
+  // 模板：止损设定后按设置的 R 倍数自动放止盈；用户手动改过就不抢回。
+  // 市价单的 rulerEntry 跟着报价走，所以价格一动止盈就按新的 1R 距离重算。
   useEffect(() => {
     if (!armed || tpTouched || !info || !draft.active) return;
     const target = templateTpTarget({
@@ -83,6 +84,7 @@ export function useTemplateSync({
     draft.side,
     draft.price,
     draft.sl,
+    rulerEntry,
     info,
     tick,
     digits,

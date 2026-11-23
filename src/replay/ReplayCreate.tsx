@@ -1,6 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, X } from 'lucide-react';
-import { clsx } from 'clsx';
+import { ChevronRight, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogClose,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPopup,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 import { gateway } from '../gateway/client';
 import type { Bar } from '../gateway/types';
 import { activeTemplate, useApp } from '../store/useApp';
@@ -194,139 +212,151 @@ export function ReplayCreate({ open, onClose }: { open: boolean; onClose: () => 
   };
 
   return (
-    <div
-      data-modal
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(33,28,22,.32)] px-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
       }}
     >
-      <div
-        role="dialog"
+      <DialogPopup
+        data-modal=""
+        showCloseButton={false}
+        bottomStickOnMobile={false}
+        className="max-h-[calc(100vh-48px)] w-[640px] max-w-[640px]"
         aria-label="新建复盘"
-        className="flex max-h-[calc(100vh-48px)] w-[640px] flex-col overflow-hidden rounded-[16px] border border-console-line bg-console-card shadow-[0_24px_64px_rgba(33,28,22,.22)]"
       >
-        <div className="flex items-start justify-between gap-4 border-b border-console-line px-6 py-5">
+        <DialogHeader className="relative flex-row items-start justify-between gap-4 border-b border-border px-6 py-5">
           <div>
-            <div className="text-[15px] font-medium">新建复盘</div>
-            <div className="mt-1 text-[11px] text-console-muted">
+            <DialogTitle className="text-[15px] font-medium leading-none">新建复盘</DialogTitle>
+            <DialogDescription className="mt-1 text-[11px]">
               创建后先检查本地缓存，缺的行情再从网关补齐
-            </div>
+            </DialogDescription>
           </div>
-          <button
-            onClick={onClose}
-            className="grid h-7 w-7 place-items-center rounded-[6px] text-console-muted hover:bg-console-hover hover:text-console-ink"
-            title="关闭"
+          <DialogClose
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="absolute end-4 top-4"
+                title="关闭"
+                aria-label="关闭"
+              />
+            }
           >
-            <X size={16} strokeWidth={1.5} />
-          </button>
-        </div>
+            <X strokeWidth={1.5} />
+          </DialogClose>
+        </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-auto px-6">
-          <section className="border-b border-console-line py-4">
+          <section className="border-b border-border py-4">
             <h3 className="mb-3 text-[12px] font-medium">品种与区间</h3>
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-2 block">
-                <span className="mb-1 block text-[10px] text-console-muted">品种</span>
-                <div className="relative">
-                  <select
-                    value={symbol}
-                    onChange={(event) => setSymbol(event.target.value)}
-                    className="console-input w-full appearance-none pr-8"
-                  >
+                <span className="mb-1 block text-[10px] text-muted-foreground">品种</span>
+                <Select
+                  value={symbol}
+                  onValueChange={(value) => {
+                    if (typeof value === 'string') setSymbol(value);
+                  }}
+                >
+                  <SelectTrigger className="w-full" aria-label="品种">
+                    <SelectValue>
+                      {(value: string | null) => {
+                        const item = symbols.find((entry) => entry.name === value);
+                        return value ? `${value} · ${item?.description ?? ''}` : '选择品种';
+                      }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
                     {symbols.map((item) => (
-                      <option key={item.name} value={item.name}>
+                      <SelectItem key={item.name} value={item.name}>
                         {item.name} · {item.description}
-                      </option>
+                      </SelectItem>
                     ))}
-                  </select>
-                  <ChevronDown
-                    size={14}
-                    strokeWidth={1.5}
-                    className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-console-faint"
-                  />
-                </div>
+                  </SelectPopup>
+                </Select>
               </label>
 
               <div className="col-span-2">
-                <span className="mb-1 block text-[10px] text-console-muted">区间</span>
-                <div className="flex gap-0.5 rounded-[8px] bg-console-hover p-0.5">
+                <span className="mb-1 block text-[10px] text-muted-foreground">区间</span>
+                <div className="flex gap-0.5 rounded-lg bg-muted p-0.5">
                   {RANGES.map((item) => (
-                    <button
+                    <Button
                       key={item.key}
+                      variant={range === item.key ? 'secondary' : 'ghost'}
+                      size="xs"
                       onClick={() => setRange(item.key)}
-                      className={clsx(
-                        'h-7 flex-1 rounded-[6px] text-[11px]',
-                        range === item.key
-                          ? 'bg-console-card text-console-ink shadow-[0_1px_1px_rgba(33,28,22,.06)]'
-                          : 'text-console-muted hover:text-console-ink',
+                      className={cn(
+                        'h-7 flex-1 rounded-md text-[11px]',
+                        range === item.key ? 'text-foreground' : 'text-muted-foreground',
                       )}
                     >
                       {item.label}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
 
               <label className="block">
-                <span className="mb-1 block text-[10px] text-console-muted">开始时间</span>
-                <input
+                <span className="mb-1 block text-[10px] text-muted-foreground">开始时间</span>
+                <Input
                   type="datetime-local"
                   value={start}
                   onChange={(event) => {
                     setStart(event.target.value);
                     setRange('custom');
                   }}
-                  className="console-input w-full font-mono text-[11px]"
+                  className="w-full font-mono text-[11px]"
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-[10px] text-console-muted">结束时间</span>
-                <input
+                <span className="mb-1 block text-[10px] text-muted-foreground">结束时间</span>
+                <Input
                   type="datetime-local"
                   value={end}
                   onChange={(event) => {
                     setEnd(event.target.value);
                     setRange('custom');
                   }}
-                  className="console-input w-full font-mono text-[11px]"
+                  className="w-full font-mono text-[11px]"
                 />
               </label>
 
               <label className="block">
-                <span className="mb-1 block text-[10px] text-console-muted">默认显示周期</span>
-                <div className="relative">
-                  <select
-                    value={timeframe}
-                    onChange={(event) => setTimeframe(event.target.value)}
-                    className="console-input w-full appearance-none pr-8"
-                  >
+                <span className="mb-1 block text-[10px] text-muted-foreground">默认显示周期</span>
+                <Select
+                  value={timeframe}
+                  onValueChange={(value) => {
+                    if (typeof value === 'string') setTimeframe(value);
+                  }}
+                >
+                  <SelectTrigger className="w-full" aria-label="默认显示周期">
+                    <SelectValue>
+                      {(value: string | null) => (value ? `${value}m` : '选择周期')}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
                     {TIMEFRAMES.map((item) => (
-                      <option key={item} value={item}>
+                      <SelectItem key={item} value={item}>
                         {item}m
-                      </option>
+                      </SelectItem>
                     ))}
-                  </select>
-                  <ChevronDown
-                    size={14}
-                    strokeWidth={1.5}
-                    className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-console-faint"
-                  />
-                </div>
+                  </SelectPopup>
+                </Select>
               </label>
               <div>
-                <span className="mb-1 block text-[10px] text-console-muted">预热根数</span>
-                <div className="console-input flex w-full items-center font-mono text-[11px] text-console-muted">
+                <span className="mb-1 block text-[10px] text-muted-foreground">预热根数</span>
+                <div className="flex h-8.5 w-full items-center rounded-lg border border-input bg-background px-[calc(--spacing(3)-1px)] font-mono text-[11px] text-muted-foreground sm:h-7.5">
                   1,000 根 M1
                 </div>
               </div>
             </div>
           </section>
 
-          <section className="border-b border-console-line py-4">
+          <section className="border-b border-border py-4">
             <div className="flex items-baseline justify-between gap-4">
               <h3 className="text-[12px] font-medium">数据覆盖</h3>
-              <span className="text-[10px] text-console-muted">
+              <span className="text-[10px] text-muted-foreground">
                 可用至 {latest ? fmtDateTime(latest) : '读取中…'}
               </span>
             </div>
@@ -334,7 +364,7 @@ export function ReplayCreate({ open, onClose }: { open: boolean; onClose: () => 
               {Array.from({ length: 24 }, (_, index) => (
                 <span
                   key={index}
-                  className={clsx(
+                  className={cn(
                     'h-2 flex-1 rounded-[2px]',
                     index < (coverage?.filled ?? 0)
                       ? 'bg-console-gain'
@@ -345,11 +375,11 @@ export function ReplayCreate({ open, onClose }: { open: boolean; onClose: () => 
                 />
               ))}
             </div>
-            <div className="mt-1.5 flex justify-between font-mono text-[10px] text-console-muted">
+            <div className="mt-1.5 flex justify-between font-mono text-[10px] text-muted-foreground">
               <span>{start ? start.slice(0, 10) : '—'}</span>
               <span>{end ? end.slice(0, 10) : '—'}</span>
             </div>
-            <div className="mt-2.5 flex flex-wrap items-center gap-3.5 text-[10px] text-console-muted">
+            <div className="mt-2.5 flex flex-wrap items-center gap-3.5 text-[10px] text-muted-foreground">
               <span>{estimate ? `预计 ${estimate.bars.toLocaleString()} 根 M1` : '等待区间'}</span>
               <span>{estimate ? `约 ${estimate.size}` : '—'}</span>
               <span>
@@ -365,82 +395,87 @@ export function ReplayCreate({ open, onClose }: { open: boolean; onClose: () => 
             </div>
           </section>
 
-          <section className="border-b border-console-line py-4">
+          <section className="border-b border-border py-4">
             <h3 className="mb-3 text-[12px] font-medium">初始账户</h3>
             <div className="grid grid-cols-3 gap-3">
               <label className="block">
-                <span className="mb-1 block text-[10px] text-console-muted">初始资金</span>
-                <input
+                <span className="mb-1 block text-[10px] text-muted-foreground">初始资金</span>
+                <Input
                   value={balance}
                   onChange={(event) => setBalance(event.target.value)}
                   inputMode="decimal"
-                  className="console-input w-full font-mono text-[11px]"
+                  className="w-full font-mono text-[11px]"
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-[10px] text-console-muted">杠杆</span>
-                <input
+                <span className="mb-1 block text-[10px] text-muted-foreground">杠杆</span>
+                <Input
                   value={leverage}
                   onChange={(event) => setLeverage(event.target.value)}
                   inputMode="numeric"
-                  className="console-input w-full font-mono text-[11px]"
+                  className="w-full font-mono text-[11px]"
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-[10px] text-console-muted">账户货币</span>
-                <input
+                <span className="mb-1 block text-[10px] text-muted-foreground">账户货币</span>
+                <Input
                   value={currency}
                   onChange={(event) => setCurrency(event.target.value.toUpperCase())}
-                  className="console-input w-full font-mono text-[11px]"
+                  className="w-full font-mono text-[11px]"
                 />
               </label>
             </div>
           </section>
 
           <section className="py-4">
-            <button
+            <Button
+              variant="ghost"
               onClick={() => setAdvanced((value) => !value)}
-              className="flex w-full items-center justify-between gap-4 text-left"
+              className="h-auto w-full justify-between gap-4 p-0 text-left hover:bg-transparent"
             >
               <div>
                 <h3 className="text-[12px] font-medium">成本与撮合</h3>
-                <p className="mt-1 text-[10px] text-console-muted">
+                <p className="mt-1 text-[10px] font-normal text-muted-foreground">
                   点差 {spread || '—'} points · 佣金 {commission || '0'} / 手 / 单边 · 固定点差
                 </p>
               </div>
               <ChevronRight
-                size={14}
                 strokeWidth={1.5}
-                className={clsx('text-console-muted transition-transform', advanced && 'rotate-90')}
+                className={cn(
+                  'size-3.5 shrink-0 text-muted-foreground transition-transform',
+                  advanced && 'rotate-90',
+                )}
               />
-            </button>
+            </Button>
             {advanced && (
               <div className="mt-3 grid grid-cols-3 gap-3">
                 <label className="block">
-                  <span className="mb-1 block text-[10px] text-console-muted">点差（points）</span>
-                  <input
+                  <span className="mb-1 block text-[10px] text-muted-foreground">
+                    点差（points）
+                  </span>
+                  <Input
                     value={spread}
                     onChange={(event) => setSpread(event.target.value)}
                     inputMode="numeric"
-                    className="console-input w-full font-mono text-[11px]"
+                    className="w-full font-mono text-[11px]"
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-[10px] text-console-muted">佣金 / 手</span>
-                  <input
+                  <span className="mb-1 block text-[10px] text-muted-foreground">佣金 / 手</span>
+                  <Input
                     value={commission}
                     onChange={(event) => setCommission(event.target.value)}
                     inputMode="decimal"
-                    className="console-input w-full font-mono text-[11px]"
+                    className="w-full font-mono text-[11px]"
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-[10px] text-console-muted">单笔风险 %</span>
-                  <input
+                  <span className="mb-1 block text-[10px] text-muted-foreground">单笔风险 %</span>
+                  <Input
                     value={riskPercent}
                     onChange={(event) => setRiskPercent(event.target.value)}
                     inputMode="decimal"
-                    className="console-input w-full font-mono text-[11px]"
+                    className="w-full font-mono text-[11px]"
                   />
                 </label>
               </div>
@@ -448,24 +483,23 @@ export function ReplayCreate({ open, onClose }: { open: boolean; onClose: () => 
           </section>
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-console-line px-6 py-4">
+        <DialogFooter className="flex-row items-center justify-end gap-2 border-t border-border bg-card px-6 py-4">
           <span
-            className={clsx('mr-auto text-[10px]', error ? 'text-console-loss' : 'text-console-muted')}
+            className={cn(
+              'mr-auto text-[10px]',
+              error ? 'text-destructive-foreground' : 'text-muted-foreground',
+            )}
           >
             {error ?? '不会调用任何实盘下单接口'}
           </span>
-          <button onClick={onClose} className="console-btn console-btn-secondary">
+          <Button variant="secondary" onClick={onClose}>
             取消
-          </button>
-          <button
-            onClick={submit}
-            disabled={busy}
-            className="console-btn console-btn-primary disabled:opacity-50"
-          >
+          </Button>
+          <Button onClick={submit} disabled={busy}>
             创建并准备数据
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
   );
 }

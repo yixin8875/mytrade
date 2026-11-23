@@ -25,15 +25,15 @@ function component(overrides: Partial<ScoreComponent> = {}): ScoreComponent {
 
 describe('scoreTone', () => {
   it('按 75 / 50 分档', () => {
-    expect(scoreTone(90)).toBe('text-console-gain');
-    expect(scoreTone(75)).toBe('text-console-gain');
-    expect(scoreTone(74.9)).toBe('text-console-accent');
-    expect(scoreTone(50)).toBe('text-console-accent');
-    expect(scoreTone(49.9)).toBe('text-console-warn');
+    expect(scoreTone(90)).toBe('text-success-foreground');
+    expect(scoreTone(75)).toBe('text-success-foreground');
+    expect(scoreTone(74.9)).toBe('text-brand');
+    expect(scoreTone(50)).toBe('text-brand');
+    expect(scoreTone(49.9)).toBe('text-warning-foreground');
   });
 
   it('没有分数时用弱化色', () => {
-    expect(scoreTone(null)).toBe('text-console-faint');
+    expect(scoreTone(null)).toBe('text-muted-foreground/60');
   });
 });
 

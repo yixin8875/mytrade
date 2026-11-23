@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { clsx } from 'clsx';
 import {
   Archive,
   Check,
@@ -12,6 +11,19 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogClose,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
 import { gateway } from '../gateway/client';
 import { WEEKDAYS } from '../lib/review';
 import {
@@ -120,117 +132,125 @@ export function RoutinesView() {
   const isToday = Boolean(day && day.date === day.today);
 
   return (
-    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
+    <div className="console-scope h-full min-h-0 overflow-auto bg-sidebar">
       <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-[24px] font-medium tracking-[-0.01em]">例行清单</h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">
+            <p className="mt-1.5 text-[13px] text-muted-foreground">
               盘前、盘中、盘后各一组固定动作
               {activeLogin ? ` · 账户 ${activeLogin}` : ''} · 与盈亏统计完全独立
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => void load(anchor ?? undefined)}
-              disabled={loading}
-              className="console-btn console-btn-secondary"
-            >
-              <RefreshCw size={14} strokeWidth={1.5} className={clsx(loading && 'animate-spin')} />
+            <Button onClick={() => void load(anchor ?? undefined)} disabled={loading} variant="outline">
+              <RefreshCw size={14} strokeWidth={1.5} className={cn(loading && 'animate-spin')} />
               {loading ? '读取中…' : '刷新'}
-            </button>
-            <button onClick={() => setManageOpen(true)} className="console-btn console-btn-primary">
+            </Button>
+            <Button onClick={() => setManageOpen(true)}>
               <Pencil size={13} strokeWidth={1.8} />
               管理清单
-            </button>
+            </Button>
           </div>
         </header>
 
         {error && (
-          <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
+          <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive-foreground">
             读取失败：{error}
           </div>
         )}
 
         {empty ? (
-          <section className="console-card mt-6 flex flex-col items-center gap-3 px-6 py-16 text-center">
-            <ListChecks size={26} strokeWidth={1.4} className="text-console-faint" />
+          <Card className="mt-6 flex flex-col items-center gap-3 px-6 py-16 text-center">
+            <ListChecks size={26} strokeWidth={1.4} className="text-muted-foreground/60" />
             <div>
               <p className="text-[14px] font-medium">还没有例行清单</p>
-              <p className="mt-1 text-[12px] text-console-muted">
+              <p className="mt-1 text-[12px] text-muted-foreground">
                 先套用一套常用的盘前 / 盘中 / 盘后动作，之后随时可以改。
               </p>
             </div>
             <div className="mt-1 flex items-center gap-2">
-              <button
-                onClick={() => void seed()}
-                disabled={seeding}
-                className="console-btn console-btn-primary"
-              >
+              <Button onClick={() => void seed()} disabled={seeding}>
                 <Sparkles size={13} strokeWidth={1.8} />
                 {seeding ? '生成中…' : '生成默认清单'}
-              </button>
-              <button onClick={() => setManageOpen(true)} className="console-btn console-btn-secondary">
+              </Button>
+              <Button onClick={() => setManageOpen(true)} variant="outline">
                 <Plus size={13} strokeWidth={1.8} />
                 自己写
-              </button>
+              </Button>
             </div>
-          </section>
+          </Card>
         ) : (
           <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
             <div className="min-w-0 space-y-4">
-              <div className="console-card flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <Card className="flex flex-row flex-wrap items-center justify-between gap-3 px-4 py-3">
                 <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => go(-1)}
-                    disabled={loading}
-                    className="console-icon-btn"
-                    aria-label="前一天"
-                  >
-                    <ChevronLeft size={16} strokeWidth={1.6} />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          onClick={() => go(-1)}
+                          disabled={loading}
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label="前一天"
+                        />
+                      }
+                    >
+                      <ChevronLeft size={16} strokeWidth={1.6} />
+                    </TooltipTrigger>
+                    <TooltipPopup>前一天</TooltipPopup>
+                  </Tooltip>
                   <div className="min-w-[132px] text-center">
                     <div className="text-[13px] font-medium">
                       {day ? dateLabel(day.date, day.today) : '—'}
                     </div>
-                    <div className="num font-mono text-[10px] text-console-faint">{day?.date ?? ''}</div>
+                    <div className="num font-mono text-[10px] text-muted-foreground/60">{day?.date ?? ''}</div>
                   </div>
-                  <button
-                    onClick={() => go(1)}
-                    disabled={loading}
-                    className="console-icon-btn"
-                    aria-label="后一天"
-                  >
-                    <ChevronRight size={16} strokeWidth={1.6} />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          onClick={() => go(1)}
+                          disabled={loading}
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label="后一天"
+                        />
+                      }
+                    >
+                      <ChevronRight size={16} strokeWidth={1.6} />
+                    </TooltipTrigger>
+                    <TooltipPopup>后一天</TooltipPopup>
+                  </Tooltip>
                   {day && !isToday && (
-                    <button onClick={() => void load(day.today)} className="console-chip ml-1">
+                    <Button onClick={() => void load(day.today)} size="xs" variant="outline" className="ml-1">
                       回到今天
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <div className="flex items-center gap-3">
                   {day && !day.editable && (
-                    <span className="rounded border border-console-line px-1.5 py-0.5 text-[10px] text-console-faint">
+                    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground/60">
                       只读
                     </span>
                   )}
                   <div className="flex items-center gap-2">
-                    <div className="h-1.5 w-28 overflow-hidden rounded-full bg-console-line/60">
+                    <div className="h-1.5 w-28 overflow-hidden rounded-full bg-border/60">
                       <div
-                        className="h-full rounded-full bg-console-accent transition-[width]"
+                        className="h-full rounded-full bg-brand transition-[width]"
                         style={{ width: `${Math.round((day?.summary.rate ?? 0) * 100)}%` }}
                       />
                     </div>
-                    <span className="num font-mono text-[12px] text-console-muted">
+                    <span className="num font-mono text-[12px] text-muted-foreground">
                       {day ? `${day.summary.done}/${day.summary.total}` : '—'}
-                      <span className="ml-1 text-console-faint">
+                      <span className="ml-1 text-muted-foreground/60">
                         {rateText(day?.summary.rate ?? null)}
                       </span>
                     </span>
                   </div>
                 </div>
-              </div>
+              </Card>
 
               {PHASE_ORDER.map((phase) => (
                 <PhaseLane
@@ -244,7 +264,7 @@ export function RoutinesView() {
               ))}
 
               {day && day.items.length === 0 && (
-                <p className="px-1 text-[12px] text-console-faint">
+                <p className="px-1 text-[12px] text-muted-foreground/60">
                   这一天没有需要执行的例行。
                   {day.editable ? '可以在「管理清单」里调整星期安排。' : ''}
                 </p>
@@ -280,60 +300,61 @@ function PhaseLane({
   onToggle: (id: number, next: boolean) => void;
 }) {
   return (
-    <section className="console-card overflow-hidden">
-      <div className="flex items-center justify-between border-b border-console-line px-4 py-2.5">
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <div className="flex items-baseline gap-2">
           <h2 className="text-[13px] font-medium">{PHASE_LABELS[phase]}</h2>
-          <span className="text-[11px] text-console-faint">{PHASE_HINTS[phase]}</span>
+          <span className="text-[11px] text-muted-foreground/60">{PHASE_HINTS[phase]}</span>
         </div>
-        <span className="num font-mono text-[11px] text-console-faint">
+        <span className="num font-mono text-[11px] text-muted-foreground/60">
           {items.filter((item) => item.done).length}/{items.length}
         </span>
       </div>
       {items.length === 0 ? (
-        <p className="px-4 py-3 text-[12px] text-console-faint">这一组今天没有安排</p>
+        <p className="px-4 py-3 text-[12px] text-muted-foreground/60">这一组今天没有安排</p>
       ) : (
-        <ul className="divide-y divide-console-line/60">
+        <ul className="divide-y divide-border/60">
           {items.map((item) => (
             <li key={item.id}>
-              <button
+              <Button
                 onClick={() => onToggle(item.id, !item.done)}
                 disabled={!editable || pending === item.id}
-                className={clsx(
-                  'flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors',
-                  editable && 'hover:bg-console-hover/60',
+                variant="ghost"
+                className={cn(
+                  'h-auto w-full justify-start gap-3 rounded-none border-0 px-4 py-2.5 text-left transition-colors',
+                  editable && 'hover:bg-accent/60',
                   !editable && 'cursor-default',
                 )}
               >
                 <span
-                  className={clsx(
+                  className={cn(
                     'flex h-[17px] w-[17px] shrink-0 items-center justify-center rounded-[4px] border',
                     item.done
-                      ? 'border-console-accent bg-console-accent text-console-canvas'
-                      : 'border-console-line-strong text-transparent',
+                      ? 'border-brand bg-brand text-sidebar'
+                      : 'border-input text-transparent',
                   )}
                 >
                   <Check size={12} strokeWidth={2.4} />
                 </span>
                 <span
-                  className={clsx(
+                  className={cn(
                     'min-w-0 flex-1 text-[13px]',
-                    item.done ? 'text-console-faint line-through' : 'text-console-ink',
+                    item.done ? 'text-muted-foreground/60 line-through' : 'text-foreground',
                   )}
                 >
                   {item.title}
                 </span>
                 {item.weekdays.length < 7 && (
-                  <span className="shrink-0 text-[10px] text-console-faint">
+                  <span className="shrink-0 text-[10px] text-muted-foreground/60">
                     {weekdayMaskText(item.weekdays)}
                   </span>
                 )}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -349,15 +370,15 @@ function Heatmap({ heat }: { heat: RoutineHeatmap | null }) {
   }, [heat]);
 
   return (
-    <section className="console-card h-fit overflow-hidden">
-      <div className="border-b border-console-line px-4 py-2.5">
+    <Card className="h-fit overflow-hidden">
+      <div className="border-b border-border px-4 py-2.5">
         <div className="flex items-center justify-between">
           <h2 className="text-[13px] font-medium">最近 13 周</h2>
-          <span className="num font-mono text-[11px] text-console-muted">
+          <span className="num font-mono text-[11px] text-muted-foreground">
             {rateText(heat?.summary.rate ?? null)}
           </span>
         </div>
-        <p className="mt-1 text-[11px] text-console-faint">
+        <p className="mt-1 text-[11px] text-muted-foreground/60">
           {heat
             ? `${streakText(heat.summary.streak)} · 共完成 ${heat.summary.done}/${heat.summary.due}`
             : '读取中…'}
@@ -367,7 +388,7 @@ function Heatmap({ heat }: { heat: RoutineHeatmap | null }) {
         <div className="flex gap-2">
           <div className="flex flex-col justify-between py-[1px]">
             {WEEKDAYS.map((label) => (
-              <span key={label} className="h-[14px] text-[9px] leading-[14px] text-console-faint">
+              <span key={label} className="h-[14px] text-[9px] leading-[14px] text-muted-foreground/60">
                 {label}
               </span>
             ))}
@@ -388,10 +409,10 @@ function Heatmap({ heat }: { heat: RoutineHeatmap | null }) {
                   <div
                     key={key}
                     title={heatCellTitle(key, cell?.due ?? 0, cell?.done ?? 0, cell?.future ?? false)}
-                    className={clsx(
+                    className={cn(
                       'rounded-[3px] border border-transparent',
                       cell?.future ? 'bg-transparent' : heatTone(cell?.rate ?? null),
-                      cell?.date === heat?.today && 'outline outline-1 outline-console-accent/70',
+                      cell?.date === heat?.today && 'outline outline-1 outline-brand/70',
                     )}
                   />
                 );
@@ -399,16 +420,16 @@ function Heatmap({ heat }: { heat: RoutineHeatmap | null }) {
             )}
           </div>
         </div>
-        <div className="mt-3 flex items-center justify-between text-[10px] text-console-faint">
+        <div className="mt-3 flex items-center justify-between text-[10px] text-muted-foreground/60">
           <span>越接近绿色完成度越高</span>
           <div className="flex items-center gap-1">
-            <span className="h-[10px] w-[10px] rounded-[2px] bg-console-line/25" />
-            <span className="h-[10px] w-[10px] rounded-[2px] bg-console-warn/35" />
-            <span className="h-[10px] w-[10px] rounded-[2px] bg-console-gain/40" />
+            <span className="h-[10px] w-[10px] rounded-[2px] bg-border/25" />
+            <span className="h-[10px] w-[10px] rounded-[2px] bg-warning/35" />
+            <span className="h-[10px] w-[10px] rounded-[2px] bg-success/40" />
           </div>
         </div>
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -505,28 +526,27 @@ function RoutineManager({
   const archived = (list ?? []).filter((routine) => routine.archivedAt);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/55 p-6"
-      onClick={onClose}
-    >
-      <div
-        className="console-card mt-8 w-full max-w-[760px]"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-console-line px-5 py-3.5">
-          <div>
-            <h2 className="text-[15px] font-medium">管理例行清单</h2>
-            <p className="mt-0.5 text-[11px] text-console-faint">
-              星期决定哪天出现；归档不删除历史打勾记录。
-            </p>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogPopup showCloseButton={false} className="max-w-[760px]">
+        <DialogHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <DialogTitle className="text-[15px]">管理例行清单</DialogTitle>
+              <p className="mt-0.5 text-[11px] text-muted-foreground/60">
+                星期决定哪天出现；归档不删除历史打勾记录。
+              </p>
+            </div>
+            <DialogClose
+              render={<Button size="icon-sm" variant="ghost" aria-label="关闭" />}
+              onClick={onClose}
+            >
+              <X size={16} strokeWidth={1.6} />
+            </DialogClose>
           </div>
-          <button onClick={onClose} className="console-icon-btn" aria-label="关闭">
-            <X size={16} strokeWidth={1.6} />
-          </button>
-        </div>
+        </DialogHeader>
 
-        <div className="max-h-[60vh] space-y-2 overflow-auto px-5 py-4">
-          {list === null && <p className="text-[12px] text-console-faint">读取中…</p>}
+        <DialogPanel className="space-y-2">
+          {list === null && <p className="text-[12px] text-muted-foreground/60">读取中…</p>}
           {active.map((routine) => {
             const key = String(routine.id);
             const draft = drafts[key];
@@ -548,11 +568,11 @@ function RoutineManager({
             );
           })}
           {list !== null && active.length === 0 && !creating && (
-            <p className="py-4 text-center text-[12px] text-console-faint">还没有例行，先加一条。</p>
+            <p className="py-4 text-center text-[12px] text-muted-foreground/60">还没有例行，先加一条。</p>
           )}
 
           {creating ? (
-            <div className="rounded-lg border border-console-accent/40 bg-console-selected p-3">
+            <div className="rounded-lg border border-brand/40 bg-accent p-3">
               <DraftRow
                 draft={fresh}
                 dirty
@@ -568,23 +588,24 @@ function RoutineManager({
               />
             </div>
           ) : (
-            <button
+            <Button
               onClick={() => setCreating(true)}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-console-line px-3 py-2 text-[12px] text-console-muted hover:bg-console-hover/50"
+              variant="outline"
+              className="w-full border-dashed text-muted-foreground"
             >
               <Plus size={13} strokeWidth={1.8} />
               添加例行
-            </button>
+            </Button>
           )}
 
           {archived.length > 0 && (
             <div className="pt-3">
-              <div className="console-label pb-2">已归档</div>
+              <div className="pb-2 text-[11px] font-medium text-muted-foreground">已归档</div>
               <div className="space-y-1">
                 {archived.map((routine) => (
                   <div
                     key={routine.id}
-                    className="flex items-center justify-between rounded border border-console-line/60 px-3 py-1.5 text-[12px] text-console-faint"
+                    className="flex items-center justify-between rounded border border-border/60 px-3 py-1.5 text-[12px] text-muted-foreground/60"
                   >
                     <span className="truncate">
                       {PHASE_LABELS[routine.phase]} · {routine.title}
@@ -595,9 +616,9 @@ function RoutineManager({
               </div>
             </div>
           )}
-        </div>
-      </div>
-    </div>
+        </DialogPanel>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -627,21 +648,22 @@ function DraftRow({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <input
+      <Input
         value={draft.title}
         onChange={(event) => onChange({ ...draft, title: event.target.value })}
         placeholder="例行动作"
-        className="console-input min-w-[180px] flex-1"
+        className="min-w-[180px] flex-1"
       />
       <div className="flex items-center gap-0.5">
         {PHASE_ORDER.map((phase) => (
-          <button
+          <Button
             key={phase}
             onClick={() => onChange({ ...draft, phase })}
-            className={clsx('console-chip', draft.phase === phase && 'console-chip-active')}
+            size="xs"
+            variant={draft.phase === phase ? 'default' : 'outline'}
           >
             {PHASE_LABELS[phase]}
-          </button>
+          </Button>
         ))}
       </div>
       <div className="flex items-center gap-0.5">
@@ -649,39 +671,39 @@ function DraftRow({
           const day = index + 1;
           const on = draft.weekdays.includes(day);
           return (
-            <button
+            <Button
               key={label}
               onClick={() => toggleWeekday(day)}
               title={`周${label}`}
-              className={clsx(
-                'flex h-[22px] w-[22px] items-center justify-center rounded text-[10px] transition-colors',
-                on
-                  ? 'bg-console-accent text-console-canvas'
-                  : 'bg-console-line/40 text-console-muted hover:bg-console-line/70',
-              )}
+              size="icon-xs"
+              variant={on ? 'default' : 'ghost'}
+              className="size-[22px] text-[10px]"
             >
               {label}
-            </button>
+            </Button>
           );
         })}
       </div>
       <div className="ml-auto flex items-center gap-1">
         {onCancel && (
-          <button onClick={onCancel} className="console-btn console-btn-ghost">
+          <Button onClick={onCancel} variant="ghost">
             取消
-          </button>
+          </Button>
         )}
-        <button
-          onClick={onSave}
-          disabled={!dirty || saving}
-          className="console-btn console-btn-secondary disabled:opacity-40"
-        >
+        <Button onClick={onSave} disabled={!dirty || saving} variant="outline">
           {saving ? '保存中…' : '保存'}
-        </button>
+        </Button>
         {onArchive && (
-          <button onClick={onArchive} className="console-icon-btn" aria-label="归档">
-            <Archive size={14} strokeWidth={1.6} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button onClick={onArchive} size="icon-sm" variant="ghost" aria-label="归档" />
+              }
+            >
+              <Archive size={14} strokeWidth={1.6} />
+            </TooltipTrigger>
+            <TooltipPopup>归档</TooltipPopup>
+          </Tooltip>
         )}
       </div>
     </div>

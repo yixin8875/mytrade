@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { Camera, ChartCandlestick, Play, X } from 'lucide-react';
 import { TradeChart } from './TradeChart';
 import { isShotMeta, shotY, type ShotMeta } from '../chart/tv/shotMeta';
@@ -7,6 +7,9 @@ import { fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import { shotUrl } from '../lib/shots';
 import { useTradeReplay } from '../replay/useTradeReplay';
 import type { JournalRecord } from '../gateway/types';
+import { Button } from './ui/button';
+import { Dialog, DialogDescription, DialogPopup, DialogTitle } from './ui/dialog';
+import { Tabs, TabsList, TabsTab } from './ui/tabs';
 
 const CLOSED_BY: Record<string, string> = {
   sl: '止损',
@@ -32,14 +35,6 @@ export function TradeDetailModal({
   const [meta, setMeta] = useState<ShotMeta | null>(null);
   const replay = useTradeReplay();
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   // 截图旁边的价格锚点；老截图没有旁车文件，按无坐标处理
   useEffect(() => {
     setMeta(null);
@@ -60,85 +55,89 @@ export function TradeDetailModal({
   const closedBy = record.closed_by ? CLOSED_BY[record.closed_by] ?? record.closed_by : null;
 
   return (
-    <div
-      className="console-scope fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
-      onClick={onClose}
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
     >
-      <div
-        className="flex h-[min(640px,92vh)] w-[min(1180px,96vw)] flex-col overflow-hidden rounded-xl border border-console-line bg-console-canvas shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-console-line px-4 py-2.5">
+      <DialogPopup className="console-scope h-[min(640px,92vh)] w-[min(1180px,96vw)] max-w-none gap-0 p-0">
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2.5">
           <span
-            className={clsx(
+            className={cn(
               'h-1.5 w-1.5 rounded-full',
-              record.side === 'buy' ? 'bg-console-gain' : 'bg-console-loss',
+              record.side === 'buy' ? 'bg-success' : 'bg-destructive',
             )}
           />
-          <span className="text-[13px] font-medium">{record.symbol}</span>
+          <DialogTitle className="text-[13px] font-medium">{record.symbol}</DialogTitle>
+          <DialogDescription className="sr-only">交易详情</DialogDescription>
           <span
-            className={clsx(
+            className={cn(
               'text-[11px]',
-              record.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
+              record.side === 'buy' ? 'text-success-foreground' : 'text-destructive-foreground',
             )}
           >
             {record.side === 'buy' ? '多' : '空'}
           </span>
-          <span className="num font-mono text-[11px] text-console-muted">
+          <span className="num font-mono text-[11px] text-muted-foreground">
             {fmtVolume(record.volume)} 手
           </span>
-          <span className={clsx('num font-mono text-[12px] font-medium', signedClass(record.profit))}>
+          <span className={cn('num font-mono text-[12px] font-medium', signedClass(record.profit))}>
             {fmtSigned(record.profit)}
           </span>
           {record.tag && (
-            <span className="rounded bg-console-hover px-1.5 py-0.5 text-[10px] text-console-ink-2">
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground/80">
               {record.tag}
             </span>
           )}
-          {closedBy && <span className="text-[11px] text-console-faint">平仓：{closedBy}</span>}
+          {closedBy && <span className="text-[11px] text-muted-foreground/60">平仓：{closedBy}</span>}
           <span className="flex-1" />
 
-          <button
+          <Button
+            size="sm"
             onClick={() => {
               if (replay.start(record) === 'opened') onClose();
             }}
             title="创建或打开这笔交易的回放会话"
-            className="console-btn console-btn-primary flex items-center gap-1.5"
+            className="gap-1.5 px-2.5"
           >
             <Play size={13} strokeWidth={1.6} />
             在回放中重演
-          </button>
+          </Button>
 
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setTab('chart')}
-              className={clsx('console-chip flex items-center gap-1.5', tab === 'chart' && 'console-chip-active')}
-            >
-              <ChartCandlestick size={13} strokeWidth={1.6} />
-              图表
-            </button>
-            <button
-              onClick={() => setTab('shot')}
-              disabled={!record.has_shot}
-              title={record.has_shot ? '成交时保存的图表截图' : '这笔交易没有保存截图'}
-              className={clsx(
-                'console-chip flex items-center gap-1.5',
-                tab === 'shot' && 'console-chip-active',
-                !record.has_shot && 'cursor-not-allowed opacity-40',
-              )}
-            >
-              <Camera size={13} strokeWidth={1.6} />
-              截图
-            </button>
-          </div>
+          <Tabs
+            value={tab}
+            onValueChange={(next) => {
+              if (next === 'chart' || next === 'shot') setTab(next);
+            }}
+            className="w-auto gap-0"
+          >
+            <TabsList variant="underline" className="h-8 gap-1">
+              <TabsTab value="chart" className="h-7 gap-1.5 px-2 text-[11px]">
+                <ChartCandlestick size={13} strokeWidth={1.6} />
+                图表
+              </TabsTab>
+              <TabsTab
+                value="shot"
+                disabled={!record.has_shot}
+                title={record.has_shot ? '成交时保存的图表截图' : '这笔交易没有保存截图'}
+                className="h-7 gap-1.5 px-2 text-[11px]"
+              >
+                <Camera size={13} strokeWidth={1.6} />
+                截图
+              </TabsTab>
+            </TabsList>
+          </Tabs>
 
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={onClose}
             aria-label="关闭"
-            className="ml-1 flex h-7 w-7 items-center justify-center rounded-md text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+            className="ml-1"
           >
             <X size={15} strokeWidth={1.6} />
-          </button>
+          </Button>
         </header>
 
         <div className="min-h-0 flex-1 p-4">
@@ -149,7 +148,7 @@ export function TradeDetailModal({
               <img
                 src={shotUrl(record)}
                 alt={`交易 ${record.position_id} 的图表截图`}
-                className="block max-h-full max-w-full rounded-lg border border-console-line object-contain"
+                className="block max-h-full max-w-full rounded-lg border border-border object-contain"
               />
               {meta && <ShotAnnotations meta={meta} record={record} />}
               {!meta && (
@@ -163,8 +162,8 @@ export function TradeDetailModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -186,7 +185,7 @@ function ShotAnnotations({ meta, record }: { meta: ShotMeta; record: JournalReco
       <PriceMarker
         y={exit.y}
         edge={exit.edge}
-        color={record.profit >= 0 ? '#0f7a55' : '#c2413a'}
+        color={record.profit >= 0 ? '#059669' : '#dc2626'}
         side="right"
         label={`出场 ${fmtPrice(record.exit_price, meta.digits)}`}
       />
@@ -210,7 +209,7 @@ function PriceMarker({
   const arrow = edge === 'above' ? ' ↑' : edge === 'below' ? ' ↓' : '';
   const tag = (
     <span
-      className={clsx(
+      className={cn(
         'shrink-0 px-2 py-0.5 text-[11px] font-medium text-white shadow-sm',
         side === 'left' ? 'rounded-r-md' : 'rounded-l-md',
       )}

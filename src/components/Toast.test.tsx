@@ -3,6 +3,15 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useApp } from '../store/useApp';
 import { Toast } from './Toast';
+import { ToastProvider } from './ui/toast';
+
+function renderToast() {
+  return render(
+    <ToastProvider position="bottom-center">
+      <Toast />
+    </ToastProvider>,
+  );
+}
 
 describe('Toast', () => {
   beforeEach(() => {
@@ -11,9 +20,9 @@ describe('Toast', () => {
 
   it('普通提示点击关闭', async () => {
     useApp.setState({ toast: { id: 1, kind: 'info', text: '已同步交易日志', action: null } });
-    render(<Toast />);
+    renderToast();
 
-    await userEvent.click(screen.getByText('已同步交易日志'));
+    await userEvent.click(await screen.findByText('已同步交易日志'));
 
     expect(useApp.getState().toast).toBeNull();
   });
@@ -28,16 +37,16 @@ describe('Toast', () => {
         action: { label: '撤销', run },
       },
     });
-    render(<Toast />);
+    renderToast();
 
-    await userEvent.click(screen.getByRole('button', { name: '撤销' }));
+    await userEvent.click(await screen.findByRole('button', { name: '撤销' }));
 
     expect(run).toHaveBeenCalledTimes(1);
     expect(useApp.getState().toast).toBeNull();
   });
 
   it('没有提示时不渲染', () => {
-    const { container } = render(<Toast />);
+    const { container } = renderToast();
     expect(container).toBeEmptyDOMElement();
   });
 });

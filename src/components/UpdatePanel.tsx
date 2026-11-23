@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Download, RefreshCw, X } from 'lucide-react';
+import { Button } from './ui/button';
+import { Progress, ProgressIndicator, ProgressTrack } from './ui/progress';
 import {
   checkForUpdates,
   currentUpdateState,
@@ -52,23 +54,25 @@ export function UpdatePanel() {
   const downloading = state.phase === 'downloading';
 
   return (
-    <div className="fixed bottom-8 right-3 z-50 w-[324px] overflow-hidden rounded-xl border border-tv-border bg-tv-panel text-tv-text shadow-[0_18px_48px_-16px_rgba(0,0,0,0.35)]">
-      <div className="flex items-center gap-2 border-b border-tv-border px-3.5 py-2.5">
-        <Download size={14} strokeWidth={1.5} className="text-tv-muted" />
+    <div className="fixed bottom-8 right-3 z-50 w-[324px] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg/5">
+      <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5">
+        <Download size={14} strokeWidth={1.5} className="text-muted-foreground" />
         <span className="flex-1 text-[12px] font-medium">软件更新</span>
-        <button
+        <Button
+          variant="ghost"
+          size="icon-xs"
           onClick={dismissUpdate}
           title="关闭"
           aria-label="关闭更新提示"
-          className="rounded-md p-1 text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+          className="text-muted-foreground hover:text-foreground"
         >
           <X size={14} strokeWidth={1.5} />
-        </button>
+        </Button>
       </div>
 
       <div className="space-y-3 px-3.5 py-3.5">
         {state.phase === 'checking' && (
-          <div className="flex items-center gap-2 text-[12px] text-tv-muted">
+          <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
             <RefreshCw size={14} strokeWidth={1.5} className="animate-spin" />
             正在检查更新…
           </div>
@@ -76,7 +80,7 @@ export function UpdatePanel() {
 
         {state.phase === 'none' && (
           <div className="flex items-center gap-2 text-[12px]">
-            <CheckCircle2 size={14} strokeWidth={1.5} className="text-tv-up" />
+            <CheckCircle2 size={14} strokeWidth={1.5} className="text-success-foreground" />
             已是最新版本
           </div>
         )}
@@ -85,38 +89,43 @@ export function UpdatePanel() {
           <>
             <div className="flex items-baseline gap-2">
               <span className="text-[13px] font-medium">发现新版本 v{state.version}</span>
-              <span className="num font-mono text-[11px] text-tv-muted">
+              <span className="num font-mono text-[11px] text-muted-foreground">
                 当前 v{state.currentVersion}
               </span>
             </div>
             {state.notes && (
-              <div className="max-h-28 overflow-auto whitespace-pre-wrap rounded-lg border border-tv-border bg-tv-raised px-2.5 py-2 text-[11px] leading-relaxed text-tv-muted">
+              <div className="max-h-28 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
                 {state.notes}
               </div>
             )}
             <div className="flex items-center gap-2">
-              <button
+              <Button
+                size="sm"
                 onClick={() => void installUpdate()}
-                className="h-7 rounded-lg bg-tv-text px-3 text-[12px] font-medium text-tv-bg transition-opacity hover:opacity-90"
+                className="h-7 px-3 text-[12px]"
               >
                 立即更新
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={dismissUpdate}
-                className="h-7 rounded-lg border border-tv-border bg-tv-panel px-2.5 text-[12px] text-tv-text transition-colors hover:bg-tv-hover"
+                className="h-7 px-2.5 text-[12px]"
               >
                 稍后
-              </button>
+              </Button>
               {!state.manual && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="xs"
                   onClick={() => {
                     if (state.version) skipVersion(state.version);
                     dismissUpdate();
                   }}
-                  className="ml-auto text-[11px] text-tv-muted transition-colors hover:text-tv-text"
+                  className="ml-auto h-7 px-2 text-[11px] font-normal text-muted-foreground hover:text-foreground"
                 >
                   忽略此版本
-                </button>
+                </Button>
               )}
             </div>
           </>
@@ -125,21 +134,20 @@ export function UpdatePanel() {
         {downloading && (
           <>
             <div className="flex items-center justify-between text-[11px]">
-              <span className="text-tv-text">
+              <span className="text-foreground">
                 {state.percent != null ? `下载中 ${state.percent.toFixed(0)}%` : '下载中…'}
               </span>
-              <span className="font-mono text-tv-muted">
+              <span className="font-mono text-muted-foreground">
                 {fmtBytes(state.received ?? 0)}
                 {state.total ? ` / ${fmtBytes(state.total)}` : ''}
               </span>
             </div>
-            <div className="h-1 w-full overflow-hidden rounded-full bg-tv-raised">
-              <div
-                className="h-full origin-left rounded-full bg-tv-accent transition-transform duration-200"
-                style={{ transform: `scaleX(${Math.max(state.percent ?? 8, 2) / 100})` }}
-              />
-            </div>
-            <div className="text-[11px] leading-relaxed text-tv-muted">
+            <Progress value={Math.max(state.percent ?? 8, 2)} aria-label="下载进度">
+              <ProgressTrack className="h-1 bg-muted">
+                <ProgressIndicator className="bg-brand" />
+              </ProgressTrack>
+            </Progress>
+            <div className="text-[11px] leading-relaxed text-muted-foreground">
               下载完成后会自动安装并重启，请勿关闭程序。
             </div>
           </>
@@ -147,7 +155,7 @@ export function UpdatePanel() {
 
         {state.phase === 'installing' && (
           <div className="flex items-center gap-2 text-[12px]">
-            <RefreshCw size={14} strokeWidth={1.5} className="animate-spin text-tv-muted" />
+            <RefreshCw size={14} strokeWidth={1.5} className="animate-spin text-muted-foreground" />
             正在停止网关并安装 v{state.version}，应用即将重启…
           </div>
         )}
@@ -155,22 +163,30 @@ export function UpdatePanel() {
         {state.phase === 'error' && (
           <>
             <div className="flex items-start gap-2 text-[12px] leading-relaxed">
-              <AlertTriangle size={14} strokeWidth={1.5} className="mt-0.5 shrink-0 text-tv-warn" />
+              <AlertTriangle
+                size={14}
+                strokeWidth={1.5}
+                className="mt-0.5 shrink-0 text-warning-foreground"
+              />
               <span className="break-all">{state.message || '更新失败'}</span>
             </div>
             <div className="flex items-center gap-2">
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => void checkForUpdates(true)}
-                className="h-7 rounded-lg border border-tv-border bg-tv-panel px-2.5 text-[12px] text-tv-text transition-colors hover:bg-tv-hover"
+                className="h-7 px-2.5 text-[12px]"
               >
                 重试
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={dismissUpdate}
-                className="h-7 rounded-lg px-2 text-[12px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text"
+                className="h-7 px-2 text-[12px] font-normal text-muted-foreground hover:text-foreground"
               >
                 关闭
-              </button>
+              </Button>
             </div>
           </>
         )}

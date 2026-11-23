@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import type { AuditRecord } from '../gateway/types';
@@ -17,12 +20,12 @@ function fmtClock(ts: string): string {
 /** 审计日志页：按 UTC 日期查询网关 JSONL 审计记录 */
 export function AuditView() {
   return (
-    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
+    <div className="console-scope h-full min-h-0 overflow-auto bg-sidebar">
       <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-[24px] font-medium tracking-[-0.01em]">审计日志</h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">
+            <p className="mt-1.5 text-[13px] text-muted-foreground">
               UTC 日期 · JSONL 文件 · 最多返回 300 条
             </p>
           </div>
@@ -89,75 +92,71 @@ export function AuditPanel() {
   return (
     <>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-[12px] text-console-muted">
+        <p className="text-[12px] text-muted-foreground">
           UTC 日期 · JSONL 文件 · 最多返回 300 条
         </p>
-        <button
+        <Button
           onClick={reconcile}
-          className="console-btn console-btn-secondary"
+          variant="outline"
           title="按 clientOrderId 与 MT5 挂单/持仓/近 7 天成交重新对账"
         >
           <RefreshCw size={14} strokeWidth={1.5} />
           立即对账
-        </button>
+        </Button>
       </div>
 
-        <section className="console-card mt-6 p-5">
+        <Card className="mt-6 p-5">
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1.5">
-              <span className="console-label">日期（UTC）</span>
-              <input
+              <span className="text-[11px] font-medium text-muted-foreground">日期（UTC）</span>
+              <Input
                 type="date"
                 value={date}
                 onChange={(event) => setDate(event.target.value)}
-                className="console-input w-[152px]"
+                className="w-[152px]"
               />
             </label>
             <label className="flex flex-col gap-1.5">
-              <span className="console-label">类型</span>
-              <input
+              <span className="text-[11px] font-medium text-muted-foreground">类型</span>
+              <Input
                 value={kind}
                 onChange={(event) => setKind(event.target.value)}
                 placeholder="如 order. / alert / reconcile"
-                className="console-input w-64"
+                className="w-64"
               />
             </label>
             <label className="flex flex-col gap-1.5">
-              <span className="console-label">含文本</span>
-              <input
+              <span className="text-[11px] font-medium text-muted-foreground">含文本</span>
+              <Input
                 value={text}
                 onChange={(event) => setText(event.target.value)}
                 placeholder="品种 / clientId / 错误"
-                className="console-input w-60"
+                className="w-60"
               />
             </label>
-            <button
-              onClick={() => void load()}
-              disabled={loading}
-              className="console-btn console-btn-primary h-8"
-            >
+            <Button onClick={() => void load()} disabled={loading} className="h-8">
               {loading ? '查询中…' : '查询'}
-            </button>
+            </Button>
             <span className="flex-1" />
-            <span className="num pb-2 font-mono text-[11px] text-console-faint">
+            <span className="num pb-2 font-mono text-[11px] text-muted-foreground/60">
               {rows.length} 条
             </span>
           </div>
           {error && (
-            <div className="mt-4 rounded-lg border border-console-loss/30 bg-console-loss-soft px-3 py-2 text-[12px] text-console-loss">
+            <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive-foreground">
               读取审计日志失败：{error}
             </div>
           )}
-        </section>
+        </Card>
 
-        <section className="console-card mt-4 overflow-hidden">
-          <div className="flex items-baseline justify-between border-b border-console-line px-5 py-3.5">
+        <Card className="mt-4 overflow-hidden">
+          <div className="flex items-baseline justify-between border-b border-border px-5 py-3.5">
             <span className="text-[13px] font-semibold">记录</span>
-            <span className="num font-mono text-[11px] text-console-faint">{date}</span>
+            <span className="num font-mono text-[11px] text-muted-foreground/60">{date}</span>
           </div>
 
           {rows.length === 0 && !loading ? (
-            <div className="px-5 py-14 text-center text-[12px] text-console-faint">
+            <div className="px-5 py-14 text-center text-[12px] text-muted-foreground/60">
               这个日期没有匹配的审计记录
             </div>
           ) : (
@@ -165,29 +164,29 @@ export function AuditPanel() {
               {rows.map((record, index) => (
                 <details
                   key={`${record.ts}-${index}`}
-                  className="group border-b border-console-line/70 last:border-b-0"
+                  className="group border-b border-border/70 last:border-b-0"
                 >
-                  <summary className="flex cursor-pointer list-none items-center gap-2.5 px-5 py-2.5 text-[12px] hover:bg-console-hover/60">
-                    <span className="num w-[76px] shrink-0 font-mono text-[11px] text-console-muted">
+                  <summary className="flex cursor-pointer list-none items-center gap-2.5 px-5 py-2.5 text-[12px] hover:bg-accent/60">
+                    <span className="num w-[76px] shrink-0 font-mono text-[11px] text-muted-foreground">
                       {fmtClock(record.ts)}
                     </span>
-                    <span className="shrink-0 rounded-md border border-console-line bg-console-canvas px-1.5 py-0.5 font-mono text-[11px] text-console-ink-2">
+                    <span className="shrink-0 rounded-md border border-border bg-sidebar px-1.5 py-0.5 font-mono text-[11px] text-foreground/80">
                       {record.kind}
                     </span>
-                    <span className="truncate font-mono text-[11px] text-console-faint">
+                    <span className="truncate font-mono text-[11px] text-muted-foreground/60">
                       {JSON.stringify(record.payload)}
                     </span>
                   </summary>
-                  <pre className="max-h-72 overflow-auto border-t border-console-line/60 bg-console-canvas/60 px-5 py-3 font-mono text-[11px] leading-relaxed text-console-ink-2">
+                  <pre className="max-h-72 overflow-auto border-t border-border/60 bg-sidebar/60 px-5 py-3 font-mono text-[11px] leading-relaxed text-foreground/80">
                     {JSON.stringify(record.payload, null, 2)}
                   </pre>
                 </details>
               ))}
             </div>
           )}
-        </section>
+        </Card>
 
-        <p className="mt-4 text-[11px] text-console-faint">
+        <p className="mt-4 text-[11px] text-muted-foreground/60">
           {loading ? '正在读取审计文件…' : '审计记录由网关写入 gateway/audit，按 UTC 日期分文件。'}
         </p>
     </>

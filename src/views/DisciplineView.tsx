@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { PageTabs, useVisited } from '../components/PageTabs';
 import { useApp } from '../store/useApp';
 import { MissedView } from './Missed';
@@ -18,21 +18,21 @@ export function DisciplineView() {
   const seen = useVisited(tab);
 
   return (
-    <div className="console-scope flex h-full min-h-0 flex-col bg-console-canvas">
+    <div className="console-scope flex h-full min-h-0 flex-col bg-sidebar">
       <PageTabs tabs={TABS} value={tab} onChange={setTab} />
       <div className="relative min-h-0 flex-1">
         {seen.includes('strategy') && (
-          <div className={clsx('absolute inset-0', tab !== 'strategy' && 'hidden')}>
+          <div className={cn('absolute inset-0', tab !== 'strategy' && 'hidden')}>
             <StrategyView />
           </div>
         )}
         {seen.includes('routines') && (
-          <div className={clsx('absolute inset-0', tab !== 'routines' && 'hidden')}>
+          <div className={cn('absolute inset-0', tab !== 'routines' && 'hidden')}>
             <RoutinesView />
           </div>
         )}
         {seen.includes('missed') && (
-          <div className={clsx('absolute inset-0', tab !== 'missed' && 'hidden')}>
+          <div className={cn('absolute inset-0', tab !== 'missed' && 'hidden')}>
             <MissedView />
           </div>
         )}

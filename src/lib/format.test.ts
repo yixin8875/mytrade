@@ -97,9 +97,9 @@ describe('snapToLevel', () => {
 
 describe('signedClass', () => {
   it('按盈亏方向返回配色类', () => {
-    expect(signedClass(1)).toBe('text-tv-up');
-    expect(signedClass(-1)).toBe('text-tv-down');
-    expect(signedClass(0)).toBe('text-tv-muted');
-    expect(signedClass(null)).toBe('text-tv-muted');
+    expect(signedClass(1)).toBe('text-success-foreground');
+    expect(signedClass(-1)).toBe('text-destructive-foreground');
+    expect(signedClass(0)).toBe('text-muted-foreground');
+    expect(signedClass(null)).toBe('text-muted-foreground');
   });
 });

@@ -11,7 +11,17 @@ import {
   Settings as SettingsIcon,
   ShieldCheck,
 } from 'lucide-react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { gateway } from '../gateway/client';
 import { goReplaySession } from '../replay/route';
 import { useReplay } from '../replay/store';
@@ -95,23 +105,21 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
   });
 
   return (
-    <div className="console-scope h-full min-h-0 overflow-auto bg-console-canvas">
+    <div className="console-scope h-full min-h-0 overflow-auto bg-sidebar">
       <div className="mx-auto w-full max-w-[1240px] px-8 py-8">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-[24px] font-medium tracking-[-0.01em]">概览</h1>
-            <p className="mt-1.5 text-[13px] text-console-muted">
+            <p className="mt-1.5 text-[13px] text-muted-foreground">
               {dateText} · {health?.terminal?.name ?? 'MT5 未连接'}
               {account?.currency ? ` · ${account.currency}` : ''}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button className="console-btn console-btn-secondary" onClick={() => onNavigate('journal')}>
+            <Button variant="outline" onClick={() => onNavigate('journal')}>
               交易日志
-            </button>
-            <button className="console-btn console-btn-primary" onClick={() => onNavigate('trade')}>
-              打开交易台
-            </button>
+            </Button>
+            <Button onClick={() => onNavigate('trade')}>打开交易台</Button>
           </div>
         </header>
 
@@ -135,75 +143,77 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
         {conn === 'open' && <TodayBoard onNavigate={onNavigate} />}
 
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(300px,1fr)]">
-          <section className="console-card overflow-hidden">
-            <div className="flex items-center justify-between border-b border-console-line px-5 py-4">
+          <Card className="overflow-hidden">
+            <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <div>
                 <div className="text-[13px] font-semibold">最近交易</div>
-                <div className="mt-1 text-[12px] text-console-muted">近 30 天已平仓记录</div>
+                <div className="mt-1 text-[12px] text-muted-foreground">近 30 天已平仓记录</div>
               </div>
-              <button
+              <Button
                 onClick={() => onNavigate('journal')}
-                className="flex items-center gap-1 text-[12px] text-console-muted transition-colors hover:text-console-ink"
+                variant="link"
+                size="xs"
+                className="text-muted-foreground hover:text-foreground"
               >
                 全部日志
                 <ArrowUpRight size={14} strokeWidth={1.5} />
-              </button>
+              </Button>
             </div>
 
             {recent.length === 0 ? (
-              <div className="px-5 py-12 text-center text-[12px] text-console-faint">
+              <div className="px-5 py-12 text-center text-[12px] text-muted-foreground/60">
                 {loading ? '读取中…' : '还没有已平仓交易，去交易台开始第一笔'}
               </div>
             ) : (
-              <table className="w-full border-collapse text-[12px]">
-                <thead>
-                  <tr className="text-left text-[11px] text-console-faint">
-                    <th className="px-5 py-2 font-normal">平仓时间</th>
-                    <th className="px-2 py-2 font-normal">品种</th>
-                    <th className="px-2 py-2 font-normal">方向</th>
-                    <th className="px-2 py-2 text-right font-normal">手数</th>
-                    <th className="px-5 py-2 text-right font-normal">盈亏</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table className="w-full border-collapse text-[12px]">
+                <TableHeader>
+                  <TableRow className="border-0 text-left text-[11px] text-muted-foreground/60 hover:bg-transparent">
+                    <TableHead className="h-auto px-5 py-2 font-normal">平仓时间</TableHead>
+                    <TableHead className="h-auto px-2 py-2 font-normal">品种</TableHead>
+                    <TableHead className="h-auto px-2 py-2 font-normal">方向</TableHead>
+                    <TableHead className="h-auto px-2 py-2 text-right font-normal">手数</TableHead>
+                    <TableHead className="h-auto px-5 py-2 text-right font-normal">盈亏</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {recent.map((record) => (
-                    <tr key={record.position_id} className="border-t border-console-line/70">
-                      <td
-                        className="num whitespace-nowrap px-5 py-2.5 font-mono text-[11px] text-console-muted"
+                    <TableRow key={record.position_id} className="border-t border-border/70">
+                      <TableCell
+                        className="num whitespace-nowrap px-5 py-2.5 font-mono text-[11px] text-muted-foreground"
                         title="本机时区"
                       >
                         {fmtLocalTime(record.close_time, rowOffset(record, health?.serverOffset ?? 0))}
-                      </td>
-                      <td className="px-2 py-2.5 font-medium">{record.symbol}</td>
-                      <td className="px-2 py-2.5">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 font-medium">{record.symbol}</TableCell>
+                      <TableCell className="px-2 py-2.5">
                         <span
-                          className={clsx(
+                          className={cn(
                             'inline-flex items-center gap-1.5 text-[11px]',
-                            record.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
+                            record.side === 'buy' ? 'text-success-foreground' : 'text-destructive-foreground',
                           )}
                         >
                           <span
-                            className={clsx(
+                            className={cn(
                               'h-1.5 w-1.5 rounded-full',
-                              record.side === 'buy' ? 'bg-console-gain' : 'bg-console-loss',
+                              record.side === 'buy' ? 'bg-success' : 'bg-destructive',
                             )}
                           />
                           {record.side === 'buy' ? '多' : '空'}
                         </span>
-                      </td>
-                      <td className="num px-2 py-2.5 text-right font-mono text-[11px] text-console-muted">
+                      </TableCell>
+                      <TableCell className="num px-2 py-2.5 text-right font-mono text-[11px] text-muted-foreground">
                         {fmtVolume(record.volume)}
-                      </td>
-                      <td className={clsx('num px-5 py-2.5 text-right font-mono font-medium', signedClass(record.profit))}>
+                      </TableCell>
+                      <TableCell className={cn('num px-5 py-2.5 text-right font-mono font-medium', signedClass(record.profit))}>
                         {fmtSigned(record.profit)}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             )}
 
-            <div className="flex items-center justify-between border-t border-console-line bg-console-card/60 px-5 py-3 text-[12px] text-console-muted">
+            <div className="flex items-center justify-between border-t border-border bg-card/60 px-5 py-3 text-[12px] text-muted-foreground">
               <span>
                 {stats
                   ? `近 30 天 ${stats.summary.trades} 笔 · 胜率 ${
@@ -211,36 +221,36 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
                     }`
                   : '加载统计中…'}
               </span>
-              <span className={clsx('num font-mono', stats ? signedClass(stats.summary.netPnl) : '')}>
+              <span className={cn('num font-mono', stats ? signedClass(stats.summary.netPnl) : '')}>
                 {stats ? fmtSigned(stats.summary.netPnl) : ''}
               </span>
             </div>
-          </section>
+          </Card>
 
           <div className="space-y-4">
-            <section className="console-card p-5">
+            <Card className="p-5">
               <div className="flex items-center gap-2">
-                <ShieldCheck size={16} strokeWidth={1.5} className="text-console-muted" />
+                <ShieldCheck size={16} strokeWidth={1.5} className="text-muted-foreground" />
                 <span className="text-[13px] font-semibold">今日风控</span>
                 <span className="flex-1" />
                 <span
-                  className={clsx(
+                  className={cn(
                     'inline-flex items-center gap-1.5 text-[11px]',
                     risk?.halted
-                      ? 'text-console-loss'
+                      ? 'text-destructive-foreground'
                       : risk?.canTrade === false
-                        ? 'text-console-warn'
-                        : 'text-console-gain',
+                        ? 'text-warning-foreground'
+                        : 'text-success-foreground',
                   )}
                 >
                   <span
-                    className={clsx(
+                    className={cn(
                       'h-1.5 w-1.5 rounded-full',
                       risk?.halted
-                        ? 'bg-console-loss'
+                        ? 'bg-destructive'
                         : risk?.canTrade === false
-                          ? 'bg-console-warn'
-                          : 'bg-console-gain',
+                          ? 'bg-warning'
+                          : 'bg-success',
                     )}
                   />
                   {risk?.halted ? '已停机' : risk?.canTrade === false ? '暂不可开仓' : '正常'}
@@ -248,24 +258,24 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
               </div>
 
               <div className="mt-5">
-                <div className="flex items-baseline justify-between text-[12px] text-console-muted">
+                <div className="flex items-baseline justify-between text-[12px] text-muted-foreground">
                   <span>当日亏损</span>
-                  <span className="num font-mono text-console-ink-2">
+                  <span className="num font-mono text-foreground/80">
                     {fmtMoney(risk?.dailyLoss ?? 0)}
                     {lossLimit > 0 ? ` / ${fmtMoney(lossLimit)}` : ' · 未设上限'}
                   </span>
                 </div>
-                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-console-hover">
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-accent">
                   <div
-                    className={clsx(
+                    className={cn(
                       'h-full origin-left rounded-full',
-                      lossUsed >= 1 ? 'bg-console-loss' : lossUsed >= 0.6 ? 'bg-console-warn' : 'bg-console-gain',
+                      lossUsed >= 1 ? 'bg-destructive' : lossUsed >= 0.6 ? 'bg-warning' : 'bg-success',
                     )}
                     style={{ transform: `scaleX(${Math.max(lossUsed, risk?.dailyLoss ? 0.03 : 0)})` }}
                   />
                 </div>
                 {lossLimit > 0 && (
-                  <div className="mt-1.5 text-right text-[11px] text-console-faint">
+                  <div className="mt-1.5 text-right text-[11px] text-muted-foreground/60">
                     剩余 {fmtMoney(risk?.remaining ?? 0)}
                   </div>
                 )}
@@ -285,54 +295,56 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
               </div>
 
               {risk?.blockReason && !risk.halted && (
-                <div className="mt-3 rounded-lg bg-console-warn-soft px-3 py-2 text-[12px] text-console-warn">
+                <div className="mt-3 rounded-lg bg-warning/10 px-3 py-2 text-[12px] text-warning-foreground">
                   {risk.blockReason}
                 </div>
               )}
 
-              <button
+              <Button
                 onClick={() => onNavigate('settings')}
-                className="mt-4 flex items-center gap-1 text-[12px] text-console-muted transition-colors hover:text-console-ink"
+                variant="link"
+                size="xs"
+                className="mt-4 h-auto p-0 text-muted-foreground hover:text-foreground"
               >
                 调整风控上限
                 <ArrowUpRight size={13} strokeWidth={1.5} />
-              </button>
-            </section>
+              </Button>
+            </Card>
 
-            <section className="console-card p-5">
+            <Card className="p-5">
               <div className="flex items-center gap-2">
-                <Layers size={16} strokeWidth={1.5} className="text-console-muted" />
+                <Layers size={16} strokeWidth={1.5} className="text-muted-foreground" />
                 <span className="text-[13px] font-semibold">当前持仓</span>
                 <span className="flex-1" />
-                <span className="num font-mono text-[11px] text-console-faint">{positions.length}</span>
+                <span className="num font-mono text-[11px] text-muted-foreground/60">{positions.length}</span>
               </div>
 
               {positions.length === 0 ? (
-                <div className="py-7 text-center text-[12px] text-console-faint">暂无持仓</div>
+                <div className="py-7 text-center text-[12px] text-muted-foreground/60">暂无持仓</div>
               ) : (
-                <div className="mt-3 divide-y divide-console-line/70">
+                <div className="mt-3 divide-y divide-border/70">
                   {positions.slice(0, 4).map((position) => (
                     <div key={position.ticket} className="flex items-center gap-2 py-2.5">
                       <span className="w-16 shrink-0 text-[12px] font-medium">{position.symbol}</span>
                       <span
-                        className={clsx(
+                        className={cn(
                           'inline-flex items-center gap-1 text-[11px]',
-                          position.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
+                          position.side === 'buy' ? 'text-success-foreground' : 'text-destructive-foreground',
                         )}
                       >
                         <span
-                          className={clsx(
+                          className={cn(
                             'h-1.5 w-1.5 rounded-full',
-                            position.side === 'buy' ? 'bg-console-gain' : 'bg-console-loss',
+                            position.side === 'buy' ? 'bg-success' : 'bg-destructive',
                           )}
                         />
                         {position.side === 'buy' ? '多' : '空'}
                       </span>
-                      <span className="num font-mono text-[11px] text-console-muted">
+                      <span className="num font-mono text-[11px] text-muted-foreground">
                         {fmtVolume(position.volume)}
                       </span>
                       <span className="flex-1" />
-                      <span className={clsx('num font-mono text-[12px] font-medium', signedClass(position.profit))}>
+                      <span className={cn('num font-mono text-[12px] font-medium', signedClass(position.profit))}>
                         {fmtSigned(position.profit)}
                       </span>
                     </div>
@@ -340,14 +352,16 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
                 </div>
               )}
 
-              <button
+              <Button
                 onClick={() => onNavigate('trade')}
-                className="mt-2 flex items-center gap-1 text-[12px] text-console-muted transition-colors hover:text-console-ink"
+                variant="link"
+                size="xs"
+                className="mt-2 h-auto p-0 text-muted-foreground hover:text-foreground"
               >
                 打开交易台
                 <ArrowUpRight size={13} strokeWidth={1.5} />
-              </button>
-            </section>
+              </Button>
+            </Card>
 
             <ScoreCard onNavigate={onNavigate} />
           </div>
@@ -357,12 +371,12 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
           {QUICK_LINKS.map((item) => {
             const Icon = item.icon;
             return (
-              <button
+              <Card
                 key={item.page}
-                onClick={() => onNavigate(item.page)}
-                className="console-card group flex items-start gap-3 p-4 text-left transition-colors hover:bg-console-hover/60"
+                render={<button type="button" onClick={() => onNavigate(item.page)} />}
+                className="group flex-row items-start gap-3 p-4 text-left transition-colors hover:bg-accent/60"
               >
-                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-console-hover text-console-muted group-hover:text-console-ink">
+                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-muted-foreground group-hover:text-foreground">
                   <Icon size={16} strokeWidth={1.5} />
                 </span>
                 <span className="min-w-0">
@@ -371,14 +385,14 @@ export function Overview({ onNavigate }: { onNavigate: (page: Page) => void }) {
                     <ArrowUpRight
                       size={12}
                       strokeWidth={1.5}
-                      className="text-console-faint transition-colors group-hover:text-console-ink"
+                      className="text-muted-foreground/60 transition-colors group-hover:text-foreground"
                     />
                   </span>
-                  <span className="mt-1 block text-[12px] leading-relaxed text-console-muted">
+                  <span className="mt-1 block text-[12px] leading-relaxed text-muted-foreground">
                     {item.hint}
                   </span>
                 </span>
-              </button>
+              </Card>
             );
           })}
         </section>
@@ -516,13 +530,15 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
     <section className="mt-4">
       <div className="flex items-baseline justify-between">
         <span className="text-[13px] font-semibold">今天</span>
-        <button
+        <Button
           onClick={() => onNavigate('diary')}
-          className="flex items-center gap-1 text-[12px] text-console-muted transition-colors hover:text-console-ink"
+          variant="link"
+          size="xs"
+          className="text-muted-foreground hover:text-foreground"
         >
           写今日笔记
           <ArrowUpRight size={13} strokeWidth={1.5} />
-        </button>
+        </Button>
       </div>
 
       <div className="mt-2 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -530,10 +546,10 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
           icon={ListChecks}
           title="今天例行"
           aside={total > 0 ? `${done} / ${total}` : '未建立'}
-          asideTone={total > 0 && done >= total ? 'text-console-gain' : 'text-console-faint'}
+          asideTone={total > 0 && done >= total ? 'text-success-foreground' : 'text-muted-foreground/60'}
         >
           {total === 0 ? (
-            <p className="text-[12px] leading-relaxed text-console-muted">
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
               还没有例行清单。先生成一份盘前 / 盘中 / 盘后的默认清单，之后每天打勾。
             </p>
           ) : (
@@ -544,19 +560,19 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
                 const ratio = items.length > 0 ? finished / items.length : 0;
                 return (
                   <div key={key}>
-                    <div className="flex items-baseline justify-between text-[11px] text-console-muted">
+                    <div className="flex items-baseline justify-between text-[11px] text-muted-foreground">
                       <span>{label}</span>
-                      <span className="num font-mono text-console-faint">
+                      <span className="num font-mono text-muted-foreground/60">
                         {items.length > 0 ? `${finished} / ${items.length}` : '—'}
                       </span>
                     </div>
-                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-console-hover">
+                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-accent">
                       <div
-                        className={clsx(
+                        className={cn(
                           'h-full rounded-full',
                           items.length > 0 && finished >= items.length
-                            ? 'bg-console-gain'
-                            : 'bg-console-ink-2/50',
+                            ? 'bg-success'
+                            : 'bg-foreground/40',
                         )}
                         style={{ width: `${ratio * 100}%` }}
                       />
@@ -579,13 +595,13 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
           icon={ShieldCheck}
           title="开仓门禁"
           aside={mode === 'off' ? '未开启' : '生效中'}
-          asideTone={mode === 'off' ? 'text-console-warn' : 'text-console-gain'}
+          asideTone={mode === 'off' ? 'text-warning-foreground' : 'text-success-foreground'}
         >
-          <p className="text-[12px] leading-relaxed text-console-muted">
+          <p className="text-[12px] leading-relaxed text-muted-foreground">
             {MODE_TEXT[mode]}
             {override.mode ? '（账户覆盖）' : ''}
           </p>
-          <p className="mt-1 truncate text-[11px] text-console-faint" title={playbookId || undefined}>
+          <p className="mt-1 truncate text-[11px] text-muted-foreground/60" title={playbookId || undefined}>
             {playbookName ?? (playbookId || '还没有默认清单')}
           </p>
           <TodayAction onClick={() => openSettings('discipline')}>
@@ -597,33 +613,33 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
           icon={BookOpen}
           title="今日交易"
           aside={today ? `${today.trades} 笔` : '—'}
-          asideTone="text-console-faint"
+          asideTone="text-muted-foreground/60"
         >
           {today == null ? (
-            <p className="text-[12px] text-console-faint">读取中…</p>
+            <p className="text-[12px] text-muted-foreground/60">读取中…</p>
           ) : (
             <div className="space-y-1">
               <div className="flex items-baseline justify-between text-[12px]">
-                <span className="text-console-muted">今日盈亏（含浮动）</span>
+                <span className="text-muted-foreground">今日盈亏（含浮动）</span>
                 <span
-                  className={clsx('num font-mono font-medium', signedClass(todayPnl))}
+                  className={cn('num font-mono font-medium', signedClass(todayPnl))}
                 >
                   {fmtSigned(todayPnl)}
                 </span>
               </div>
               <div className="flex items-baseline justify-between text-[12px]">
-                <span className="text-console-muted">待复盘</span>
+                <span className="text-muted-foreground">待复盘</span>
                 <span
-                  className={clsx(
+                  className={cn(
                     'num font-mono',
-                    unreviewed > 0 ? 'text-console-warn' : 'text-console-gain',
+                    unreviewed > 0 ? 'text-warning-foreground' : 'text-success-foreground',
                   )}
                 >
                   {unreviewed > 0 ? `${unreviewed} 笔` : '都写完了'}
                 </span>
               </div>
               {today.trades === 0 && (
-                <p className="text-[11px] leading-relaxed text-console-faint">
+                <p className="text-[11px] leading-relaxed text-muted-foreground/60">
                   今天还没有已平仓交易。开仓前先过一遍门禁清单。
                 </p>
               )}
@@ -638,19 +654,19 @@ function TodayBoard({ onNavigate }: { onNavigate: (page: Page) => void }) {
           icon={PlayCircle}
           title="继续复盘"
           aside={resumable ? resumable.status === 'paused' ? '已暂停' : '未结束' : '无进行中'}
-          asideTone="text-console-faint"
+          asideTone="text-muted-foreground/60"
         >
           {resumable ? (
             <>
               <p className="truncate text-[12px] font-medium" title={resumable.name}>
                 {resumable.name}
               </p>
-              <p className="mt-1 text-[11px] text-console-faint">
+              <p className="mt-1 text-[11px] text-muted-foreground/60">
                 {resumable.symbol} · 更新于 {fmtLocalTime(resumable.updatedAt / 1000, 0)}
               </p>
             </>
           ) : (
-            <p className="text-[12px] leading-relaxed text-console-muted">
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
               没有未结束的回放。挑一笔今天的交易，重演一遍入场与离场。
             </p>
           )}
@@ -677,15 +693,15 @@ function TodayCard({
   children: ReactNode;
 }) {
   return (
-    <section className="console-card flex flex-col p-4">
+    <Card className="flex flex-col p-4">
       <div className="flex items-center gap-2">
-        <Icon size={15} strokeWidth={1.5} className="text-console-muted" />
+        <Icon size={15} strokeWidth={1.5} className="text-muted-foreground" />
         <span className="text-[13px] font-semibold">{title}</span>
         <span className="flex-1" />
-        <span className={clsx('num font-mono text-[11px]', asideTone)}>{aside}</span>
+        <span className={cn('num font-mono text-[11px]', asideTone)}>{aside}</span>
       </div>
       <div className="mt-3 flex-1">{children}</div>
-    </section>
+    </Card>
   );
 }
 
@@ -699,14 +715,16 @@ function TodayAction({
   children: ReactNode;
 }) {
   return (
-    <button
+    <Button
       onClick={onClick}
       disabled={disabled}
-      className="mt-3 flex items-center gap-1 text-[12px] text-console-muted transition-colors hover:text-console-ink disabled:opacity-50"
+      variant="link"
+      size="xs"
+      className="mt-3 h-auto justify-start p-0 text-muted-foreground hover:text-foreground"
     >
       {children}
       <ArrowUpRight size={13} strokeWidth={1.5} />
-    </button>
+    </Button>
   );
 }
 
@@ -735,36 +753,38 @@ function ScoreCard({ onNavigate }: { onNavigate: (page: Page) => void }) {
   const value = score?.score ?? null;
 
   return (
-    <section className="console-card p-5">
+    <Card className="p-5">
       <div className="flex items-center gap-2">
-        <Gauge size={16} strokeWidth={1.5} className="text-console-muted" />
+        <Gauge size={16} strokeWidth={1.5} className="text-muted-foreground" />
         <span className="text-[13px] font-semibold">过程评分</span>
         <span className="flex-1" />
-        {score && <span className="num font-mono text-[10px] text-console-faint">v{score.version}</span>}
+        {score && <span className="num font-mono text-[10px] text-muted-foreground/60">v{score.version}</span>}
       </div>
 
       <div className="mt-3 flex items-end gap-3">
-        <span className={clsx('num font-mono text-[28px] leading-none', scoreTone(value))}>
+        <span className={cn('num font-mono text-[28px] leading-none', scoreTone(value))}>
           {value == null ? '—' : Math.round(value)}
         </span>
-        <span className={clsx('pb-0.5 text-[12px]', scoreTone(value))}>{scoreWords(value)}</span>
+        <span className={cn('pb-0.5 text-[12px]', scoreTone(value))}>{scoreWords(value)}</span>
       </div>
 
-      <div className="mt-2 text-[11px] leading-relaxed text-console-muted">
+      <div className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
         {score?.note ??
           (score
             ? `近 90 天 · ${score.sample.trades} 笔 · 其中 ${score.sample.rTrades} 笔可折算 R`
             : '连接网关后读取')}
       </div>
 
-      <button
+      <Button
         onClick={() => onNavigate('score')}
-        className="mt-2 flex items-center gap-1 text-[12px] text-console-muted transition-colors hover:text-console-ink"
+        variant="link"
+        size="xs"
+        className="mt-2 h-auto p-0 text-muted-foreground hover:text-foreground"
       >
         查看分量与公式
         <ArrowUpRight size={13} strokeWidth={1.5} />
-      </button>
-    </section>
+      </Button>
+    </Card>
   );
 }
 
@@ -781,25 +801,25 @@ function Metric({
 }) {
   return (
     <div className="readout-cell">
-      <div className="text-[12px] text-console-muted">{label}</div>
+      <div className="text-[12px] text-muted-foreground">{label}</div>
       <div
-        className={clsx(
+        className={cn(
           'num mt-1.5 font-mono text-[24px] font-medium leading-none tracking-[-0.01em]',
-          tone === 'gain' && 'text-console-gain',
-          tone === 'loss' && 'text-console-loss',
+          tone === 'gain' && 'text-success-foreground',
+          tone === 'loss' && 'text-destructive-foreground',
         )}
       >
         {value}
       </div>
-      <div className="mt-2 truncate text-[11px] text-console-faint">{hint ?? ' '}</div>
+      <div className="mt-2 truncate text-[11px] text-muted-foreground/60">{hint ?? ' '}</div>
     </div>
   );
 }
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-console-hover/70 px-3 py-2.5">
-      <div className="text-[11px] text-console-faint">{label}</div>
+    <div className="rounded-lg bg-accent/70 px-3 py-2.5">
+      <div className="text-[11px] text-muted-foreground/60">{label}</div>
       <div className="num mt-1 font-mono text-[13px] font-medium">{value}</div>
     </div>
   );

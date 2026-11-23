@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { ChevronDown, Loader2, Sparkles } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card as CossCard } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { SegmentedControl, SegmentedControlItem } from '@/components/ui/segmented-control';
 import { gateway } from '../gateway/client';
 import { usePrivacyMask } from '../lib/privacy';
 import type {
@@ -23,6 +27,11 @@ function fmtWhen(ts: number): string {
     when.getHours(),
   )}:${pad(when.getMinutes())}`;
 }
+
+const KINDS = [
+  ['day', '当日'],
+  ['week', '本周'],
+] as const;
 
 /**
  * AI 复盘面板：没有 Key 或没开启时整块不渲染（功能完全不可见）。
@@ -100,53 +109,53 @@ export function AiReviewPanel({ date }: Props) {
   };
 
   return (
-    <section className="console-card mt-3 px-5 py-4">
+    <CossCard render={<section />} className="mt-3 gap-0 rounded-xl px-5 py-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-[13px] font-medium">
           <Sparkles size={14} strokeWidth={1.6} />
           AI 复盘
-          <span className="text-[11px] font-normal text-console-faint">
+          <span className="text-[11px] font-normal text-muted-foreground/60">
             {status?.provider === 'anthropic' ? 'Claude' : status?.model}
             {result?.cached ? ' · 缓存' : ''}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border border-console-line bg-console-canvas p-0.5 text-[11px]">
-            {(
-              [
-                ['day', '当日'],
-                ['week', '本周'],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setKind(value)}
-                className={clsx(
-                  'h-6 rounded-md px-2 transition-colors',
-                  kind === value
-                    ? 'bg-console-card text-console-ink shadow-[0_1px_2px_rgba(33,28,22,0.06)]'
-                    : 'text-console-muted hover:text-console-ink',
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <button
+          <SegmentedControl size="sm">
+            {KINDS.map(([value, label]) => {
+              const active = kind === value;
+              return (
+                <SegmentedControlItem
+                  key={value}
+                  data-checked={active ? '' : undefined}
+                  aria-pressed={active}
+                  onClick={() => setKind(value)}
+                  className="px-2 text-[11px]"
+                >
+                  {label}
+                </SegmentedControlItem>
+              );
+            })}
+          </SegmentedControl>
+          <Button
+            variant="ghost"
+            size="xs"
+            aria-expanded={showFields}
             onClick={() => setShowFields((value) => !value)}
-            className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] text-console-muted transition-colors hover:bg-console-hover hover:text-console-ink"
+            className="gap-1 text-[11px] font-normal text-muted-foreground"
           >
             将发送哪些字段
             <ChevronDown
               size={12}
               strokeWidth={1.8}
-              className={clsx('transition-transform', showFields && 'rotate-180')}
+              className={cn('transition-transform', showFields && 'rotate-180')}
             />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            size="xs"
             onClick={() => void generate(Boolean(result))}
             disabled={busy}
-            className="console-btn console-btn-secondary h-7 text-[11px]"
+            className="text-[11px] font-normal"
           >
             {busy ? (
               <Loader2 size={13} strokeWidth={1.6} className="animate-spin" />
@@ -154,31 +163,30 @@ export function AiReviewPanel({ date }: Props) {
               <Sparkles size={13} strokeWidth={1.6} />
             )}
             {busy ? '生成中…' : result ? '重新生成' : '生成复盘'}
-          </button>
+          </Button>
         </div>
       </div>
 
       {showFields && (
-        <div className="mt-3 rounded-lg border border-console-line bg-console-canvas px-3 py-2.5">
-          <div className="flex items-center justify-between text-[11px] text-console-faint">
+        <div className="mt-3 rounded-lg border border-border bg-muted px-3 py-2.5">
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground/60">
             <span>只会发送下面这些内容，不含账户号、服务器、截图</span>
             {preview && <span className="num font-mono">{preview.bytes} 字节</span>}
           </div>
           <ul className="mt-2 space-y-1 text-[11px] leading-relaxed">
             {(preview?.fields ?? []).map((field) => (
               <li key={field.key} className="flex gap-2">
-                <span className="text-console-ink">{field.label}</span>
-                <span className="text-console-muted">{field.text}</span>
+                <span className="text-foreground">{field.label}</span>
+                <span className="text-muted-foreground">{field.text}</span>
               </li>
             ))}
-            {!preview && <li className="text-console-faint">正在统计…</li>}
+            {!preview && <li className="text-muted-foreground/60">正在统计…</li>}
           </ul>
-          <label className="mt-2 flex items-center gap-1.5 text-[11px] text-console-muted">
-            <input
-              type="checkbox"
+          <label className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Checkbox
               checked={includeNotes}
-              onChange={(event) => setIncludeNotes(event.target.checked)}
-              className="h-3 w-3 accent-console-accent"
+              onCheckedChange={setIncludeNotes}
+              aria-label="同时发送我写的日笔记与逐笔备注（默认不发）"
             />
             同时发送我写的日笔记与逐笔备注（默认不发）
           </label>
@@ -186,32 +194,32 @@ export function AiReviewPanel({ date }: Props) {
       )}
 
       {error && (
-        <div className="mt-3 rounded-lg border border-console-warn/30 bg-console-warn/5 px-3 py-2 text-[11px] text-console-warn">
+        <div className="mt-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning-foreground">
           {error}
         </div>
       )}
 
       {result ? (
         <div className="mt-3">
-          <div className="space-y-2 text-[12px] leading-relaxed text-console-ink-2">
+          <div className="space-y-2 text-[12px] leading-relaxed text-foreground/82">
             {result.text.split(/\n+/).map((line, index) => (
               <p key={index}>{line}</p>
             ))}
           </div>
-          <div className="mt-3 flex items-center gap-3 text-[10px] text-console-faint">
+          <div className="mt-3 flex items-center gap-3 text-[10px] text-muted-foreground/60">
             <span>{fmtWhen(result.generatedAt)}</span>
             <span>{result.model}</span>
             <span>只作建议，不写回交易数据</span>
           </div>
         </div>
       ) : (
-        <p className="mt-2 text-[11px] leading-relaxed text-console-faint">
+        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/60">
           {kind === 'week'
             ? `本周复盘统计截止 ${date} 的 7 天；`
             : '生成的复盘只发给模型做文字总结，'}
           不会修改任何记录；同一区间重复打开会直接用缓存。
         </p>
       )}
-    </section>
+    </CossCard>
   );
 }

@@ -1,4 +1,5 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
+import { SegmentedControl, SegmentedControlItem } from './ui/segmented-control';
 
 /** 区间天数的统一选项；0 = 全部历史，与 journal.stats 的 days<=0 语义一致 */
 export const RANGE_OPTIONS = [
@@ -24,16 +25,17 @@ export function RangeChips({
   className?: string;
 }) {
   return (
-    <div className={clsx('flex items-center gap-1', className)}>
+    <SegmentedControl size="sm" className={cn('w-fit', className)}>
       {options.map((item) => (
-        <button
+        <SegmentedControlItem
           key={item.value}
           onClick={() => onChange(item.value)}
-          className={clsx('console-chip', value === item.value && 'console-chip-active')}
+          aria-pressed={value === item.value}
+          className="text-[12px]"
         >
           {item.label}
-        </button>
+        </SegmentedControlItem>
       ))}
-    </div>
+    </SegmentedControl>
   );
 }

@@ -12,7 +12,22 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { clsx } from 'clsx';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsList, TabsTab } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
 import { stepSummary, templateSummary, templateTpTarget } from '../lib/template';
 import { activeTemplate, useApp, type Page } from '../store/useApp';
@@ -73,7 +88,7 @@ function sideText(side: Side): string {
 }
 
 function pnlClass(value: number): string {
-  return value > 0 ? 'text-console-gain' : value < 0 ? 'text-console-loss' : 'text-console-muted';
+  return value > 0 ? 'text-success-foreground' : value < 0 ? 'text-destructive-foreground' : 'text-muted-foreground';
 }
 
 export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
@@ -230,12 +245,12 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
 
   if (!session) {
     return (
-      <div className="flex h-full items-center justify-center bg-console-canvas">
+      <div className="flex h-full items-center justify-center bg-sidebar">
         <div className="text-center">
-          <div className="text-[13px] text-console-ink">复盘会话不存在</div>
-          <button onClick={goReplayList} className="console-btn console-btn-secondary mt-3">
+          <div className="text-[13px] text-foreground">复盘会话不存在</div>
+          <Button variant="secondary" onClick={goReplayList} className="mt-3">
             返回复盘列表
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -434,178 +449,180 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
   if (session.reference) tabDefs.push({ value: 'reference', label: '参照', count: null });
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-console-canvas">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-console-line px-6">
-        <button
-          onClick={goReplayList}
-          className="grid h-8 w-8 place-items-center rounded-[8px] text-console-muted hover:bg-console-hover hover:text-console-ink"
-          title="返回复盘列表"
-        >
-          <ChevronLeft size={16} strokeWidth={1.5} />
-        </button>
+    <div className="flex h-full min-h-0 flex-col bg-sidebar">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-6">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={goReplayList}
+                title="返回复盘列表"
+                aria-label="返回复盘列表"
+              />
+            }
+          >
+            <ChevronLeft strokeWidth={1.5} />
+          </TooltipTrigger>
+          <TooltipPopup>返回复盘列表</TooltipPopup>
+        </Tooltip>
         {back && (
-          <button
+          <Button
+            variant="outline"
+            size="xs"
             onClick={goBack}
-            className="shrink-0 rounded-[8px] border border-console-line px-2.5 py-1 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover"
+            className="shrink-0 text-[11px] text-foreground/80"
             title={`回到${back.label}`}
           >
             返回{back.label}
-          </button>
+          </Button>
         )}
         <div className="min-w-0">
           <div className="truncate text-[15px] font-medium leading-tight">{session.name}</div>
-          <div className="mt-1 whitespace-nowrap text-[11px] text-console-muted">
+          <div className="mt-1 whitespace-nowrap text-[11px] text-muted-foreground">
             {session.symbol} · {tfLabel(timeframe)} · 行情时间{' '}
-            <b className="font-mono font-normal text-console-ink-2">{fmtShort(virtualTime)}</b>
+            <b className="font-mono font-normal text-foreground/80">{fmtShort(virtualTime)}</b>
           </div>
         </div>
-        <span className="ml-2 inline-flex items-center gap-1.5 text-[11px] text-console-muted">
+        <span className="ml-2 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <span
-            className={clsx(
+            className={cn(
               'h-1.5 w-1.5 rounded-full',
               playing
-                ? 'bg-console-accent'
+                ? 'bg-brand'
                 : finished
-                  ? 'bg-console-gain'
+                  ? 'bg-success'
                   : preparing
-                    ? 'bg-console-warn'
-                    : 'bg-console-line-2',
+                    ? 'bg-warning'
+                    : 'bg-input',
             )}
           />
           {playing ? '回放中' : finished ? '已完成' : preparing ? '准备行情' : '暂停'}
         </span>
-        <span className="num font-mono text-[11px] text-console-muted">
+        <span className="num font-mono text-[11px] text-muted-foreground">
           {Math.round(progress * 100)}%
         </span>
         <div className="flex-1" />
-        <span className="inline-flex h-[18px] items-center rounded-[4px] border border-console-line-2 px-1.5 text-[10px] text-console-muted">
+        <Badge variant="outline" size="sm" className="text-[10px]">
           模拟撮合
-        </span>
+        </Badge>
         {finished ? (
-          <button
-            onClick={() => goReplayReport(session.id)}
-            className="console-btn console-btn-primary"
-          >
-            查看报告
-          </button>
+          <Button onClick={() => goReplayReport(session.id)}>查看报告</Button>
         ) : confirmFinish ? (
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-console-muted">结束并平掉持仓？</span>
-            <button
+            <span className="text-[10px] text-muted-foreground">结束并平掉持仓？</span>
+            <Button
               onClick={() => {
                 finish();
                 setConfirmFinish(false);
                 goReplayReport(session.id);
               }}
-              className="console-btn console-btn-primary"
             >
               结束
-            </button>
-            <button
-              onClick={() => setConfirmFinish(false)}
-              className="console-btn console-btn-secondary"
-            >
+            </Button>
+            <Button variant="secondary" onClick={() => setConfirmFinish(false)}>
               取消
-            </button>
+            </Button>
           </div>
         ) : (
-          <button
-            onClick={() => setConfirmFinish(true)}
-            className="console-btn console-btn-secondary"
-          >
+          <Button variant="secondary" onClick={() => setConfirmFinish(true)}>
             结束复盘
-          </button>
+          </Button>
         )}
-        <div className="relative">
-          <button
-            onClick={() => {
-              setMenu((value) => !value);
-              setConfirmDelete(false);
-            }}
-            className="grid h-8 w-8 place-items-center rounded-[8px] text-console-muted hover:bg-console-hover hover:text-console-ink"
-            title="更多"
-          >
-            <MoreHorizontal size={16} strokeWidth={1.5} />
-          </button>
-          {menu && (
-            <>
-              <div
-                className="fixed inset-0 z-20"
-                onClick={() => {
-                  setMenu(false);
-                  setConfirmDelete(false);
-                }}
-              />
-              <div className="absolute right-0 top-9 z-30 w-36 overflow-hidden rounded-[8px] border border-console-line bg-console-card py-1 shadow-[0_12px_28px_-12px_rgba(33,28,22,.35)]">
-                <button
-                  onClick={() => {
-                    restart();
-                    setMenu(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-console-ink-2 hover:bg-console-hover"
-                >
-                  <RotateCcw size={13} strokeWidth={1.5} />
-                  重新开始
-                </button>
-                <button
-                  onClick={() => {
-                    archive(session.id);
-                    setMenu(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-console-ink-2 hover:bg-console-hover"
-                >
-                  <Archive size={13} strokeWidth={1.5} />
-                  归档
-                </button>
-                <button
-                  onClick={() => {
-                    if (!confirmDelete) {
-                      setConfirmDelete(true);
-                      return;
-                    }
-                    setConfirmDelete(false);
-                    remove(session.id);
-                    setMenu(false);
-                    goReplayList();
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-console-loss hover:bg-console-hover"
-                >
-                  <Trash2 size={13} strokeWidth={1.5} />
-                  {confirmDelete ? '再次点击删除' : '删除'}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        <Menu
+          open={menu}
+          onOpenChange={(open) => {
+            setMenu(open);
+            if (!open) setConfirmDelete(false);
+          }}
+        >
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <MenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      title="更多"
+                      aria-label="更多"
+                    />
+                  }
+                />
+              }
+            >
+              <MoreHorizontal strokeWidth={1.5} />
+            </TooltipTrigger>
+            <TooltipPopup>更多</TooltipPopup>
+          </Tooltip>
+          <MenuPopup align="end" className="w-36">
+            <MenuItem
+              onClick={() => {
+                restart();
+                setMenu(false);
+              }}
+            >
+              <RotateCcw strokeWidth={1.5} />
+              重新开始
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                archive(session.id);
+                setMenu(false);
+              }}
+            >
+              <Archive strokeWidth={1.5} />
+              归档
+            </MenuItem>
+            <MenuItem
+              variant="destructive"
+              closeOnClick={false}
+              onClick={() => {
+                if (!confirmDelete) {
+                  setConfirmDelete(true);
+                  return;
+                }
+                setConfirmDelete(false);
+                remove(session.id);
+                setMenu(false);
+                goReplayList();
+              }}
+            >
+              <Trash2 strokeWidth={1.5} />
+              {confirmDelete ? '再次点击删除' : '删除'}
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <section className="flex min-w-0 flex-1 flex-col border-r border-console-line">
-          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-console-line px-4">
-            <span className="font-mono text-[11px] text-console-ink-2">{tfLabel(timeframe)}</span>
-            <span className="mx-1 h-4 w-px bg-console-line" />
-            <span className="inline-flex items-center gap-1 text-[10px] text-console-muted">
+        <section className="flex min-w-0 flex-1 flex-col border-r border-border">
+          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
+            <span className="font-mono text-[11px] text-foreground/80">{tfLabel(timeframe)}</span>
+            <span className="mx-1 h-4 w-px bg-border" />
+            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
               <Lock size={13} strokeWidth={1.5} />
               品种与区间已锁定 · 周期在图表上方切换
             </span>
             <div className="flex-1" />
             {session.dataSource === 'demo' && (
-              <span className="inline-flex h-[20px] items-center rounded-[4px] bg-console-warn-soft px-1.5 text-[10px] text-console-warn">
+              <Badge variant="warning" size="sm" className="text-[10px]">
                 演示数据
-              </span>
+              </Badge>
             )}
-            <span className="text-[10px] text-console-muted">
+            <span className="text-[10px] text-muted-foreground">
               {session.settings.spreadPoints} points 点差
             </span>
           </div>
 
           {session.reference && session.dataSource === 'demo' && (
-            <div className="shrink-0 border-b border-console-warn/30 bg-console-warn-soft px-4 py-1.5 text-[10px] text-console-warn">
+            <div className="shrink-0 border-b border-warning/30 bg-warning/10 px-4 py-1.5 text-[10px] text-warning-foreground">
               演示数据 · 不能作为真实行情对照
             </div>
           )}
 
-          <div className="relative min-h-0 flex-1 bg-console-card">
+          <div className="relative min-h-0 flex-1 bg-card">
             {barsReady && (
               <ReplayChart
                 sessionId={session.id}
@@ -619,118 +636,118 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
             )}
 
             {(!barsReady || preparing || loading?.id === session.id) && (
-              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-console-card/90">
-                <div className="text-[13px] text-console-ink">
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-card/90">
+                <div className="text-[13px] text-foreground">
                   {loading?.message ?? '准备回放行情'}
                 </div>
-                <div className="h-1 w-56 overflow-hidden rounded-full bg-console-line">
+                <div className="h-1 w-56 overflow-hidden rounded-full bg-border">
                   <div
-                    className="h-full rounded-full bg-console-accent transition-[width] duration-300"
+                    className="h-full rounded-full bg-brand transition-[width] duration-300"
                     style={{ width: `${Math.round((loading?.progress ?? 0.02) * 100)}%` }}
                   />
                 </div>
-                <div className="text-[10px] text-console-muted">
+                <div className="text-[10px] text-muted-foreground">
                   先读本地缓存，缺的部分按 5,000 根一段向网关取 M1
                 </div>
               </div>
             )}
 
             {session.status === 'error' && (
-              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-console-card/90">
-                <div className="text-[13px] text-console-loss">
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-card/90">
+                <div className="text-[13px] text-destructive-foreground">
                   {session.error ?? '这段区间没有可用行情'}
                 </div>
-                <button onClick={goReplayList} className="console-btn console-btn-secondary mt-1">
+                <Button variant="secondary" onClick={goReplayList} className="mt-1">
                   返回复盘列表
-                </button>
+                </Button>
               </div>
             )}
 
             {finished && (
               <div className="absolute inset-x-0 bottom-4 z-20 flex justify-center">
-                <div className="flex items-center gap-3 rounded-[12px] border border-console-line bg-console-card/95 px-4 py-2.5 shadow-[0_12px_28px_-16px_rgba(33,28,22,.4)]">
-                  <span className="text-[11px] text-console-muted">
+                <div className="flex items-center gap-3 rounded-[12px] border border-border bg-card/95 px-4 py-2.5 shadow-[0_12px_28px_-16px_rgba(33,28,22,.4)]">
+                  <span className="text-[11px] text-muted-foreground">
                     复盘已结束，模拟持仓已按最后一根 M1 收盘平仓
                   </span>
-                  <button
-                    onClick={() => goReplayReport(session.id)}
-                    className="console-btn console-btn-primary"
-                  >
-                    查看复盘报告
-                  </button>
+                  <Button onClick={() => goReplayReport(session.id)}>查看复盘报告</Button>
                 </div>
               </div>
             )}
           </div>
         </section>
 
-        <aside className="flex w-[336px] shrink-0 flex-col bg-console-card">
-          <div className="shrink-0 border-b border-console-line px-5 py-4">
+        <aside className="flex w-[336px] shrink-0 flex-col bg-card">
+          <div className="shrink-0 border-b border-border px-5 py-4">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[12px] font-medium">模拟账户</span>
-              <span className="text-[10px] text-console-muted">
+              <span className="text-[10px] text-muted-foreground">
                 {session.settings.currency} · 1:{session.settings.leverage}
               </span>
             </div>
             <div className="mt-2.5 flex items-baseline gap-2">
-              <span className="text-[11px] text-console-muted">净值</span>
+              <span className="text-[11px] text-muted-foreground">净值</span>
               <span className="num font-mono text-[24px] font-medium leading-none tracking-[-0.01em]">
                 {fmtMoney(equity)}
               </span>
-              <span className={clsx('num font-mono text-[11px]', pnlClass(equity - initial))}>
+              <span className={cn('num font-mono text-[11px]', pnlClass(equity - initial))}>
                 {fmtSigned(equity - initial)}
               </span>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[10px] text-console-muted">
+            <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[10px] text-muted-foreground">
               <span>
                 余额{' '}
-                <b className="font-mono font-normal text-console-ink-2">
+                <b className="font-mono font-normal text-foreground/80">
                   {fmtMoney(session.balance)}
                 </b>
               </span>
               <span>
                 保证金{' '}
-                <b className="font-mono font-normal text-console-ink-2">
+                <b className="font-mono font-normal text-foreground/80">
                   {fmtMoney(account?.margin ?? 0)}
                 </b>
               </span>
               <span>
                 可用{' '}
-                <b className="font-mono font-normal text-console-ink-2">
+                <b className="font-mono font-normal text-foreground/80">
                   {fmtMoney(account?.freeMargin ?? 0)}
                 </b>
               </span>
             </div>
           </div>
 
-          <div className="flex h-10 shrink-0 items-stretch gap-0.5 border-b border-console-line px-3">
-            {tabDefs.map(({ value, label, count }) => (
-              <button
-                key={value}
-                onClick={() => setTab(value)}
-                className={clsx(
-                  'relative inline-flex items-center gap-1.5 px-2 text-[12px] transition-colors',
-                  tab === value
-                    ? 'font-medium text-console-ink'
-                    : 'text-console-muted hover:text-console-ink',
-                )}
-              >
-                {label}
-                {count != null && (
-                  <span className="num font-mono text-[10px] text-console-muted">{count}</span>
-                )}
-                {tab === value && (
-                  <span className="absolute inset-x-2 -bottom-px h-0.5 bg-console-ink" />
-                )}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            value={tab}
+            onValueChange={(value) => {
+              if (typeof value === 'string') setTab(value as typeof tab);
+            }}
+            className="contents"
+          >
+            <TabsList
+              variant="underline"
+              className="h-10 w-full shrink-0 items-stretch justify-start gap-0.5 rounded-none border-b border-border px-3"
+            >
+              {tabDefs.map(({ value, label, count }) => (
+                <TabsTab
+                  key={value}
+                  value={value}
+                  className="h-auto gap-1.5 px-2 text-[12px] font-normal data-active:font-medium"
+                >
+                  {label}
+                  {count != null && (
+                    <span className="num font-mono text-[10px] text-muted-foreground">
+                      {count}
+                    </span>
+                  )}
+                </TabsTab>
+              ))}
+            </TabsList>
+          </Tabs>
 
           <div className="min-h-0 flex-1 overflow-auto">
             {tab === 'positions' && (
               <>
                 {session.positions.length === 0 && (
-                  <div className="px-5 py-6 text-[11px] leading-5 text-console-muted">
+                  <div className="px-5 py-6 text-[11px] leading-5 text-muted-foreground">
                     还没有模拟持仓。市价单会在下一根 M1 开盘成交，限价/停损单等待价格触发。
                   </div>
                 )}
@@ -744,22 +761,22 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                       : null;
                   const exit = position.side === 'buy' ? bid : ask;
                   return (
-                    <div key={position.id} className="border-b border-console-line px-5 py-3">
+                    <div key={position.id} className="border-b border-border px-5 py-3">
                       <div className="flex items-center gap-2">
                         <span
-                          className={clsx(
+                          className={cn(
                             'text-[11px] font-medium',
-                            position.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
+                            position.side === 'buy' ? 'text-success-foreground' : 'text-destructive-foreground',
                           )}
                         >
                           {sideText(position.side)}
                         </span>
                         <span className="text-[13px] font-medium">{session.symbol}</span>
-                        <span className="font-mono text-[10px] text-console-muted">
+                        <span className="font-mono text-[10px] text-muted-foreground">
                           {fmtVolume(position.volume, stepVolume)} 手
                         </span>
                         <span
-                          className={clsx(
+                          className={cn(
                             'num ml-auto font-mono text-[13px] font-medium',
                             pnlClass(profit),
                           )}
@@ -768,9 +785,9 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                         </span>
                       </div>
                       {position.templateName && (
-                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-console-muted">
-                          <span className="rounded-[4px] bg-console-hover px-1.5">模板</span>
-                          <span className="text-console-ink-2">{position.templateName}</span>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
+                          <span className="rounded-[4px] bg-accent px-1.5">模板</span>
+                          <span className="text-foreground/80">{position.templateName}</span>
                           {position.steps?.length ? (
                             <span className="num font-mono">
                               {Math.min(position.templateStep, position.steps.length)}/
@@ -786,85 +803,93 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                           ) : null}
                         </div>
                       )}
-                      <div className="mt-1.5 flex items-center gap-4 text-[10px] text-console-muted">
+                      <div className="mt-1.5 flex items-center gap-4 text-[10px] text-muted-foreground">
                         <span>
                           入场{' '}
-                          <b className="font-mono font-normal text-console-ink-2">
+                          <b className="font-mono font-normal text-foreground/80">
                             {fmtPrice(position.entry, digits)}
                           </b>
                         </span>
                         <span>
                           现价{' '}
-                          <b className="font-mono font-normal text-console-ink-2">
+                          <b className="font-mono font-normal text-foreground/80">
                             {fmtPrice(exit, digits)}
                           </b>
                         </span>
                         {r != null && <span className={pnlClass(r)}>{fmtSigned(r)}R</span>}
                       </div>
-                      <div className="mt-2 flex items-center gap-3 text-[10px] text-console-muted">
+                      <div className="mt-2 flex items-center gap-3 text-[10px] text-muted-foreground">
                         <span>
                           SL{' '}
-                          <b className="font-mono font-normal text-console-ink-2">
+                          <b className="font-mono font-normal text-foreground/80">
                             {fmtPrice(position.sl, digits)}
                           </b>
                         </span>
                         <span>
                           TP{' '}
-                          <b className="font-mono font-normal text-console-ink-2">
+                          <b className="font-mono font-normal text-foreground/80">
                             {fmtPrice(position.tp, digits)}
                           </b>
                         </span>
                         <div className="flex-1" />
-                        <button
+                        <Button
+                          variant="link"
+                          size="xs"
                           onClick={() => closePosition(position.id)}
-                          className="text-console-muted hover:text-console-ink"
+                          className="h-auto p-0 text-[10px] font-normal text-muted-foreground hover:text-foreground hover:no-underline"
                         >
                           平仓
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          variant="link"
+                          size="xs"
                           onClick={() => startEdit(position.id, position.sl, position.tp)}
-                          className="text-console-muted hover:text-console-ink"
+                          className="h-auto p-0 text-[10px] font-normal text-muted-foreground hover:text-foreground hover:no-underline"
                         >
                           改止损
-                        </button>
+                        </Button>
                       </div>
                       {editing === position.id && (
-                        <div className="mt-2 rounded-[8px] border border-console-line bg-console-canvas p-2">
+                        <div className="mt-2 rounded-[8px] border border-border bg-sidebar p-2">
                           <div className="grid grid-cols-2 gap-2">
                             <label className="block">
-                              <span className="mb-1 block text-[10px] text-console-muted">
+                              <span className="mb-1 block text-[10px] text-muted-foreground">
                                 止损
                               </span>
-                              <input
+                              <Input
                                 value={editSl}
                                 onChange={(event) => setEditSl(event.target.value)}
-                                className="console-input w-full font-mono text-[11px]"
+                                className="w-full font-mono text-[11px]"
                               />
                             </label>
                             <label className="block">
-                              <span className="mb-1 block text-[10px] text-console-muted">
+                              <span className="mb-1 block text-[10px] text-muted-foreground">
                                 止盈
                               </span>
-                              <input
+                              <Input
                                 value={editTp}
                                 onChange={(event) => setEditTp(event.target.value)}
-                                className="console-input w-full font-mono text-[11px]"
+                                className="w-full font-mono text-[11px]"
                               />
                             </label>
                           </div>
                           <div className="mt-2 flex justify-end gap-1.5">
-                            <button
+                            <Button
+                              variant="link"
+                              size="xs"
                               onClick={() => setEditing(null)}
-                              className="text-[10px] text-console-muted hover:text-console-ink"
+                              className="h-auto p-0 text-[10px] font-normal text-muted-foreground hover:text-foreground hover:no-underline"
                             >
                               取消
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                              variant="link"
+                              size="xs"
                               onClick={() => saveEdit(position.id)}
-                              className="text-[10px] font-medium text-console-accent"
+                              className="h-auto p-0 text-[10px] font-medium text-brand"
                             >
                               保存
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       )}
@@ -872,12 +897,12 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                   );
                 })}
                 {latestNote && (
-                  <div className="border-b border-console-line px-5 py-3">
-                    <div className="flex items-center justify-between text-[10px] text-console-muted">
+                  <div className="border-b border-border px-5 py-3">
+                    <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                       <span>最新笔记</span>
                       <span className="num font-mono">{fmtShort(latestNote.time)}</span>
                     </div>
-                    <p className="mt-1.5 text-[11px] leading-5 text-console-ink-2">
+                    <p className="mt-1.5 text-[11px] leading-5 text-foreground/80">
                       {latestNote.text}
                     </p>
                   </div>
@@ -888,37 +913,39 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
             {tab === 'orders' && (
               <>
                 {session.orders.length === 0 && (
-                  <div className="px-5 py-6 text-[11px] leading-5 text-console-muted">
+                  <div className="px-5 py-6 text-[11px] leading-5 text-muted-foreground">
                     没有等待触发的模拟挂单。
                   </div>
                 )}
                 {session.orders.map((order) => (
-                  <div key={order.id} className="border-b border-console-line px-5 py-3">
+                  <div key={order.id} className="border-b border-border px-5 py-3">
                     <div className="flex items-center gap-2">
                       <span
-                        className={clsx(
+                        className={cn(
                           'text-[11px] font-medium',
-                          order.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
+                          order.side === 'buy' ? 'text-success-foreground' : 'text-destructive-foreground',
                         )}
                       >
                         {order.type === 'limit' ? '限价' : order.type === 'stop' ? '停损' : '市价'}
                         {sideText(order.side)}
                       </span>
-                      <span className="font-mono text-[10px] text-console-muted">
+                      <span className="font-mono text-[10px] text-muted-foreground">
                         {fmtVolume(order.volume, stepVolume)} 手
                       </span>
                       <div className="flex-1" />
-                      <button
+                      <Button
+                        variant="link"
+                        size="xs"
                         onClick={() => cancelOrder(order.id)}
-                        className="text-[10px] text-console-muted hover:text-console-loss"
+                        className="h-auto p-0 text-[10px] font-normal text-muted-foreground hover:text-destructive-foreground hover:no-underline"
                       >
                         撤单
-                      </button>
+                      </Button>
                     </div>
-                    <div className="mt-1.5 flex items-center gap-4 text-[10px] text-console-muted">
+                    <div className="mt-1.5 flex items-center gap-4 text-[10px] text-muted-foreground">
                       <span>
                         委托{' '}
-                        <b className="font-mono font-normal text-console-ink-2">
+                        <b className="font-mono font-normal text-foreground/80">
                           {fmtPrice(order.price, digits)}
                         </b>
                       </span>
@@ -926,14 +953,14 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                       <span>TP {fmtPrice(order.tp, digits)}</span>
                     </div>
                     {order.templateName && (
-                      <div className="mt-1 text-[10px] text-console-muted">
+                      <div className="mt-1 text-[10px] text-muted-foreground">
                         模板 {order.templateName}
                         {order.steps?.length
                           ? ` · ${order.steps.map(stepSummary).join(' · ')}`
                           : ''}
                       </div>
                     )}
-                    <div className="mt-1 text-[10px] text-console-faint">
+                    <div className="mt-1 text-[10px] text-muted-foreground/60">
                       {order.type === 'market'
                         ? '下一根 M1 开盘按对手价成交'
                         : '价格触发后按委托价成交，跳空时按开盘价'}
@@ -947,58 +974,69 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
               <div className="flex h-full flex-col">
                 <div className="min-h-0 flex-1">
                   {session.notes.length === 0 && (
-                    <div className="px-5 py-6 text-[11px] leading-5 text-console-muted">
+                    <div className="px-5 py-6 text-[11px] leading-5 text-muted-foreground">
                       在回放过程中记下判断和情绪，结束后会出现在复盘报告里。
                     </div>
                   )}
                   {[...session.notes].reverse().map((note) => (
-                    <div key={note.id} className="border-b border-console-line px-5 py-3">
-                      <div className="flex items-center gap-2 text-[10px] text-console-muted">
+                    <div key={note.id} className="border-b border-border px-5 py-3">
+                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                         <span className="num font-mono">{fmtShort(note.time)}</span>
                         {note.tag && (
-                          <span className="rounded-[4px] bg-console-hover px-1.5 text-[10px]">
+                          <span className="rounded-[4px] bg-accent px-1.5 text-[10px]">
                             {note.tag}
                           </span>
                         )}
                         <div className="flex-1" />
-                        <button
-                          onClick={() => removeNote(note.id)}
-                          className="text-console-faint hover:text-console-loss"
-                          title="删除笔记"
-                        >
-                          <X size={12} strokeWidth={1.5} />
-                        </button>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => removeNote(note.id)}
+                                className="text-muted-foreground/60 hover:text-destructive-foreground"
+                                title="删除笔记"
+                                aria-label="删除笔记"
+                              />
+                            }
+                          >
+                            <X strokeWidth={1.5} />
+                          </TooltipTrigger>
+                          <TooltipPopup>删除笔记</TooltipPopup>
+                        </Tooltip>
                       </div>
-                      <p className="mt-1.5 text-[11px] leading-5 text-console-ink-2">{note.text}</p>
+                      <p className="mt-1.5 text-[11px] leading-5 text-foreground/80">{note.text}</p>
                     </div>
                   ))}
                 </div>
-                <div className="border-t border-console-line p-3">
-                  <textarea
+                <div className="border-t border-border p-3">
+                  <Textarea
                     value={noteText}
                     onChange={(event) => setNoteText(event.target.value)}
                     placeholder="记录这一段的判断…"
                     rows={2}
-                    className="console-input h-auto w-full resize-none py-2 text-[11px] leading-5"
+                    className="min-h-0 w-full resize-none text-[11px] leading-5"
                   />
                   <div className="mt-2 flex items-center gap-2">
-                    <input
+                    <Input
                       value={noteTag}
                       onChange={(event) => setNoteTag(event.target.value)}
                       placeholder="标签"
-                      className="console-input h-7 w-24 text-[11px]"
+                      className="w-24 text-[11px]"
                     />
                     <div className="flex-1" />
-                    <button
+                    <Button
+                      size="xs"
                       onClick={() => {
                         addNote(noteText, noteTag);
                         setNoteText('');
                       }}
                       disabled={!noteText.trim()}
-                      className="console-btn console-btn-primary h-7 px-3 text-[11px] disabled:opacity-40"
+                      className="px-3 text-[11px]"
                     >
                       添加笔记
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -1013,7 +1051,7 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
             )}
 
             {tab === 'stats' && stats && (
-              <div className="grid grid-cols-2 gap-px bg-console-line">
+              <div className="grid grid-cols-2 gap-px bg-border">
                 {[
                   ['已平仓净盈亏', fmtSigned(stats.netPnl), pnlClass(stats.netPnl)],
                   ['含浮盈净值变化', fmtSigned(stats.equityPnl), pnlClass(stats.equityPnl)],
@@ -1031,12 +1069,12 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                   ],
                   ['总 R', fmtSigned(stats.totalR), pnlClass(stats.totalR)],
                   ['盈亏比', stats.profitFactor == null ? '—' : stats.profitFactor.toFixed(2), ''],
-                  ['最大回撤', `-${session.maxDrawdownPct.toFixed(1)}%`, 'text-console-loss'],
+                  ['最大回撤', `-${session.maxDrawdownPct.toFixed(1)}%`, 'text-destructive-foreground'],
                   ['保证金', fmtMoney(account?.margin ?? 0), ''],
                 ].map(([label, value, tone]) => (
-                  <div key={label} className="bg-console-card px-4 py-3">
-                    <div className="text-[10px] text-console-muted">{label}</div>
-                    <div className={clsx('num mt-1 font-mono text-[13px] font-medium', tone)}>
+                  <div key={label} className="bg-card px-4 py-3">
+                    <div className="text-[10px] text-muted-foreground">{label}</div>
+                    <div className={cn('num mt-1 font-mono text-[13px] font-medium', tone)}>
                       {value}
                     </div>
                   </div>
@@ -1045,17 +1083,18 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
             )}
           </div>
 
-          <div className="shrink-0 border-t border-console-line px-5 py-4">
+          <div className="shrink-0 border-t border-border px-5 py-4">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-[12px] font-medium">模拟下单</span>
-              <span className="text-[10px] text-console-muted">按 {riskPercent}% 风险</span>
+              <span className="text-[10px] text-muted-foreground">按 {riskPercent}% 风险</span>
             </div>
 
             <div className="mt-2.5 flex items-center gap-2">
-              <select
+              <Select
                 value={template.id}
-                onChange={(event) => {
-                  setActiveTemplate(event.target.value);
+                onValueChange={(value) => {
+                  if (typeof value !== 'string') return;
+                  setActiveTemplate(value);
                   // 选中模板即视为启用，避免选了模板却仍按手工参数下单
                   if (!templateArmed) setTemplateArmed(true);
                   setSlTouched(false);
@@ -1063,35 +1102,51 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                   setVolumeTouched(false);
                   ticketInited.current = null;
                 }}
-                className="console-input h-7 min-w-0 flex-1 text-[11px]"
-                title="下单模板"
               >
-                {templates.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-              <button
+                <SelectTrigger
+                  size="sm"
+                  className="h-7 min-w-0 flex-1 text-[11px]"
+                  aria-label="下单模板"
+                  title="下单模板"
+                >
+                  <SelectValue>
+                    {(value: string | null) =>
+                      templates.find((item) => item.id === value)?.name ?? '下单模板'
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  {templates.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+              <Button
+                variant={templateArmed ? 'outline' : 'ghost'}
+                size="xs"
                 onClick={toggleTemplate}
-                className={clsx(
-                  'h-7 shrink-0 rounded-[6px] border px-2 text-[11px] transition-colors',
+                className={cn(
+                  'shrink-0 px-2 text-[11px]',
                   templateArmed
-                    ? 'border-console-accent bg-console-accent-soft text-console-accent'
-                    : 'border-console-line text-console-muted hover:text-console-ink',
+                    ? 'border-brand bg-brand-soft text-brand'
+                    : 'text-muted-foreground hover:text-foreground',
                 )}
               >
                 {templateArmed ? '已启用' : '启用'}
-              </button>
+              </Button>
             </div>
-            <div className="mt-1 truncate text-[10px] text-console-muted">
+            <div className="mt-1 truncate text-[10px] text-muted-foreground">
               {templateSummary(template)}
             </div>
 
-            <div className="mt-2.5 grid grid-cols-2 gap-0.5 rounded-[8px] bg-console-hover p-0.5">
+            <div className="mt-2.5 grid grid-cols-2 gap-0.5 rounded-[8px] bg-accent p-0.5">
               {SIDES.map((item) => (
-                <button
+                <Button
                   key={item.value}
+                  variant="ghost"
+                  size="xs"
                   onClick={() => {
                     setSide(item.value);
                     setSlTouched(false);
@@ -1099,24 +1154,26 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                     setRetryTag(null);
                     ticketInited.current = null;
                   }}
-                  className={clsx(
-                    'h-[30px] rounded-[6px] text-[12px] transition-colors',
+                  className={cn(
+                    'h-[30px] rounded-md text-[12px]',
                     side === item.value
                       ? item.value === 'buy'
-                        ? 'bg-console-gain-soft font-medium text-console-gain'
-                        : 'bg-console-loss-soft font-medium text-console-loss'
-                      : 'text-console-muted hover:text-console-ink',
+                        ? 'bg-success/10 font-medium text-success-foreground hover:bg-success/10'
+                        : 'bg-destructive/10 font-medium text-destructive-foreground hover:bg-destructive/10'
+                      : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
                   {item.label}
-                </button>
+                </Button>
               ))}
             </div>
 
-            <div className="mt-2.5 grid grid-cols-3 gap-0.5 rounded-[8px] bg-console-hover p-0.5">
+            <div className="mt-2.5 grid grid-cols-3 gap-0.5 rounded-[8px] bg-accent p-0.5">
               {TYPES.map((item) => (
-                <button
+                <Button
                   key={item.value}
+                  variant="ghost"
+                  size="xs"
                   onClick={() => {
                     setType(item.value);
                     setSlTouched(false);
@@ -1126,49 +1183,53 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                       setPrice(String(roundPrice(entry, info)));
                     }
                   }}
-                  className={clsx(
-                    'h-6 rounded-[6px] text-[11px]',
+                  className={cn(
+                    'h-6 rounded-md text-[11px]',
                     type === item.value
-                      ? 'bg-console-card text-console-ink shadow-[0_1px_1px_rgba(33,28,22,.06)]'
-                      : 'text-console-muted hover:text-console-ink',
+                      ? 'bg-card text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
                   {item.label}
-                </button>
+                </Button>
               ))}
             </div>
 
             <div className="mt-2 flex items-center justify-between gap-2 text-[10px]">
-              <button
+              <Button
+                variant="ghost"
+                size="xs"
                 onClick={toggleDraft}
-                className={clsx(
-                  'inline-flex items-center gap-1 rounded-[6px] px-1.5 py-1 transition-colors',
+                className={cn(
+                  'gap-1 px-1.5 py-1 text-[10px]',
                   draftActive
-                    ? 'bg-console-accent-soft text-console-accent'
-                    : 'text-console-muted hover:bg-console-hover hover:text-console-ink',
+                    ? 'bg-brand-soft text-brand hover:bg-brand-soft'
+                    : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                 )}
               >
-                <PenLine size={12} strokeWidth={1.5} />
+                <PenLine strokeWidth={1.5} />
                 {draftActive
                   ? type === 'market'
                     ? '划线中 · 拖动设置止损/止盈'
                     : '划线中 · 点击图表设价'
                   : '画线下单'}
-              </button>
+              </Button>
               {draftActive && (
-                <button
+                <Button
+                  variant="link"
+                  size="xs"
                   onClick={() => setDraftActive(false)}
-                  className="text-console-faint hover:text-console-ink"
+                  className="h-auto p-0 text-[10px] font-normal text-muted-foreground/60 hover:text-foreground hover:no-underline"
                 >
                   清除划线
-                </button>
+                </Button>
               )}
             </div>
 
             <div className="mt-2.5 grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="mb-1 block text-[10px] text-console-muted">手数</span>
-                <input
+                <span className="mb-1 block text-[10px] text-muted-foreground">手数</span>
+                <Input
                   value={volume}
                   onChange={(event) => {
                     setVolume(event.target.value);
@@ -1176,20 +1237,20 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                     setVolumeTouched(true);
                   }}
                   inputMode="decimal"
-                  className="console-input w-full font-mono text-[11px]"
+                  className="w-full font-mono text-[11px]"
                 />
               </label>
               <div>
-                <span className="mb-1 block text-[10px] text-console-muted">风险</span>
-                <div className="console-input flex w-full items-center font-mono text-[11px] text-console-ink-2">
+                <span className="mb-1 block text-[10px] text-muted-foreground">风险</span>
+                <div className="flex h-8.5 w-full items-center rounded-lg border border-input bg-background px-[calc(--spacing(3)-1px)] font-mono sm:h-7.5 text-[11px] text-foreground/80">
                   {riskAmount == null ? '—' : fmtMoney(riskAmount)}
                 </div>
               </div>
               <label className="block">
-                <span className="mb-1 block text-[10px] text-console-muted">
+                <span className="mb-1 block text-[10px] text-muted-foreground">
                   {type === 'market' ? '参考价' : '委托价'}
                 </span>
-                <input
+                <Input
                   value={type === 'market' ? fmtPrice(entry, digits) : price}
                   onChange={(event) => {
                     const next = event.target.value;
@@ -1203,18 +1264,18 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                     }
                   }}
                   disabled={type === 'market'}
-                  className="console-input w-full font-mono text-[11px] disabled:text-console-muted"
+                  className="w-full font-mono text-[11px] disabled:text-muted-foreground"
                 />
               </label>
               <div>
-                <span className="mb-1 block text-[10px] text-console-muted">保证金</span>
-                <div className="console-input flex w-full items-center font-mono text-[11px] text-console-ink-2">
+                <span className="mb-1 block text-[10px] text-muted-foreground">保证金</span>
+                <div className="flex h-8.5 w-full items-center rounded-lg border border-input bg-background px-[calc(--spacing(3)-1px)] font-mono sm:h-7.5 text-[11px] text-foreground/80">
                   ≈ {fmtMoney(margin)}
                 </div>
               </div>
               <label className="block">
-                <span className="mb-1 block text-[10px] text-console-muted">止损</span>
-                <input
+                <span className="mb-1 block text-[10px] text-muted-foreground">止损</span>
+                <Input
                   value={sl}
                   onChange={(event) => {
                     const next = event.target.value;
@@ -1227,22 +1288,22 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
                       setTpTouched(true);
                     }
                   }}
-                  className="console-input w-full font-mono text-[11px]"
+                  className="w-full font-mono text-[11px]"
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-[10px] text-console-muted">止盈</span>
-                <input
+                <span className="mb-1 block text-[10px] text-muted-foreground">止盈</span>
+                <Input
                   value={tp}
                   onChange={(event) => {
                     setTp(event.target.value);
                     setTpTouched(true);
                   }}
-                  className="console-input w-full font-mono text-[11px]"
+                  className="w-full font-mono text-[11px]"
                 />
               </label>
             </div>
-            <div className="mt-2.5 flex items-center justify-between gap-3 text-[10px] text-console-muted">
+            <div className="mt-2.5 flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
               <span>
                 风险 {riskPct == null ? '—' : `${riskPct.toFixed(2)}%`}
                 {rr != null ? ` · R ${rr.toFixed(1)}` : ''}
@@ -1252,28 +1313,30 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
               </span>
             </div>
             {retryTag != null && (
-              <div className="mt-2 flex items-center gap-2 rounded-[6px] bg-console-accent-soft px-2 py-1 text-[10px] text-console-accent">
+              <div className="mt-2 flex items-center gap-2 rounded-[6px] bg-brand-soft px-2 py-1 text-[10px] text-brand">
                 <span>重演参照 #{session.reference?.positionId ?? '—'}</span>
                 {retryTag && <span className="min-w-0 truncate">标签 {retryTag}</span>}
-                <button
+                <Button
+                  variant="link"
+                  size="xs"
                   onClick={() => setRetryTag(null)}
-                  className="ml-auto shrink-0 hover:underline"
+                  className="ml-auto h-auto shrink-0 p-0 text-[10px] font-normal text-brand"
                 >
                   取消重演
-                </button>
+                </Button>
               </div>
             )}
-            <button
+            <Button
               onClick={submit}
               disabled={finished || preparing || !bar}
-              className="mt-2.5 h-9 w-full rounded-[8px] bg-console-ink text-[12px] font-medium text-console-card transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="mt-2.5 h-9 w-full text-[12px]"
             >
               模拟{sideText(side)} {fmtVolume(Number(volume) || 0, stepVolume)} 手
-            </button>
+            </Button>
             <div
-              className={clsx(
+              className={cn(
                 'mt-1.5 min-h-[14px] text-[10px]',
-                ticketError ? 'text-console-loss' : 'text-console-muted',
+                ticketError ? 'text-destructive-foreground' : 'text-muted-foreground',
               )}
             >
               {ticketError ?? '提交后由下一根 M1 撮合，不会发送到券商'}
@@ -1282,55 +1345,79 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
         </aside>
       </div>
 
-      <footer className="flex h-[72px] shrink-0 items-center gap-4 border-t border-console-line bg-console-card px-5">
+      <footer className="flex h-[72px] shrink-0 items-center gap-4 border-t border-border bg-card px-5">
         <div className="flex shrink-0 items-center gap-1">
-          <button
-            onClick={restart}
-            className="grid h-8 w-8 place-items-center rounded-[8px] text-console-muted hover:bg-console-hover hover:text-console-ink"
-            title="重新开始"
-          >
-            <RotateCcw size={15} strokeWidth={1.5} />
-          </button>
-          <button
-            onClick={() => step(1)}
-            disabled={finished || preparing}
-            className="grid h-8 w-8 place-items-center rounded-[8px] text-console-muted hover:bg-console-hover hover:text-console-ink disabled:opacity-40"
-            title="单步一根 M1"
-          >
-            <StepForward size={15} strokeWidth={1.5} />
-          </button>
-          <button
-            onClick={toggle}
-            disabled={finished || preparing}
-            className="grid h-9 w-9 place-items-center rounded-[10px] bg-console-ink text-console-card transition-opacity hover:opacity-90 disabled:opacity-40"
-            title={playing ? '暂停' : '播放'}
-          >
-            {playing ? (
-              <Pause size={16} strokeWidth={1.5} />
-            ) : (
-              <Play size={16} strokeWidth={1.5} />
-            )}
-          </button>
-          <div className="ml-2 flex items-center gap-0.5 rounded-[8px] bg-console-hover p-0.5">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={restart}
+                  title="重新开始"
+                  aria-label="重新开始"
+                />
+              }
+            >
+              <RotateCcw strokeWidth={1.5} />
+            </TooltipTrigger>
+            <TooltipPopup>重新开始</TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => step(1)}
+                  disabled={finished || preparing}
+                  title="单步一根 M1"
+                  aria-label="单步一根 M1"
+                />
+              }
+            >
+              <StepForward strokeWidth={1.5} />
+            </TooltipTrigger>
+            <TooltipPopup>单步一根 M1</TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-lg"
+                  onClick={toggle}
+                  disabled={finished || preparing}
+                  title={playing ? '暂停' : '播放'}
+                  aria-label={playing ? '暂停' : '播放'}
+                />
+              }
+            >
+              {playing ? <Pause strokeWidth={1.5} /> : <Play strokeWidth={1.5} />}
+            </TooltipTrigger>
+            <TooltipPopup>{playing ? '暂停' : '播放'}</TooltipPopup>
+          </Tooltip>
+          <div className="ml-2 flex items-center gap-0.5 rounded-lg bg-accent p-0.5">
             {SPEEDS.map((value) => (
-              <button
+              <Button
                 key={value}
+                variant="ghost"
+                size="xs"
                 onClick={() => setSpeed(value)}
-                className={clsx(
-                  'h-[26px] rounded-[6px] px-2 font-mono text-[10px]',
+                className={cn(
+                  'h-[26px] px-2 font-mono text-[10px]',
                   speed === value
-                    ? 'bg-console-card text-console-ink shadow-[0_1px_1px_rgba(33,28,22,.06)]'
-                    : 'text-console-muted hover:text-console-ink',
+                    ? 'bg-card text-foreground shadow-sm hover:bg-card'
+                    : 'text-muted-foreground hover:text-foreground',
                 )}
               >
                 {value}x
-              </button>
+              </Button>
             ))}
           </div>
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="relative h-3 font-mono text-[10px] text-console-muted">
+          <div className="relative h-3 font-mono text-[10px] text-muted-foreground">
             <span className="absolute left-0 top-0">{fmtDate(session.startTs)}</span>
             <span className="absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap">
               {fmtDate((session.startTs + session.endTs) / 2)}
@@ -1341,33 +1428,17 @@ export function ReplayWorkspace({ sessionId }: { sessionId: string }) {
         </div>
 
         <div className="flex min-w-[104px] shrink-0 flex-col items-end gap-0.5">
-          <span className="num font-mono text-[12px] text-console-ink">
+          <span className="num font-mono text-[12px] text-foreground">
             {fmtShort(virtualTime)}
           </span>
-          <span className="text-[10px] text-console-muted">
+          <span className="text-[10px] text-muted-foreground">
             {Math.round(progress * 100)}% · {played.toLocaleString()} /{' '}
             {session.totalBars.toLocaleString()} 根
           </span>
         </div>
 
-        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[10px] text-console-muted">
-          <button
-            onClick={() => setFollow(!follow)}
-            className={clsx(
-              'relative h-4 w-7 rounded-full transition-colors',
-              follow ? 'bg-console-ink' : 'bg-console-line-2',
-            )}
-            role="switch"
-            aria-checked={follow}
-            title="跟随游标"
-          >
-            <span
-              className={clsx(
-                'absolute top-0.5 h-3 w-3 rounded-full bg-console-card transition-transform',
-                follow ? 'translate-x-3.5' : 'translate-x-0.5',
-              )}
-            />
-          </button>
+        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[10px] text-muted-foreground">
+          <Switch checked={follow} onCheckedChange={setFollow} title="跟随游标" />
           跟随游标
         </label>
       </footer>

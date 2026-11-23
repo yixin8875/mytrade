@@ -1,6 +1,23 @@
 import { useMemo } from 'react';
 import { ArrowLeft, Download, RotateCcw } from 'lucide-react';
-import { clsx } from 'clsx';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Empty,
+  EmptyContent,
+  EmptyHeader,
+  EmptyTitle,
+} from '@/components/ui/empty';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
 import { usePrivacyMask } from '../lib/privacy';
 import { useApp, type Page } from '../store/useApp';
@@ -12,7 +29,7 @@ import { fmtDate, fmtDateTime, fmtShort } from './time';
 import type { ReplaySession, ReplayStats } from './types';
 
 function pnlClass(value: number): string {
-  return value > 0 ? 'text-console-gain' : value < 0 ? 'text-console-loss' : 'text-console-muted';
+  return value > 0 ? 'text-success-foreground' : value < 0 ? 'text-destructive-foreground' : 'text-muted-foreground';
 }
 
 function closedByText(reason: ReplaySession['trades'][number]['closedBy']): string {
@@ -100,7 +117,7 @@ function EquityCurve({ session }: { session: ReplaySession }) {
 
   if (!geometry) {
     return (
-      <div className="flex h-[240px] items-center justify-center text-[11px] text-console-muted">
+      <div className="flex h-[240px] items-center justify-center text-[11px] text-muted-foreground">
         净值点还不够，回放一段后会出现资金曲线
       </div>
     );
@@ -111,10 +128,10 @@ function EquityCurve({ session }: { session: ReplaySession }) {
 
   return (
     <div className="relative">
-      <div className="pointer-events-none absolute left-2 top-0 font-mono text-[10px] text-console-muted">
+      <div className="pointer-events-none absolute left-2 top-0 font-mono text-[10px] text-muted-foreground">
         {fmtMoney(geometry.max)}
       </div>
-      <div className="pointer-events-none absolute bottom-5 left-2 font-mono text-[10px] text-console-muted">
+      <div className="pointer-events-none absolute bottom-5 left-2 font-mono text-[10px] text-muted-foreground">
         {fmtMoney(geometry.min)}
       </div>
       <svg
@@ -155,7 +172,7 @@ function EquityCurve({ session }: { session: ReplaySession }) {
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      <div className="mt-1 flex justify-between font-mono text-[10px] text-console-muted">
+      <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
         <span>{curve.length ? fmtShort(curve[0].t) : ''}</span>
         <span>初始 {fmtMoney(initial)}</span>
         <span>{curve.length ? fmtShort(curve[curve.length - 1].t) : ''}</span>
@@ -173,18 +190,18 @@ function RHistogram({ stats }: { stats: ReplayStats }) {
           key={bin.label}
           className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1.5"
         >
-          <span className="num font-mono text-[10px] text-console-muted">{bin.count}</span>
+          <span className="num font-mono text-[10px] text-muted-foreground">{bin.count}</span>
           <div
-            className={clsx(
+            className={cn(
               'w-full rounded-t-[3px]',
-              bin.negative ? 'bg-console-loss' : 'bg-console-gain',
+              bin.negative ? 'bg-destructive' : 'bg-success',
             )}
             style={{
               height: `${Math.max(bin.count > 0 ? 6 : 2, (bin.count / max) * 132)}px`,
               opacity: bin.count > 0 ? 0.85 : 0.18,
             }}
           />
-          <span className="whitespace-nowrap font-mono text-[9px] text-console-muted">
+          <span className="whitespace-nowrap font-mono text-[9px] text-muted-foreground">
             {bin.label}
           </span>
         </div>
@@ -266,10 +283,10 @@ function ReferenceCompare({ session }: { session: ReplaySession }) {
   const shown = retry ? rows.filter((row) => row.real !== row.replay) : rows;
 
   return (
-    <section className="mt-4 rounded-[12px] border border-console-line bg-console-card p-5">
+    <section className="mt-4 rounded-[12px] border border-border bg-card p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-[12px] font-medium">实盘 vs 重演</h2>
-        <span className="font-mono text-[10px] text-console-muted">
+        <span className="font-mono text-[10px] text-muted-foreground">
           实盘 #{reference.positionId}
           {currentLogin != null && currentLogin !== reference.login
             ? ` · 账户 ${reference.login} · 当前终端为 ${currentLogin}`
@@ -277,47 +294,59 @@ function ReferenceCompare({ session }: { session: ReplaySession }) {
         </span>
       </div>
       {shown.length > 0 ? (
-        <table className="mt-3 w-full text-[11px]">
-          <thead>
-            <tr className="text-left text-[10px] text-console-muted">
-              <th className="pb-1.5 font-normal">差异</th>
-              <th className="pb-1.5 pl-3 font-normal">实盘</th>
-              <th className="pb-1.5 pl-3 font-normal">重演</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table className="mt-3 text-[11px]">
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="h-auto px-0 pb-1.5 text-[10px] font-normal text-muted-foreground">
+                差异
+              </TableHead>
+              <TableHead className="h-auto px-0 pb-1.5 pl-3 text-[10px] font-normal text-muted-foreground">
+                实盘
+              </TableHead>
+              <TableHead className="h-auto px-0 pb-1.5 pl-3 text-[10px] font-normal text-muted-foreground">
+                重演
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {shown.map((row) => (
-              <tr key={row.label} className="border-t border-console-line">
-                <td className="py-1.5 text-console-muted">{row.label}</td>
-                <td className="num py-1.5 pl-3 font-mono text-console-ink-2">{row.real}</td>
-                <td className="num py-1.5 pl-3 font-mono text-console-ink-2">{row.replay}</td>
-              </tr>
+              <TableRow key={row.label}>
+                <TableCell className="px-0 py-1.5 text-muted-foreground">{row.label}</TableCell>
+                <TableCell className="num px-0 py-1.5 pl-3 font-mono text-foreground/80">
+                  {row.real}
+                </TableCell>
+                <TableCell className="num px-0 py-1.5 pl-3 font-mono text-foreground/80">
+                  {row.replay}
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       ) : retry ? (
-        <p className="mt-3 text-[11px] text-console-muted">
+        <p className="mt-3 text-[11px] text-muted-foreground">
           重演与实盘在方向、手数、入场、出场、R、MFE/MAE、持仓时长与出场方式上完全一致。
         </p>
       ) : null}
       {same.length > 0 && shown.length > 0 && (
-        <p className="mt-2 text-[10px] text-console-faint">
+        <p className="mt-2 text-[10px] text-muted-foreground/60">
           与实盘一致：{same.map((row) => row.label).join('、')}
         </p>
       )}
       {retry ? (
-        <p className="mt-2 text-[10px] leading-4 text-console-faint">
+        <p className="mt-2 text-[10px] leading-4 text-muted-foreground/60">
           实盘含真实滑点、隔夜利息；回放按 M1 保守撮合、不含隔夜利息。只用于过程对照，不能据此断言「实盘比回放差」。
         </p>
       ) : (
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-console-muted">
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
           还没有重演成交。回到工作台点「重演这笔」，成交后这里会自动出现对照。
-          <button
+          <Button
+            variant="link"
+            size="xs"
             onClick={() => goReplaySession(session.id)}
-            className="text-console-accent hover:underline"
+            className="h-auto p-0 text-[10px] font-normal text-brand"
           >
             回到工作台
-          </button>
+          </Button>
         </div>
       )}
     </section>
@@ -343,14 +372,16 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
 
   if (!session || !stats) {
     return (
-      <div className="flex h-full items-center justify-center bg-console-canvas">
-        <div className="text-center">
-          <div className="text-[13px] text-console-ink">复盘会话不存在</div>
-          <button onClick={goReplayList} className="console-btn console-btn-secondary mt-3">
-            返回复盘列表
-          </button>
-        </div>
-      </div>
+      <Empty className="h-full bg-sidebar">
+        <EmptyHeader>
+          <EmptyTitle className="text-[13px] font-medium">复盘会话不存在</EmptyTitle>
+          <EmptyContent>
+            <Button onClick={goReplayList} className="mt-3">
+              返回复盘列表
+            </Button>
+          </EmptyContent>
+        </EmptyHeader>
+      </Empty>
     );
   }
 
@@ -386,7 +417,7 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
       label: '最大回撤',
       value: `-${stats.maxDrawdownPct.toFixed(1)}%`,
       sub: '按净值峰值计算',
-      tone: stats.maxDrawdownPct > 0 ? 'text-console-loss' : '',
+      tone: stats.maxDrawdownPct > 0 ? 'text-destructive-foreground' : '',
     },
     {
       label: '交易笔数',
@@ -399,33 +430,45 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
   ];
 
   return (
-    <div className="h-full overflow-auto bg-console-canvas">
+    <div className="h-full overflow-auto bg-sidebar">
       <div className="mx-auto w-full max-w-[1180px] px-8 py-7">
         <header className="flex items-start gap-3">
-          <button
-            onClick={goReplayList}
-            className="mt-0.5 grid h-8 w-8 place-items-center rounded-[8px] text-console-muted hover:bg-console-hover hover:text-console-ink"
-            title="返回复盘列表"
-          >
-            <ArrowLeft size={16} strokeWidth={1.5} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={goReplayList}
+                  className="mt-0.5"
+                  title="返回复盘列表"
+                  aria-label="返回复盘列表"
+                />
+              }
+            >
+              <ArrowLeft strokeWidth={1.5} />
+            </TooltipTrigger>
+            <TooltipPopup>返回复盘列表</TooltipPopup>
+          </Tooltip>
           {back && (
-            <button
+            <Button
+              variant="outline"
+              size="xs"
               onClick={goBack}
-              className="mt-0.5 shrink-0 rounded-[8px] border border-console-line px-2.5 py-1 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover"
+              className="mt-0.5 shrink-0 text-[11px] text-foreground/80"
               title={`回到${back.label}`}
             >
               返回{back.label}
-            </button>
+            </Button>
           )}
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-[20px] font-medium leading-tight">{session.name}</h1>
-              <span className="inline-flex h-[18px] shrink-0 items-center rounded-[4px] border border-console-line-2 px-1.5 text-[10px] text-console-muted">
+              <Badge variant="outline" size="sm" className="shrink-0 text-[10px]">
                 模拟复盘
-              </span>
+              </Badge>
             </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-console-muted">
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
               <span>{session.symbol}</span>
               <span>
                 {fmtDate(session.startTs)} — {fmtDate(session.endTs)}
@@ -439,49 +482,43 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
             </div>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            <button
+            <Button
+              variant="secondary"
               onClick={() => exportCsv(session)}
               disabled={session.trades.length === 0}
-              className="console-btn console-btn-secondary disabled:opacity-40"
             >
-              <Download size={13} strokeWidth={1.5} />
+              <Download strokeWidth={1.5} />
               导出 CSV
-            </button>
+            </Button>
             {finished ? (
-              <button
+              <Button
                 onClick={() => {
                   const id = duplicateSession(session.id);
                   if (id) goReplaySession(id);
                 }}
-                className="console-btn console-btn-primary"
               >
-                <RotateCcw size={13} strokeWidth={1.5} />
+                <RotateCcw strokeWidth={1.5} />
                 重新挑战
-              </button>
+              </Button>
             ) : (
-              <button
-                onClick={() => goReplaySession(session.id)}
-                className="console-btn console-btn-primary"
-              >
-                继续复盘
-              </button>
+              <Button onClick={() => goReplaySession(session.id)}>继续复盘</Button>
             )}
           </div>
         </header>
 
-        <section className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-[12px] border border-console-line bg-console-line md:grid-cols-3 xl:grid-cols-6">
+        <section className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-[12px] border border-border bg-border md:grid-cols-3 xl:grid-cols-6">
           {readouts.map((item) => (
-            <div key={item.label} className="bg-console-card px-4 py-3.5">
-              <div className="text-[10px] text-console-muted">{item.label}</div>
+            <div key={item.label} className="bg-card px-4 py-3.5">
+              <div className="text-[10px] text-muted-foreground">{item.label}</div>
               <div
-                className={clsx(
+                className={cn(
                   'num mt-1.5 font-mono text-[19px] font-medium leading-none',
                   item.tone,
                 )}
               >
                 {item.value}
               </div>
-              <div className="mt-1.5 truncate text-[10px] text-console-muted">{item.sub}</div>
+              <div className="mt-1.5 truncate text-[10px] text-muted-foreground">{item.sub}</div>
             </div>
           ))}
         </section>
@@ -489,10 +526,10 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
         {session.reference && <ReferenceCompare session={session} />}
 
         <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="rounded-[12px] border border-console-line bg-console-card p-5">
+          <div className="rounded-[12px] border border-border bg-card p-5">
             <div className="flex items-baseline justify-between">
               <h2 className="text-[12px] font-medium">模拟净值曲线</h2>
-              <span className="text-[10px] text-console-muted">
+              <span className="text-[10px] text-muted-foreground">
                 {session.equityCurve.length.toLocaleString()} 个采样点
               </span>
             </div>
@@ -501,10 +538,10 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
             </div>
           </div>
 
-          <div className="rounded-[12px] border border-console-line bg-console-card p-5">
+          <div className="rounded-[12px] border border-border bg-card p-5">
             <div className="flex items-baseline justify-between">
               <h2 className="text-[12px] font-medium">R 分布</h2>
-              <span className="text-[10px] text-console-muted">按初始风险归一</span>
+              <span className="text-[10px] text-muted-foreground">按初始风险归一</span>
             </div>
             <div className="mt-3">
               <RHistogram stats={stats} />
@@ -513,136 +550,173 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
         </section>
 
         <section className="mt-4 grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <div className="rounded-[12px] border border-console-line bg-console-card p-5">
+          <div className="rounded-[12px] border border-border bg-card p-5">
             <h2 className="text-[12px] font-medium">按标签</h2>
             {stats.byTag.length === 0 ? (
-              <p className="mt-3 text-[11px] leading-5 text-console-muted">
+              <p className="mt-3 text-[11px] leading-5 text-muted-foreground">
                 交易带上标签后，这里会按标签汇总表现。
               </p>
             ) : (
-              <table className="mt-3 w-full text-[11px]">
-                <thead>
-                  <tr className="text-left text-[10px] text-console-muted">
-                    <th className="pb-1.5 font-normal">标签</th>
-                    <th className="pb-1.5 text-right font-normal">笔数</th>
-                    <th className="pb-1.5 text-right font-normal">总 R</th>
-                    <th className="pb-1.5 text-right font-normal">净盈亏</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table className="mt-3 text-[11px]">
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="h-auto px-0 pb-1.5 text-[10px] font-normal text-muted-foreground">
+                      标签
+                    </TableHead>
+                    <TableHead className="h-auto px-0 pb-1.5 text-right text-[10px] font-normal text-muted-foreground">
+                      笔数
+                    </TableHead>
+                    <TableHead className="h-auto px-0 pb-1.5 text-right text-[10px] font-normal text-muted-foreground">
+                      总 R
+                    </TableHead>
+                    <TableHead className="h-auto px-0 pb-1.5 text-right text-[10px] font-normal text-muted-foreground">
+                      净盈亏
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {stats.byTag.map((item) => (
-                    <tr key={item.tag} className="border-t border-console-line">
-                      <td className="py-1.5 text-console-ink-2">{item.tag}</td>
-                      <td className="num py-1.5 text-right font-mono text-console-muted">
+                    <TableRow key={item.tag}>
+                      <TableCell className="px-0 py-1.5 text-foreground/80">{item.tag}</TableCell>
+                      <TableCell className="num px-0 py-1.5 text-right font-mono text-muted-foreground">
                         {item.trades}
-                      </td>
-                      <td
-                        className={clsx('num py-1.5 text-right font-mono', pnlClass(item.totalR))}
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          'num px-0 py-1.5 text-right font-mono',
+                          pnlClass(item.totalR),
+                        )}
                       >
                         {fmtSigned(item.totalR)}
-                      </td>
-                      <td className={clsx('num py-1.5 text-right font-mono', pnlClass(item.pnl))}>
+                      </TableCell>
+                      <TableCell
+                        className={cn('num px-0 py-1.5 text-right font-mono', pnlClass(item.pnl))}
+                      >
                         {fmtSigned(item.pnl)}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             )}
           </div>
 
-          <div className="min-w-0 rounded-[12px] border border-console-line bg-console-card p-5">
+          <div className="min-w-0 rounded-[12px] border border-border bg-card p-5">
             <div className="flex items-baseline justify-between">
               <h2 className="text-[12px] font-medium">交易明细</h2>
-              <span className="text-[10px] text-console-muted">
+              <span className="text-[10px] text-muted-foreground">
                 共 {session.trades.length} 笔 · 已扣佣金
               </span>
             </div>
             {session.trades.length === 0 ? (
-              <p className="mt-3 text-[11px] leading-5 text-console-muted">
+              <p className="mt-3 text-[11px] leading-5 text-muted-foreground">
                 这段回放没有已平仓交易。下次可以先按模板给出一张带止损的单。
               </p>
             ) : (
-              <div className="-mx-1 mt-2 overflow-x-auto">
-                <table className="w-full min-w-[800px] text-[11px]">
-                  <thead>
-                    <tr className="text-left text-[10px] text-console-muted">
-                      <th className="px-1 pb-1.5 font-normal">#</th>
-                      <th className="px-1 pb-1.5 font-normal">方向</th>
-                      <th className="px-1 pb-1.5 text-right font-normal">手数</th>
-                      <th className="px-1 pb-1.5 font-normal">入场</th>
-                      <th className="px-1 pb-1.5 font-normal">出场</th>
-                      <th className="px-1 pb-1.5 font-normal">平仓</th>
-                      <th className="px-1 pb-1.5 text-right font-normal">R</th>
-                      <th className="px-1 pb-1.5 text-right font-normal">净盈亏</th>
-                      <th className="px-1 pb-1.5 font-normal">模板</th>
-                      <th className="px-1 pb-1.5 font-normal">标签</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+              <div className="-mx-1 mt-2">
+                <Table className="min-w-[800px] text-[11px]">
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="h-auto pl-3 pr-1 pb-1.5 text-[10px] font-normal text-muted-foreground">
+                        #
+                      </TableHead>
+                      <TableHead className="h-auto px-1 pb-1.5 text-[10px] font-normal text-muted-foreground">
+                        方向
+                      </TableHead>
+                      <TableHead className="h-auto px-1 pb-1.5 text-right text-[10px] font-normal text-muted-foreground">
+                        手数
+                      </TableHead>
+                      <TableHead className="h-auto px-1 pb-1.5 text-[10px] font-normal text-muted-foreground">
+                        入场
+                      </TableHead>
+                      <TableHead className="h-auto px-1 pb-1.5 text-[10px] font-normal text-muted-foreground">
+                        出场
+                      </TableHead>
+                      <TableHead className="h-auto px-1 pb-1.5 text-[10px] font-normal text-muted-foreground">
+                        平仓
+                      </TableHead>
+                      <TableHead className="h-auto px-1 pb-1.5 text-right text-[10px] font-normal text-muted-foreground">
+                        R
+                      </TableHead>
+                      <TableHead className="h-auto px-1 pb-1.5 text-right text-[10px] font-normal text-muted-foreground">
+                        净盈亏
+                      </TableHead>
+                      <TableHead className="h-auto px-1 pb-1.5 text-[10px] font-normal text-muted-foreground">
+                        模板
+                      </TableHead>
+                      <TableHead className="h-auto px-1 pb-1.5 text-[10px] font-normal text-muted-foreground">
+                        标签
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {[...session.trades].reverse().map((trade, index) => (
-                      <tr key={trade.id} className="border-t border-console-line">
-                        <td className="num px-1 py-1.5 font-mono text-console-faint">
+                      <TableRow key={trade.id}>
+                        <TableCell className="num py-1.5 pl-3 pr-1 font-mono text-muted-foreground/60">
                           {session.trades.length - index}
-                        </td>
-                        <td
-                          className={clsx(
+                        </TableCell>
+                        <TableCell
+                          className={cn(
                             'px-1 py-1.5',
-                            trade.side === 'buy' ? 'text-console-gain' : 'text-console-loss',
+                            trade.side === 'buy'
+                              ? 'text-success-foreground'
+                              : 'text-destructive-foreground',
                           )}
                         >
                           {trade.side === 'buy' ? '买入' : '卖出'}
-                        </td>
-                        <td className="num px-1 py-1.5 text-right font-mono text-console-ink-2">
+                        </TableCell>
+                        <TableCell className="num px-1 py-1.5 text-right font-mono text-foreground/80">
                           {fmtVolume(trade.volume, session.symbolInfo.volumeStep)}
-                        </td>
-                        <td className="px-1 py-1.5 font-mono text-console-muted">
+                        </TableCell>
+                        <TableCell className="px-1 py-1.5 font-mono text-muted-foreground">
                           <div>{fmtPrice(trade.entry, digits)}</div>
                           <div className="text-[9px]">{fmtShort(trade.openTs)}</div>
-                        </td>
-                        <td className="px-1 py-1.5 font-mono text-console-muted">
+                        </TableCell>
+                        <TableCell className="px-1 py-1.5 font-mono text-muted-foreground">
                           <div>{fmtPrice(trade.exit, digits)}</div>
                           <div className="text-[9px]">{fmtShort(trade.closeTs)}</div>
-                        </td>
-                        <td className="px-1 py-1.5 text-console-muted">
+                        </TableCell>
+                        <TableCell className="px-1 py-1.5 text-muted-foreground">
                           {closedByText(trade.closedBy)}
-                        </td>
-                        <td
-                          className={clsx(
+                        </TableCell>
+                        <TableCell
+                          className={cn(
                             'num px-1 py-1.5 text-right font-mono',
-                            trade.r == null ? 'text-console-faint' : pnlClass(trade.r),
+                            trade.r == null ? 'text-muted-foreground/60' : pnlClass(trade.r),
                           )}
                         >
                           {trade.r == null ? '—' : fmtSigned(trade.r)}
-                        </td>
-                        <td
-                          className={clsx(
+                        </TableCell>
+                        <TableCell
+                          className={cn(
                             'num px-1 py-1.5 text-right font-mono font-medium',
                             pnlClass(trade.profit),
                           )}
                         >
                           {fmtSigned(trade.profit)}
-                        </td>
-                        <td className="px-1 py-1.5 text-console-muted">
+                        </TableCell>
+                        <TableCell className="px-1 py-1.5 text-muted-foreground">
                           {trade.templateName || '—'}
-                        </td>
-                        <td className="px-1 py-1.5 text-console-muted">{trade.tag || '未分类'}</td>
-                      </tr>
+                        </TableCell>
+                        <TableCell className="px-1 py-1.5 text-muted-foreground">
+                          {trade.tag || '未分类'}
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             )}
           </div>
         </section>
 
-        <section className="mt-4 rounded-[12px] border border-console-line bg-console-card p-5">
+        <section className="mt-4 rounded-[12px] border border-border bg-card p-5">
           <div className="flex items-baseline justify-between">
             <h2 className="text-[12px] font-medium">回放笔记</h2>
-            <span className="text-[10px] text-console-muted">{session.notes.length} 条</span>
+            <span className="text-[10px] text-muted-foreground">{session.notes.length} 条</span>
           </div>
           {session.notes.length === 0 ? (
-            <p className="mt-3 text-[11px] leading-5 text-console-muted">
+            <p className="mt-3 text-[11px] leading-5 text-muted-foreground">
               这次回放没有留下笔记。边看边记，复盘时更容易找到当时为什么下单。
             </p>
           ) : (
@@ -650,22 +724,22 @@ export function ReplayReport({ sessionId }: { sessionId: string }) {
               {session.notes.map((note) => (
                 <div
                   key={note.id}
-                  className="rounded-[8px] border border-console-line bg-console-canvas px-3 py-2.5"
+                  className="rounded-[8px] border border-border bg-sidebar px-3 py-2.5"
                 >
-                  <div className="flex items-center gap-2 text-[10px] text-console-muted">
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                     <span className="num font-mono">{fmtDateTime(note.time)}</span>
                     {note.tag && (
-                      <span className="rounded-[4px] bg-console-hover px-1.5">{note.tag}</span>
+                      <span className="rounded-[4px] bg-accent px-1.5">{note.tag}</span>
                     )}
                   </div>
-                  <p className="mt-1.5 text-[11px] leading-5 text-console-ink-2">{note.text}</p>
+                  <p className="mt-1.5 text-[11px] leading-5 text-foreground/80">{note.text}</p>
                 </div>
               ))}
             </div>
           )}
         </section>
 
-        <footer className="mt-5 flex items-center justify-between pb-2 text-[10px] text-console-muted">
+        <footer className="mt-5 flex items-center justify-between pb-2 text-[10px] text-muted-foreground">
           <span>
             基于 M1 OHLC 的保守撮合，与真实 tick 成交可能存在差异 · 未计隔夜利息 · 数据只保存在本机
           </span>

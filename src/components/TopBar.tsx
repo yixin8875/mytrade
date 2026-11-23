@@ -1,25 +1,28 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import { Bell, CalendarDays } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
 import { fmtMoney, fmtSigned } from '../lib/format';
 import { AccountSwitcher } from './AccountSwitcher';
 import { LayoutPickerButton } from './LayoutPicker';
 import { SymbolTabs } from './SymbolTabs';
+import { Button } from './ui/button';
+import { Separator } from './ui/separator';
 import type { RiskStatus, TradeMode } from '../gateway/types';
 
 /** 亏损额度使用比例 → 状态点与文字色（绿 → 琥珀 → 红） */
 function riskTone(risk: RiskStatus): { dot: string; text: string } {
-  if (risk.halted) return { dot: 'bg-tv-down', text: 'text-tv-down' };
+  if (risk.halted) return { dot: 'bg-destructive', text: 'text-destructive-foreground' };
   if (risk.dailyLossLimit > 0) {
     const used = risk.dailyLoss / risk.dailyLossLimit;
-    if (used >= 0.8) return { dot: 'bg-tv-down', text: 'text-tv-down' };
-    if (used >= 0.5) return { dot: 'bg-tv-warn', text: 'text-tv-warn' };
+    if (used >= 0.8) return { dot: 'bg-destructive', text: 'text-destructive-foreground' };
+    if (used >= 0.5) return { dot: 'bg-warning', text: 'text-warning-foreground' };
   }
   // 冷却 / 次数用尽不算危险，用琥珀色提示即可
-  if (!risk.canTrade) return { dot: 'bg-tv-warn', text: 'text-tv-warn' };
-  return { dot: 'bg-tv-up', text: 'text-tv-text' };
+  if (!risk.canTrade) return { dot: 'bg-warning', text: 'text-warning-foreground' };
+  return { dot: 'bg-success', text: 'text-foreground' };
 }
 
 function riskHint(risk: RiskStatus): string {
@@ -147,68 +150,62 @@ export function TopBar() {
   const tone = riskStatus ? riskTone(riskStatus) : null;
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-tv-border bg-tv-panel px-3">
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card px-3">
       <LayoutPickerButton />
 
-      <div className="h-5 w-px shrink-0 bg-tv-border" />
+      <Separator orientation="vertical" className="h-5" />
 
       <SymbolTabs />
 
-      <button
+      <Button
+        variant={alertsOpen ? 'secondary' : 'ghost'}
+        size="sm"
         onClick={() => setAlertsOpen(!alertsOpen)}
         aria-pressed={alertsOpen}
         data-alerts-toggle
         title="价格告警面板"
-        className={clsx(
-          'flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] transition-colors',
-          alertsOpen
-            ? 'bg-tv-raised text-tv-text'
-            : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
-        )}
+        className="gap-1.5 px-2 font-normal text-[12px]"
       >
         <Bell size={14} strokeWidth={1.5} />
         告警
         {activeAlerts > 0 && (
-          <span className="num font-mono text-[11px] text-tv-faint">{activeAlerts}</span>
+          <span className="num font-mono text-[11px] text-muted-foreground/70">{activeAlerts}</span>
         )}
-      </button>
+      </Button>
 
-      <button
+      <Button
+        variant={calendarOpen ? 'secondary' : 'ghost'}
+        size="sm"
         onClick={() => setCalendarOpen(!calendarOpen)}
         aria-pressed={calendarOpen}
         title="财经日历"
-        className={clsx(
-          'flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] transition-colors',
-          calendarOpen
-            ? 'bg-tv-raised text-tv-text'
-            : 'text-tv-muted hover:bg-tv-hover hover:text-tv-text',
-        )}
+        className="gap-1.5 px-2 font-normal text-[12px]"
       >
         <CalendarDays size={14} strokeWidth={1.5} />
         日历
-      </button>
+      </Button>
 
       <AccountSwitcher />
 
-      <div className="flex shrink-0 items-baseline gap-1.5 border-l border-tv-border pl-3 font-mono text-[12px]">
-        <span className="font-sans text-[11px] text-tv-muted">余额</span>
+      <div className="flex shrink-0 items-baseline gap-1.5 border-l border-border pl-3 font-mono text-[12px]">
+        <span className="font-sans text-[11px] text-muted-foreground">余额</span>
         <span className="num">{fmtMoney(account?.balance)}</span>
       </div>
 
       {riskStatus && tone && (
         <div
           title={riskHint(riskStatus)}
-          className="flex shrink-0 items-center gap-2 border-l border-tv-border pl-4"
+          className="flex shrink-0 items-center gap-2 border-l border-border pl-4"
         >
           <span className={clsx('h-1.5 w-1.5 rounded-full', tone.dot)} />
           <div className="leading-tight">
             <div className={clsx('num font-mono text-[12px]', tone.text)}>
               今日 {fmtSigned(riskStatus.dayPnl)}
               {riskStatus.dailyLossLimit > 0 && (
-                <span className="ml-1 text-tv-faint">/ -{fmtMoney(riskStatus.dailyLossLimit)}</span>
+                <span className="ml-1 text-muted-foreground/60">/ -{fmtMoney(riskStatus.dailyLossLimit)}</span>
               )}
             </div>
-            <div className="text-[11px] text-tv-muted">
+            <div className="text-[11px] text-muted-foreground">
               {halted
                 ? '已停机'
                 : riskStatus.blockReason
@@ -221,7 +218,9 @@ export function TopBar() {
         </div>
       )}
 
-      <button
+      <Button
+        variant={halted ? 'outline' : confirmKill ? 'destructive' : 'destructive-outline'}
+        size="sm"
         onClick={() => void killSwitch()}
         disabled={!terminal || busy === 'kill'}
         title={
@@ -229,20 +228,18 @@ export function TopBar() {
             ? `已停机：${riskStatus?.haltReason || '手动停机'}，点击恢复`
             : '一键平掉全部仓位并禁止再开仓'
         }
-        className={clsx(
-          'h-7 shrink-0 rounded-lg border px-2.5 text-[12px] font-medium transition-colors',
-          halted
-            ? 'border-tv-warn/40 bg-tv-warn-soft text-tv-warn hover:bg-tv-warn/15'
-            : confirmKill
-              ? 'border-tv-down bg-tv-down text-white'
-              : 'border-tv-down/35 text-tv-down hover:bg-tv-down-soft',
+        className={cn(
+          'shrink-0 px-2.5 text-[12px]',
+          halted && 'border-warning/40 bg-warning/10 text-warning-foreground hover:bg-warning/15',
           (!terminal || busy === 'kill') && 'cursor-not-allowed opacity-40',
         )}
       >
         {busy === 'kill' ? '处理中…' : halted ? '恢复交易' : confirmKill ? '确认平仓？' : '急停'}
-      </button>
+      </Button>
 
-      <button
+      <Button
+        variant={confirmLive ? 'destructive' : 'outline'}
+        size="sm"
         onClick={() => void toggleMode()}
         disabled={!terminal || modeLocked || busy === 'mode'}
         title={
@@ -252,12 +249,13 @@ export function TopBar() {
               ? '切换只读 / 实盘交易（真实资金）'
               : '切换只读 / 模拟可交易'
         }
-        className={clsx(
-          'h-7 rounded-lg border px-2.5 text-[12px] font-medium transition-colors',
-          mode === 'readonly' && 'border-tv-border bg-tv-raised text-tv-muted',
-          mode === 'demo' && 'border-tv-up/35 bg-tv-up-soft text-tv-up',
-          mode === 'live' && 'border-tv-down/35 bg-tv-down-soft text-tv-down',
-          confirmLive && 'border-tv-down bg-tv-down text-white',
+        className={cn(
+          'px-2.5 text-[12px]',
+          !confirmLive && mode === 'readonly' && 'bg-muted text-muted-foreground',
+          !confirmLive && mode === 'demo' && 'border-success/35 bg-success/10 text-success-foreground',
+          !confirmLive &&
+            mode === 'live' &&
+            'border-destructive/35 bg-destructive/10 text-destructive-foreground',
           (!terminal || modeLocked || busy === 'mode') && 'cursor-not-allowed opacity-40',
         )}
       >
@@ -270,13 +268,13 @@ export function TopBar() {
               : mode === 'demo'
                 ? '模拟可交易'
                 : '实盘交易'}
-      </button>
+      </Button>
 
-      <div className="flex items-center gap-1.5 pl-1 text-[11px] text-tv-muted">
+      <div className="flex items-center gap-1.5 pl-1 text-[11px] text-muted-foreground">
         <span
           className={clsx(
             'h-1.5 w-1.5 rounded-full',
-            terminal ? 'bg-tv-up' : online ? 'bg-tv-warn' : 'bg-tv-down',
+            terminal ? 'bg-success' : online ? 'bg-warning' : 'bg-destructive',
           )}
         />
         {terminal ? '已连接' : online ? '等待终端' : '未连接'}

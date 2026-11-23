@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { clsx } from 'clsx';
 import { Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useApp } from '../store/useApp';
 import {
   DEFAULT_TEMPLATE,
@@ -8,11 +8,13 @@ import {
   fmtNum,
   normalizeTemplateSteps,
 } from '../lib/template';
+import { Button } from './ui/button';
+import { Checkbox } from './ui/checkbox';
 import type { TemplateStep } from '../gateway/types';
 
 type Tone = 'console' | 'tv';
 
-/** 设置页用暖纸（console），下单票弹层用冷光（tv）；结构与行为完全一致 */
+/** 设置页与下单票弹层共用；两侧都使用语义 token，密度保持一致 */
 const TONES: Record<
   Tone,
   {
@@ -22,9 +24,6 @@ const TONES: Record<
     muted: string;
     secondary: string;
     card: string;
-    button: string;
-    danger: string;
-    check: string;
     numbered: string;
     dashed: string;
     divider: string;
@@ -32,35 +31,27 @@ const TONES: Record<
 > = {
   console: {
     field:
-      'h-8 rounded-lg border border-console-line bg-console-canvas px-2 font-mono text-[12px] text-console-ink outline-none transition-colors focus:border-console-accent',
-    label: 'text-[11px] text-console-muted',
-    ink: 'text-console-ink',
-    muted: 'text-console-muted',
-    secondary: 'text-console-ink-2',
-    card: 'rounded-lg border border-console-line bg-console-canvas/60',
-    button:
-      'h-7 rounded-lg border border-console-line bg-console-card px-2.5 text-[11px] text-console-ink-2 transition-colors hover:bg-console-hover hover:text-console-ink disabled:cursor-not-allowed disabled:opacity-40',
-    danger: 'hover:bg-console-hover hover:text-console-loss',
-    check: 'accent-[var(--color-console-accent)]',
-    numbered: 'bg-console-selected text-console-ink-2',
-    dashed: 'border border-dashed border-console-line',
-    divider: 'border-console-line',
+      'h-8 rounded-lg border border-input bg-background px-2 font-mono text-[12px] text-foreground outline-none transition-[border-color,box-shadow] focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25',
+    label: 'text-[11px] text-muted-foreground',
+    ink: 'text-foreground',
+    muted: 'text-muted-foreground',
+    secondary: 'text-foreground/70',
+    card: 'rounded-lg border border-border bg-muted/60',
+    numbered: 'bg-muted text-foreground/70',
+    dashed: 'border border-dashed border-border',
+    divider: 'border-border',
   },
   tv: {
     field:
-      'h-8 rounded-lg border border-tv-border bg-tv-raised px-2 font-mono text-[12px] text-tv-text outline-none transition-colors focus:border-tv-accent focus:bg-tv-panel',
-    label: 'text-[11px] text-tv-muted',
-    ink: 'text-tv-text',
-    muted: 'text-tv-muted',
-    secondary: 'text-tv-text/70',
-    card: 'rounded-lg border border-tv-border bg-tv-raised/70',
-    button:
-      'h-7 rounded-lg border border-tv-border bg-tv-panel px-2.5 text-[11px] text-tv-muted transition-colors hover:bg-tv-hover hover:text-tv-text disabled:cursor-not-allowed disabled:opacity-40',
-    danger: 'hover:bg-tv-hover hover:text-tv-down',
-    check: 'accent-[var(--color-tv-accent)]',
-    numbered: 'bg-tv-border/60 text-tv-text/70',
-    dashed: 'border border-dashed border-tv-border',
-    divider: 'border-tv-border',
+      'h-8 rounded-lg border border-input bg-muted px-2 font-mono text-[12px] text-foreground outline-none transition-[border-color,box-shadow] focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25',
+    label: 'text-[11px] text-muted-foreground',
+    ink: 'text-foreground',
+    muted: 'text-muted-foreground',
+    secondary: 'text-foreground/70',
+    card: 'rounded-lg border border-border bg-muted/70',
+    numbered: 'bg-border/60 text-foreground/70',
+    dashed: 'border border-dashed border-border',
+    divider: 'border-border',
   },
 };
 
@@ -207,7 +198,7 @@ export function TemplateEditor({
   return (
     <div className="space-y-3">
       <label className="block">
-        <span className={clsx('mb-1.5 block', styles.label)}>模板名</span>
+        <span className={cn('mb-1.5 block', styles.label)}>模板名</span>
         <input
           value={template.name}
           maxLength={24}
@@ -222,13 +213,13 @@ export function TemplateEditor({
           onKeyDown={(event) => {
             if (event.key === 'Enter') event.currentTarget.blur();
           }}
-          className={clsx(styles.field, 'w-full font-sans')}
+          className={cn(styles.field, 'w-full font-sans')}
         />
       </label>
 
       <div className="grid grid-cols-2 gap-2">
         <label className="block">
-          <span className={clsx('mb-1.5 block', styles.label)}>单笔风险</span>
+          <span className={cn('mb-1.5 block', styles.label)}>单笔风险</span>
           <div className="flex items-center gap-1.5">
             <input
               key={`${template.id}-risk`}
@@ -243,13 +234,13 @@ export function TemplateEditor({
               onKeyDown={(event) => {
                 if (event.key === 'Enter') event.currentTarget.blur();
               }}
-              className={clsx(styles.field, 'w-full text-right')}
+              className={cn(styles.field, 'w-full text-right')}
             />
-            <span className={clsx('shrink-0', styles.muted)}>%</span>
+            <span className={cn('shrink-0', styles.muted)}>%</span>
           </div>
         </label>
         <label className="block">
-          <span className={clsx('mb-1.5 block', styles.label)}>最终止盈</span>
+          <span className={cn('mb-1.5 block', styles.label)}>最终止盈</span>
           <div className="flex items-center gap-1.5">
             <input
               key={`${template.id}-reward`}
@@ -264,24 +255,26 @@ export function TemplateEditor({
               onKeyDown={(event) => {
                 if (event.key === 'Enter') event.currentTarget.blur();
               }}
-              className={clsx(styles.field, 'w-full text-right')}
+              className={cn(styles.field, 'w-full text-right')}
             />
-            <span className={clsx('shrink-0', styles.muted)}>R</span>
+            <span className={cn('shrink-0', styles.muted)}>R</span>
           </div>
         </label>
       </div>
 
-      <div className={clsx('border-t pt-3', styles.divider)}>
+      <div className={cn('border-t pt-3', styles.divider)}>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className={clsx('text-[12px]', styles.ink)}>分批止盈</div>
+            <div className={cn('text-[12px]', styles.ink)}>分批止盈</div>
             {!compact && (
-              <div className={clsx('mt-1 text-[11px] leading-relaxed', styles.muted)}>
+              <div className={cn('mt-1 text-[11px] leading-relaxed', styles.muted)}>
                 到某个 R 时平掉当时剩余仓位的一部分，再按需把止损移到开仓价；按 R 从小到大执行。
               </div>
             )}
           </div>
-          <button
+          <Button
+            variant="outline"
+            size="xs"
             onClick={addStep}
             disabled={template.steps.length >= MAX_TEMPLATE_STEPS}
             title={
@@ -289,25 +282,25 @@ export function TemplateEditor({
                 ? `最多 ${MAX_TEMPLATE_STEPS} 个阶段`
                 : '添加一个阶段'
             }
-            className={clsx(styles.button, 'flex shrink-0 items-center gap-1')}
+            className="h-7 shrink-0 gap-1 px-2.5 text-[11px] font-normal"
           >
-            <Plus size={12} strokeWidth={1.8} />
+            <Plus size={12} strokeWidth={1.8} className="size-3" />
             添加阶段
-          </button>
+          </Button>
         </div>
 
-        <div className={clsx('mt-3', compact ? 'space-y-1.5' : 'space-y-2')}>
+        <div className={cn('mt-3', compact ? 'space-y-1.5' : 'space-y-2')}>
           {drafts.map((draft, index) => (
             <div
               key={draft.key}
-              className={clsx(
+              className={cn(
                 'flex flex-wrap items-center gap-2 px-2.5',
                 styles.card,
                 compact ? 'py-1.5' : 'py-2',
               )}
             >
               <span
-                className={clsx(
+                className={cn(
                   'flex h-4 w-4 shrink-0 items-center justify-center rounded text-[10px]',
                   styles.numbered,
                 )}
@@ -331,7 +324,7 @@ export function TemplateEditor({
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') event.currentTarget.blur();
                 }}
-                className={clsx(styles.field, 'w-14 text-right')}
+                className={cn(styles.field, 'w-14 text-right')}
               />
               <span className={styles.muted}>R 时平</span>
               <input
@@ -356,35 +349,33 @@ export function TemplateEditor({
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') event.currentTarget.blur();
                 }}
-                className={clsx(styles.field, 'w-14 text-right')}
+                className={cn(styles.field, 'w-14 text-right')}
               />
               <span className={styles.muted}>%</span>
-              <label className={clsx('flex items-center gap-1.5', styles.secondary)}>
-                <input
-                  type="checkbox"
+              <label className={cn('flex items-center gap-1.5', styles.secondary)}>
+                <Checkbox
                   checked={draft.moveBreakeven}
-                  onChange={(event) => toggleBreakeven(index, event.target.checked)}
-                  className={clsx('h-3.5 w-3.5', styles.check)}
+                  onCheckedChange={(checked) => toggleBreakeven(index, checked === true)}
+                  aria-label="移到开仓价"
+                  className="size-3.5"
                 />
                 移到开仓价
               </label>
-              <button
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => removeStep(index)}
                 title="删除阶段"
                 aria-label="删除阶段"
-                className={clsx(
-                  'ml-auto flex h-6 w-6 items-center justify-center rounded-md transition-colors',
-                  styles.muted,
-                  styles.danger,
-                )}
+                className="ml-auto h-6 w-6 text-muted-foreground transition-colors hover:bg-accent hover:text-destructive-foreground"
               >
                 <Trash2 size={13} strokeWidth={1.6} />
-              </button>
+              </Button>
             </div>
           ))}
           {!template.steps.length && (
             <div
-              className={clsx(
+              className={cn(
                 'px-3 py-2.5 text-[11px] leading-relaxed',
                 styles.dashed,
                 styles.muted,
@@ -396,10 +387,12 @@ export function TemplateEditor({
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-2">
-          <span className={clsx('text-[11px]', styles.muted)}>
+          <span className={cn('text-[11px]', styles.muted)}>
             最多 {MAX_TEMPLATE_STEPS} 个阶段，按 R 自动排序
           </span>
-          <button
+          <Button
+            variant="outline"
+            size="xs"
             onClick={() =>
               updateTemplate(template.id, {
                 riskPercent: DEFAULT_TEMPLATE.riskPercent,
@@ -407,12 +400,12 @@ export function TemplateEditor({
                 steps: DEFAULT_TEMPLATE.steps,
               })
             }
-            className={clsx(styles.button, 'flex items-center gap-1')}
+            className="h-7 gap-1 px-2.5 text-[11px] font-normal"
             title="恢复为 0.5% / 2R / 1R 保本"
           >
-            <RotateCcw size={12} strokeWidth={1.7} />
+            <RotateCcw size={12} strokeWidth={1.7} className="size-3" />
             恢复默认
-          </button>
+          </Button>
         </div>
       </div>
     </div>

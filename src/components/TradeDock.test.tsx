@@ -42,10 +42,10 @@ describe('TradeDock', () => {
   it('显示四个页签和空态', () => {
     render(<TradeDock />);
 
-    expect(screen.getByRole('button', { name: /持仓/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /挂单/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /成交/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /已平仓/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /持仓/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /挂单/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /成交/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /已平仓/ })).toBeInTheDocument();
     expect(screen.getByText('当前没有持仓')).toBeInTheDocument();
   });
 
@@ -53,7 +53,7 @@ describe('TradeDock', () => {
     const user = userEvent.setup();
     render(<TradeDock />);
 
-    await user.click(screen.getByRole('button', { name: /挂单/ }));
+    await user.click(screen.getByRole('tab', { name: /挂单/ }));
 
     expect(screen.getByText('当前没有挂单')).toBeInTheDocument();
     expect(useApp.getState().dockTab).toBe('orders');
