@@ -57,6 +57,7 @@ function resetStore(): void {
     riskStatus: null,
     alerts: [],
     alertsOpen: false,
+    alertPrefill: null,
     calendarOpen: false,
     paletteOpen: false,
     templates: [template],
@@ -73,6 +74,8 @@ function resetStore(): void {
     watchRows: [],
     orderTag: '',
     toast: null,
+    ticketOpen: false,
+    crosshairPrice: null,
   });
 }
 
@@ -481,6 +484,61 @@ describe('handleGlobalShortcut', () => {
     modal.remove();
   });
 
+  it('Alt+A 预填告警，Alt+Shift+B/S 预填买卖草稿', () => {
+    tradeReady();
+    useApp.setState({ crosshairPrice: 3970, alertsOpen: false, ticketOpen: false });
+
+    handleGlobalShortcut(new KeyboardEvent('keydown', { key: 'a', altKey: true }));
+    expect(useApp.getState().alertsOpen).toBe(true);
+    expect(useApp.getState().alertPrefill).toMatchObject({ price: 3970, kind: 'below' });
+
+    useApp.getState().clearAlertPrefill();
+    useApp.getState().setAlertsOpen(false);
+
+    handleGlobalShortcut(new KeyboardEvent('keydown', { key: 'B', altKey: true, shiftKey: true }));
+    expect(useApp.getState().draft).toMatchObject({
+      active: true,
+      side: 'buy',
+      type: 'limit',
+      price: 3970,
+    });
+    expect(useApp.getState().ticketOpen).toBe(true);
+    useApp.getState().resetDraft();
+
+    handleGlobalShortcut(new KeyboardEvent('keydown', { key: 'S', altKey: true, shiftKey: true }));
+    expect(useApp.getState().draft).toMatchObject({ side: 'sell', type: 'stop', price: 3970 });
+  });
+
+  it('没有十字线价格时 Alt 快捷键用对手价兜底', () => {
+    tradeReady();
+    useApp.setState({ crosshairPrice: null, draft: draft() });
+
+    handleGlobalShortcut(new KeyboardEvent('keydown', { key: 'b', altKey: true, shiftKey: true }));
+    expect(useApp.getState().draft).toMatchObject({ type: 'limit', price: 3980.2 });
+  });
+
+  it('Alt 快捷键在输入框、弹窗、非交易台都不响应', () => {
+    tradeReady();
+    const input = document.createElement('input');
+    document.body.append(input);
+    const typed = new KeyboardEvent('keydown', { key: 'a', altKey: true });
+    Object.defineProperty(typed, 'target', { value: input });
+    handleGlobalShortcut(typed);
+    expect(useApp.getState().alertsOpen).toBe(false);
+    input.remove();
+
+    const modal = document.createElement('div');
+    modal.dataset.modal = '';
+    document.body.append(modal);
+    handleGlobalShortcut(new KeyboardEvent('keydown', { key: 'a', altKey: true }));
+    expect(useApp.getState().alertsOpen).toBe(false);
+    modal.remove();
+
+    useApp.setState({ page: 'overview' });
+    handleGlobalShortcut(new KeyboardEvent('keydown', { key: 'a', altKey: true }));
+    expect(useApp.getState().alertsOpen).toBe(false);
+  });
+
   it('Esc 关闭面板并解除草稿与模板', () => {
     tradeReady();
     useApp.setState({
@@ -499,6 +557,130 @@ describe('handleGlobalShortcut', () => {
     expect(state.paletteOpen).toBe(false);
     expect(state.templateArmed).toBe(false);
     expect(state.draft.active).toBe(false);
+  });
+});
+
+describe('chartQuickAction', () => {
+  function tradeReady(): void {
+    useApp.setState({
+      page: 'trade',
+      symbols: [GOLD_INFO],
+      symbol: 'XAUUSD',
+      quote: QUOTE,
+      draft: draft(),
+      alertsOpen: false,
+      ticketOpen: false,
+      alertPrefill: null,
+      crosshairPrice: null,
+      toast: null,
+    });
+  }
+
+  it('买入只预填草稿并打开下单区', () => {
+    tradeReady();
+    useApp.getState().chartQuickAction('buy', 3970);
+    const state = useApp.getState();
+
+    expect(state.draft).toEqual(
+      draft({ active: true, symbol: 'XAUUSD', side: 'buy', type: 'limit', price: 3970 }),
+    );
+    expect(state.ticketOpen).toBe(true);
+    expect(state.toast).toMatchObject({
+      kind: 'info',
+      text: '已预填 XAUUSD 限价买入，核对后下单',
+    });
+  });
+
+  it('卖出按点击价推导为停损', () => {
+    tradeReady();
+    useApp.getState().chartQuickAction('sell', 3970);
+
+    expect(useApp.getState().draft).toMatchObject({
+      active: true,
+      side: 'sell',
+      type: 'stop',
+      price: 3970,
+    });
+  });
+
+  it('价格先按 tick 对齐', () => {
+    tradeReady();
+    useApp.getState().chartQuickAction('buy', 3970.234);
+
+    expect(useApp.getState().draft.price).toBe(3970.23);
+  });
+
+  it('警报写入 alertPrefill，nonce 递增，可清空', () => {
+    tradeReady();
+    useApp.getState().chartQuickAction('alert', 3970);
+    let state = useApp.getState();
+    expect(state.alertsOpen).toBe(true);
+    expect(state.alertPrefill).toEqual({
+      symbol: 'XAUUSD',
+      price: 3970,
+      kind: 'below',
+      nonce: 1,
+    });
+    expect(state.draft.active).toBe(false);
+
+    useApp.getState().chartQuickAction('alert', 3990);
+    state = useApp.getState();
+    expect(state.alertPrefill).toMatchObject({ price: 3990, kind: 'above', nonce: 2 });
+
+    useApp.getState().clearAlertPrefill();
+    expect(useApp.getState().alertPrefill).toBeNull();
+  });
+
+  it('不在交易台或价格无效时什么都不做', () => {
+    tradeReady();
+    useApp.setState({ page: 'overview' });
+    useApp.getState().chartQuickAction('buy', 3970);
+    expect(useApp.getState().draft.active).toBe(false);
+
+    useApp.setState({ page: 'trade', toast: null });
+    useApp.getState().chartQuickAction('buy', 0);
+    expect(useApp.getState().draft.active).toBe(false);
+    expect(useApp.getState().toast).toMatchObject({ kind: 'error' });
+  });
+
+  it('图表品种与全局不同时先切换品种再预填', () => {
+    const eur = {
+      ...GOLD_INFO,
+      name: 'EURUSD',
+      digits: 5,
+      point: 0.00001,
+      tickSize: 0.00001,
+    };
+    useApp.setState({
+      page: 'trade',
+      symbols: [GOLD_INFO, eur],
+      symbol: 'XAUUSD',
+      quote: { ...QUOTE, symbol: 'EURUSD', bid: 1.1, ask: 1.10002 },
+      draft: draft(),
+      ticketOpen: false,
+      toast: null,
+    });
+
+    useApp.getState().chartQuickAction('buy', 1.09, 'EURUSD');
+    const state = useApp.getState();
+
+    expect(state.symbol).toBe('EURUSD');
+    expect(state.draft).toMatchObject({
+      active: true,
+      symbol: 'EURUSD',
+      side: 'buy',
+      type: 'limit',
+      price: 1.09,
+    });
+  });
+
+  it('切换账号时清空告警预填', () => {
+    tradeReady();
+    useApp.getState().chartQuickAction('alert', 3970);
+    expect(useApp.getState().alertPrefill).not.toBeNull();
+
+    useApp.getState().resetForAccountSwitch();
+    expect(useApp.getState().alertPrefill).toBeNull();
   });
 });
 

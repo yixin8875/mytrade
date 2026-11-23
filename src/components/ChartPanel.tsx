@@ -5,6 +5,7 @@ import { accentForTheme } from '../lib/accent';
 import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, snapToLevel } from '../lib/format';
 import { requestModify, revertModify } from '../lib/modifyQueue';
 import { cancelOrderWithUndo } from '../lib/orderActions';
+import { roundToTick } from '../lib/orderPrice';
 import { activeSteps, estimateStepLots, stepAtR } from '../lib/plan';
 import { classifyPending } from '../lib/pendingOrder';
 import { CalendarLayer } from '../chart/tv/calendarLayer';
@@ -18,8 +19,11 @@ import { registerWidget, setActiveSlot } from '../chart/tv/registry';
 import { SessionBoxManager } from '../chart/tv/sessionBoxes';
 import { customIndicators } from '../chart/tv/studies';
 import { publishCrosshair, publishRange, subscribeRange, type RangeState } from '../chart/tv/sync';
-import { ChartChips, type ChartBand, type ChartChip } from './ChartChips';
+import { buildQuickActionItems } from '../lib/chartQuickActions';
+import { ChartChips, measurePriceAxis, type ChartBand, type ChartChip } from './ChartChips';
+import { ChartQuickActions } from './ChartQuickActions';
 import { DrawingTemplates } from './DrawingTemplates';
+import { makeQuickMenuProcessor } from '../chart/tv/quickMenu';
 import { StudyTemplates } from './StudyTemplates';
 import type {
   ChartPropertiesOverrides,
@@ -141,13 +145,6 @@ function writeChartState(slot: string, state: object): void {
   } catch {
     /* 存储满/被禁用时不影响图表本身 */
   }
-}
-
-function roundToTick(value: number, info?: SymbolInfo): number {
-  if (!info) return value;
-  const tick = info.tickSize || info.point || 0;
-  if (!tick) return Number(value.toFixed(info.digits));
-  return Number((Math.round(value / tick) * tick).toFixed(info.digits));
 }
 
 /** 按住 Shift 拖动时吸附到整数点位：FX 取 10 个点、黄金取 0.1、日元取 0.01 */
@@ -319,6 +316,8 @@ export function ChartPanel({
   );
   const startedRef = useRef(false);
   const crosshairPrice = useRef<number | null>(null);
+  /** 右键菜单用的价格：十字线价，或按下时按鼠标 y 从价格标尺反推 */
+  const contextMenuPrice = useRef<number | null>(null);
   const lastCrosshairStore = useRef(0);
   /** 指标自动保存轮询的定时器 */
   const saveTimerRef = useRef(0);
@@ -852,6 +851,34 @@ export function ChartPanel({
     const initialTheme = useApp.getState().theme;
     if (slot === 'main') dropSavedThemeColors(chartTheme(initialTheme));
 
+    // 右键菜单的价格：优先用按下时记录的位置，其次十字线，最后取现价
+    const quickMenuPrice = () => {
+      const state = useApp.getState();
+      const sym = symbolRef.current ?? state.symbol;
+      const symbolInfo = state.symbols.find((item) => item.name === sym);
+      const raw =
+        contextMenuPrice.current ??
+        crosshairPrice.current ??
+        (state.quote && state.quote.symbol === sym ? state.quote.bid : null);
+      const price = raw == null ? null : roundToTick(raw, symbolInfo);
+      return price != null && Number.isFinite(price) && price > 0 ? price : null;
+    };
+    const quickMenuItems = (price: number) => {
+      const state = useApp.getState();
+      const sym = symbolRef.current ?? state.symbol;
+      const symbolInfo = state.symbols.find((item) => item.name === sym);
+      return buildQuickActionItems({
+        price,
+        symbol: sym,
+        volume: state.draft.volume,
+        digits: symbolInfo?.digits ?? 5,
+        step: symbolInfo?.volumeStep ?? 0.01,
+        // 只认这个品种自己的报价；多图时全局 quote 可能属于别的格子
+        quote: state.quote?.symbol === sym ? state.quote : null,
+        info: symbolInfo,
+      });
+    };
+
     try {
       const widget = new tv.widget({
         container: host,
@@ -889,6 +916,14 @@ export function ChartPanel({
         // 自定义指标（JS + PineJS.Std），以及用户保存的 Pine 脚本（Piner 本地执行）
         custom_indicators_getter: (PineJS: PineJS) =>
           customIndicators(PineJS, pineContextId),
+        // 图表 / 价格轴右键菜单顶部插入「警报 / 买入 / 卖出」，
+        // 动作只预填交易台草稿或告警面板，确认窗仍然由用户操作。
+        context_menu: {
+          items_processor: makeQuickMenuProcessor(quickMenuItems, quickMenuPrice, (action, price) => {
+            setActiveSlot(slot);
+            useApp.getState().chartQuickAction(action, price, symbolRef.current);
+          }),
+        },
         // 画线模板由应用自己的「画线模板」面板负责（见 DrawingTemplates.tsx），
         // 不用库里那个只显示「应用默认」的内置模板菜单。
         // 主图把图表属性（倒计时、坐标、指标等）存进 localStorage，重启后保留；
@@ -909,6 +944,21 @@ export function ChartPanel({
         // StrictMode 二次挂载或切换账户时，旧 widget 可能已经被替换，别再给它挂事件
         if (widgetRef.current !== widget) return;
         const active = widget.activeChart();
+        // 右键菜单的 items_processor 可能在库的 mouse_down 订阅之前执行，
+        // 所以在 iframe 文档的捕获阶段先把按下位置换算成价格。
+        host.querySelector('iframe')?.contentDocument?.addEventListener(
+          'mousedown',
+          (event) => {
+            if (event.button !== 2) return;
+            try {
+              const at = measurePriceAxis(host, active)?.priceAtLocal(event.clientY);
+              if (at != null) contextMenuPrice.current = at;
+            } catch {
+              /* 量不到就沿用十字线价 */
+            }
+          },
+          true,
+        );
         // 图表在 same-origin iframe 里，父容器的 pointerdown 收不到图内点击，
         // 所以用库的 mouse_down 事件把「当前操作的图」和下单品种对齐。
         // 落委托价放到 mouse_up 再判断：只有空白处短促点一下才算，
@@ -920,6 +970,14 @@ export function ChartPanel({
           downAt = Date.now();
           downX = params.clientX;
           downY = params.clientY;
+          // 价格轴上右键时十字线可能停在别处，按鼠标 y 从价格标尺反推价格
+          try {
+            // 库事件里的 clientY 是 iframe 本地坐标（不是外层视口）
+            const at = measurePriceAxis(host, active)?.priceAtLocal(params.clientY);
+            if (at != null) contextMenuPrice.current = at;
+          } catch {
+            /* 量不到就沿用十字线价 */
+          }
           setActiveSlot(slot);
           const store = useApp.getState();
           if (symbolRef.current && store.symbol !== symbolRef.current) store.setSymbol(symbolRef.current);
@@ -1008,6 +1066,7 @@ export function ChartPanel({
         active.crossHairMoved().subscribe(null, (params) => {
           if (!params || typeof params.price !== 'number') return;
           crosshairPrice.current = params.price;
+          contextMenuPrice.current = params.price;
           if (syncCrosshairRef.current) {
             publishCrosshair({
               price: params.price,
@@ -1376,6 +1435,7 @@ export function ChartPanel({
         slot={slot}
         syncCrosshair={syncCrosshair}
       />
+      {chart && <ChartQuickActions host={hostRef} chart={chart} symbol={symbol} />}
       {chart && <DrawingTemplates chart={chart} slot={slot} />}
       {chart && <StudyTemplates chart={chart} slot={slot} />}
       {error && (

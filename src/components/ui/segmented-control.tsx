@@ -11,9 +11,10 @@ export const segmentedControlItemSizeClassNames: Record<
   SegmentedControlSize,
   string
 > = {
-  default: "h-8.5 px-[calc(--spacing(2.5)-1px)] sm:h-7.5",
-  lg: "h-9.5 px-[calc(--spacing(3)-1px)] sm:h-8.5",
-  sm: "h-7.5 px-[calc(--spacing(2)-1px)] sm:h-6.5",
+  // 桌面窗口始终命中 sm:，紧凑高度直接常驻，调用处的 h-* 才不会被压掉
+  default: "h-7.5 px-[calc(--spacing(2.5)-1px)]",
+  lg: "h-8.5 px-[calc(--spacing(3)-1px)]",
+  sm: "h-6.5 px-[calc(--spacing(2)-1px)]",
 };
 
 export const segmentedControlItemLayoutClassName =
@@ -77,6 +78,8 @@ export function SegmentedControlItem({
     className: cn(
       "relative inline-flex shrink-0 cursor-pointer select-none items-center justify-center whitespace-nowrap rounded-md border border-transparent font-medium text-base text-muted-foreground/72 outline-2 outline-transparent transition-[color,outline-color] hover:bg-transparent hover:text-muted-foreground focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-64 data-disabled:pointer-events-none data-disabled:opacity-64 sm:text-sm",
       "data-checked:bg-background data-checked:text-foreground data-checked:shadow-sm/5 dark:data-checked:bg-input",
+      // 普通 button 用 aria-pressed 表示选中，效果与 data-checked 一致
+      "aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm/5 dark:aria-pressed:bg-input",
       "aria-[current=page]:bg-background aria-[current=page]:text-foreground aria-[current=page]:shadow-sm/5 dark:aria-[current=page]:bg-input",
       "data-pressed:bg-background data-pressed:text-foreground data-pressed:shadow-sm/5 dark:data-pressed:bg-input",
       "[:has(>[data-slot=segmented-control-indicator]:not([hidden]))>&]:bg-transparent! [:has(>[data-slot=segmented-control-indicator]:not([hidden]))>&]:shadow-none!",
@@ -97,12 +100,13 @@ export function SegmentedControlItem({
 }
 
 const activeItemSelector =
-  ':scope > [data-checked], :scope > [aria-current="page"], :scope > [data-pressed]';
+  ':scope > [data-checked], :scope > [aria-current="page"], :scope > [data-pressed], :scope > [aria-pressed="true"]';
 
 const observedAttributes: string[] = [
   "data-checked",
   "aria-current",
   "data-pressed",
+  "aria-pressed",
 ];
 
 const MAX_LAYOUT_ROUNDING_ERROR = 2;

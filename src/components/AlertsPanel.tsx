@@ -29,6 +29,8 @@ export function AlertsPanel() {
   const notify = useApp((s) => s.notify);
   const channelNames = useApp((s) => s.health?.config.alert_channel_names);
   const channels = channelNames ?? NO_CHANNELS;
+  const prefill = useApp((s) => s.alertPrefill);
+  const clearAlertPrefill = useApp((s) => s.clearAlertPrefill);
 
   const [kind, setKind] = useState<'above' | 'below'>('above');
   const [price, setPrice] = useState('');
@@ -65,6 +67,18 @@ export function AlertsPanel() {
     // 只在面板挂载时预填一次，之后用户改过的输入不被覆盖
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 图表快捷操作（价格轴 + / 右键 / Alt+A）送来的价格：套用一次后清空，
+  // 否则面板下次打开会把旧价再填一遍
+  useEffect(() => {
+    if (!prefill) return;
+    setEditing(null);
+    setPrice(prefill.price.toFixed(digitsFor(prefill.symbol)));
+    setKind(prefill.kind);
+    setNote('');
+    clearAlertPrefill();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill?.nonce]);
 
   // 面板开着时换品种，清掉旧品种的价格，避免把 A 的价位挂到 B 上
   useEffect(() => {

@@ -30,6 +30,7 @@ export function RangeChips({
         <SegmentedControlItem
           key={item.value}
           onClick={() => onChange(item.value)}
+          data-checked={value === item.value ? '' : undefined}
           aria-pressed={value === item.value}
           className="text-[12px]"
         >

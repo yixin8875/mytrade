@@ -51,6 +51,7 @@ function resetStore(alerts: PriceAlert[] = []) {
   useApp.setState({
     page: 'trade',
     alerts,
+    alertPrefill: null,
     symbol: 'XAUUSD',
     symbols: [GOLD_INFO],
     quote: null,
@@ -194,5 +195,32 @@ describe('AlertsPanel', () => {
 
     // 只读取告警列表，没有提交任何修改
     expect(call).not.toHaveBeenCalledWith('alerts.update', expect.anything());
+  });
+
+  it('图表快捷操作送来的预填只套用一次', async () => {
+    const call = mockGateway([]);
+    useApp.setState({
+      alertPrefill: { symbol: 'XAUUSD', price: 3990.5, kind: 'below', nonce: 1 },
+    });
+    const { unmount } = render(<AlertsPanel />);
+
+    const [priceInput] = screen.getAllByRole('spinbutton');
+    expect((priceInput as HTMLInputElement).value).toBe('3990.50');
+    expect(screen.getByRole('button', { name: '下穿' })).toHaveAttribute('aria-pressed', 'true');
+    expect(useApp.getState().alertPrefill).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: '添加告警' }));
+    await waitFor(() => {
+      expect(call).toHaveBeenCalledWith(
+        'alerts.create',
+        expect.objectContaining({ symbol: 'XAUUSD', kind: 'below', price: 3990.5 }),
+      );
+    });
+
+    // 清空后重新挂载不应再套用旧价
+    unmount();
+    render(<AlertsPanel />);
+    const [again] = screen.getAllByRole('spinbutton');
+    expect((again as HTMLInputElement).value).toBe('');
   });
 });

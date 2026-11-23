@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { normalizeLayoutId } from '../chart/layouts';
 import { DEFAULT_ACCENT, normalizeHex } from '../lib/accent';
+import { fallbackQuickPrice, type ChartQuickAction } from '../lib/chartQuickActions';
+import { roundToTick } from '../lib/orderPrice';
+import { classifyPending } from '../lib/pendingOrder';
 import { DEFAULT_TEMPLATE, normalizeTemplateSteps } from '../lib/template';
 import type {
   Account,
@@ -40,6 +43,15 @@ export interface ChartSync {
 
 /** 浅色 = 冷灰仪器台，白色 = 纯白底材，深色 = 墨色阶梯 */
 export type Theme = 'light' | 'white' | 'dark';
+
+/** 图表快捷操作写入的告警预填；AlertsPanel 应用后清空 */
+export interface AlertPrefill {
+  symbol: string;
+  price: number;
+  kind: 'above' | 'below';
+  /** 每次请求递增，面板据此判断是否需要重新套用 */
+  nonce: number;
+}
 
 export const THEMES: Theme[] = ['light', 'white', 'dark'];
 
@@ -229,6 +241,8 @@ interface AppStore {
   alertDesktop: boolean;
   /** 图表十字线最新价格（用于快速建告警） */
   crosshairPrice: number | null;
+  /** 图表快捷操作预填的告警；面板应用后清空 */
+  alertPrefill: AlertPrefill | null;
   /** 自选表 */
   watchlist: string[];
   watchRows: WatchlistRow[];
@@ -304,6 +318,13 @@ interface AppStore {
   setRailPinned: (pinned: boolean) => void;
   setOrderEntryMode: (mode: OrderEntryMode) => void;
   setTicketOpen: (open: boolean) => void;
+  /** 图表快捷操作（价格轴 + / 右键菜单 / Alt 快捷键）：只预填草稿或告警，不下单 */
+  chartQuickAction: (
+    action: ChartQuickAction,
+    rawPrice: number,
+    symbolOverride?: string,
+  ) => void;
+  clearAlertPrefill: () => void;
   notify: (kind: Toast['kind'], text: string, action?: ToastAction) => void;
   clearToast: () => void;
   /** 跳到设置页并打开指定分区 */
@@ -641,6 +662,7 @@ export const useApp = create<AppStore>((set, get) => ({
   alertSound: loadPrefs().sound,
   alertDesktop: loadPrefs().desktop,
   crosshairPrice: null,
+  alertPrefill: null,
   watchlist: loadWatchlist(),
   watchRows: [],
   orderTag: loadTag(),
@@ -931,6 +953,57 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   setTicketOpen: (ticketOpen) => set({ ticketOpen }),
 
+  chartQuickAction: (action, rawPrice, symbolOverride) => {
+    const state = get();
+    if (state.page !== 'trade') return;
+    const symbol = symbolOverride || state.symbol;
+    const info = state.symbols.find((item) => item.name === symbol);
+    const price = roundToTick(rawPrice, info);
+    if (!symbol || !Number.isFinite(price) || !(price > 0)) {
+      state.notify('error', '没有取得有效的图表价格');
+      return;
+    }
+    // 交易台下单与告警保存都用全局 symbol，先对齐；同品种不要调用，否则会清掉草稿
+    if (symbol !== state.symbol) get().setSymbol(symbol);
+
+    if (action === 'alert') {
+      const quote = get().quote;
+      const bid = quote && quote.symbol === symbol ? quote.bid : null;
+      const kind = bid != null && price < bid ? 'below' : 'above';
+      get().setAlertsOpen(true);
+      set((s) => ({
+        alertPrefill: { symbol, price, kind, nonce: (s.alertPrefill?.nonce ?? 0) + 1 },
+      }));
+      get().notify('info', `${symbol} 告警价格已填入，确认后添加`);
+      return;
+    }
+
+    const current = get();
+    // setSymbol 会清掉旧品种的报价；只有同一个品种的报价才能用来判断限价/停损
+    const currentQuote = current.quote?.symbol === symbol ? current.quote : null;
+    const pending = classifyPending({
+      side: action,
+      price,
+      bid: currentQuote?.bid,
+      ask: currentQuote?.ask,
+      stopsLevelPoints: info?.stopsLevelPoints,
+      point: info?.point,
+    });
+    current.setTemplateArmed(false);
+    current.patchDraft({
+      active: true,
+      symbol,
+      side: action,
+      type: pending.type ?? 'limit',
+      price,
+      volume: clampVolume(current.draft.volume, info),
+    });
+    current.setTicketOpen(true);
+    current.notify('info', `已预填 ${symbol} ${pending.label}，核对后下单`);
+  },
+  clearAlertPrefill: () => set({ alertPrefill: null }),
+
+
   notify: (kind, text, action) => {
     const id = ++toastSeq;
     set({ toast: { id, kind, text, action: action ?? null } });
@@ -955,6 +1028,7 @@ export const useApp = create<AppStore>((set, get) => ({
       preview: null,
       watchRows: [],
       crosshairPrice: null,
+      alertPrefill: null,
       templateArmed: false,
       draft: { ...emptyDraft },
     }),
@@ -963,9 +1037,29 @@ export const useApp = create<AppStore>((set, get) => ({
 export const selectSymbolInfo = (state: AppStore): SymbolInfo | undefined =>
   state.symbols.find((item) => item.name === state.symbol);
 
+/** 手数夹在品种允许范围内；没有手数时用最小手数 */
+function clampVolume(volume: number, info?: SymbolInfo): number {
+  if (!info) return volume;
+  const min = info.minVolume || 0.01;
+  const max = info.maxVolume || Number.POSITIVE_INFINITY;
+  return Math.max(min, Math.min(max, volume > 0 ? volume : min));
+}
+
+/** 确认窗 / 弹窗是否打开（图表在 iframe 里，要查顶层文档） */
+function modalOpen(): boolean {
+  let root: Document = document;
+  try {
+    root = window.top?.document ?? document;
+  } catch {
+    root = document;
+  }
+  return !!root.querySelector('[data-modal], [data-confirm]');
+}
+
 /**
  * 全局快捷键：图表在 iframe 里也能响应，所以 App 和每个图表 iframe 都绑一次。
  * B / S 只准备市价草稿（仍需确认），Esc 关弹窗/取消划线。
+ * Alt+A / Alt+Shift+B / Alt+Shift+S 走图表快捷操作，同样只预填。
  */
 export function handleGlobalShortcut(event: KeyboardEvent): void {
   // Ctrl/Cmd+K 打开命令面板；输入框里也要能用
@@ -996,9 +1090,32 @@ export function handleGlobalShortcut(event: KeyboardEvent): void {
     }
     return;
   }
-  if (event.ctrlKey || event.metaKey || event.altKey) return;
   const target = event.target as HTMLElement | null;
-  if (target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+  const typing = !!target?.closest?.('input, textarea, select, [contenteditable="true"]');
+
+  // Alt 组合：图表快捷操作，只预填草稿/告警，仍需在交易台确认
+  if (event.altKey && !event.ctrlKey && !event.metaKey) {
+    if (typing) return;
+    const altState = useApp.getState();
+    if (altState.page !== 'trade' || modalOpen()) return;
+    const altKey = event.key.toLowerCase();
+    const quick: ChartQuickAction | null =
+      altKey === 'a' && !event.shiftKey
+        ? 'alert'
+        : altKey === 'b' && event.shiftKey
+          ? 'buy'
+          : altKey === 's' && event.shiftKey
+            ? 'sell'
+            : null;
+    if (!quick) return;
+    event.preventDefault();
+    const price = altState.crosshairPrice ?? fallbackQuickPrice(quick, altState.quote) ?? 0;
+    altState.chartQuickAction(quick, price);
+    return;
+  }
+
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (typing) return;
   const state = useApp.getState();
 
   if (event.key === 'Escape') {
@@ -1010,14 +1127,8 @@ export function handleGlobalShortcut(event: KeyboardEvent): void {
     return;
   }
 
-  let root: Document = document;
-  try {
-    root = window.top?.document ?? document;
-  } catch {
-    root = document;
-  }
   // 确认窗/弹窗开着、或不在交易台时不要改草稿
-  if (root.querySelector('[data-modal], [data-confirm]')) return;
+  if (modalOpen()) return;
   if (state.page !== 'trade') return;
 
   const key = event.key.toLowerCase();

@@ -4,6 +4,7 @@ import { Check, ChevronDown, X } from 'lucide-react';
 import { gateway } from '../gateway/client';
 import { activeTemplate, useApp, type OrderEntryMode } from '../store/useApp';
 import { fmtMoney, fmtPrice, fmtVolume, roundVolume } from '../lib/format';
+import { defaultPrice } from '../lib/orderPrice';
 import { classifyPending } from '../lib/pendingOrder';
 import {
   fmtNum,
@@ -24,26 +25,7 @@ import { TemplateBar } from './order/TemplateBar';
 import { Field, Kbd, PreviewRow, inputClass } from './order/primitives';
 import { Button } from './ui/button';
 import { SegmentedControl, SegmentedControlItem } from './ui/segmented-control';
-import type {
-  DraftOrder,
-  OrderType,
-  Quote,
-  Side,
-  SymbolInfo,
-} from '../gateway/types';
-
-function defaultPrice(
-  side: Side,
-  type: OrderType,
-  quote: Quote | null,
-  info?: SymbolInfo,
-): number {
-  if (!quote || !info) return 0;
-  const tick = info.tickSize || info.point || 0;
-  if (type === 'limit') return side === 'buy' ? quote.bid : quote.ask;
-  if (type === 'stop') return side === 'buy' ? quote.ask + tick * 10 : quote.bid - tick * 10;
-  return side === 'buy' ? quote.ask : quote.bid;
-}
+import type { DraftOrder, Side } from '../gateway/types';
 
 export function OrderTicket() {
   const conn = useApp((s) => s.conn);
@@ -574,28 +556,33 @@ export function OrderTicket() {
 
         <div className="grid grid-cols-2 gap-2">
           <Button
+            variant="destructive"
             onClick={() => startMarket('sell')}
             className={clsx(
-              'flex h-14 flex-col items-center justify-center rounded-lg bg-destructive text-white transition-colors hover:bg-destructive/90',
+              'flex h-14 flex-col items-center justify-center gap-1 rounded-lg',
               draft.side === 'sell' && 'ring-2 ring-destructive/40 ring-offset-1',
               mode === 'readonly' && 'opacity-60',
             )}
             title="以市价卖出"
           >
             <span className="text-[13px] font-medium">卖出</span>
-            <span className="num font-mono text-[12px] opacity-90">{fmtPrice(bid, digits)}</span>
+            <span className="num font-mono text-[12px] leading-none opacity-90">
+              {fmtPrice(bid, digits)}
+            </span>
           </Button>
           <Button
             onClick={() => startMarket('buy')}
             className={clsx(
-              'flex h-14 flex-col items-center justify-center rounded-lg bg-success text-white transition-colors hover:bg-success/90',
+              'flex h-14 flex-col items-center justify-center gap-1 rounded-lg border-success bg-success text-white shadow-success/24 transition-colors hover:bg-success/90',
               draft.side === 'buy' && 'ring-2 ring-success/40 ring-offset-1',
               mode === 'readonly' && 'opacity-60',
             )}
             title="以市价买入"
           >
             <span className="text-[13px] font-medium">买入</span>
-            <span className="num font-mono text-[12px] opacity-90">{fmtPrice(ask, digits)}</span>
+            <span className="num font-mono text-[12px] leading-none opacity-90">
+              {fmtPrice(ask, digits)}
+            </span>
           </Button>
         </div>
 
@@ -611,6 +598,7 @@ export function OrderTicket() {
               <SegmentedControlItem
                 key={label}
                 onClick={() => setOrderMode(pending)}
+                data-checked={selected ? '' : undefined}
                 aria-pressed={selected}
                 className="h-7 flex-1 text-[12px]"
               >

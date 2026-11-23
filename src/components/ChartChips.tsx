@@ -192,6 +192,68 @@ export function measurePane(
   };
 }
 
+export interface PriceAxisBox {
+  /** 容器内 y：价格 → 像素，用于把「+」贴到十字线高度 */
+  yFor: (price: number) => number | null;
+  /** 容器内绘图区顶部与高度 */
+  top: number;
+  height: number;
+  /** 容器内 CSS right：按钮贴在主图右缘（价格轴左侧） */
+  right: number;
+  /** crossHairMoved 的 offsetX/offsetY（库容器内坐标）是否落在价格轴上 */
+  inAxis: (offsetX: number, offsetY: number) => boolean;
+  /** iframe 内 clientY → 价格；价格轴悬停与右键兜底取样 */
+  priceAtLocal: (clientY: number) => number | null;
+}
+
+/**
+ * 价格轴几何：复用 measurePane 的 iframe/canvas/价格标尺探测，
+ * 把「价格轴条带」和「价格 → 容器内 y」换算出来，供图表快捷按钮定位。
+ */
+export function measurePriceAxis(
+  host: HTMLElement,
+  chartApi?: IChartWidgetApi | null,
+  margin = 28,
+): PriceAxisBox | null {
+  const pane = measurePane(host, chartApi);
+  if (!pane) return null;
+  const frame = host.querySelector('iframe') ?? document.querySelector('iframe');
+  const doc = frame?.contentDocument;
+  if (!frame || !doc) return null;
+
+  let canvas: HTMLCanvasElement | null = null;
+  for (const item of doc.querySelectorAll('canvas')) {
+    const rect = item.getBoundingClientRect();
+    if (rect.width > 200 && rect.height > 200) {
+      canvas = item;
+      break;
+    }
+  }
+  if (!canvas) return null;
+
+  const frameRect = frame.getBoundingClientRect();
+  const canvasRect = canvas.getBoundingClientRect();
+  const hostRect = host.getBoundingClientRect();
+  const paneTop = frameRect.top - hostRect.top + canvasRect.top;
+  const paneRight = frameRect.left + canvasRect.left + canvasRect.width;
+
+  return {
+    top: paneTop,
+    height: canvasRect.height,
+    right: Math.max(hostRect.right - paneRight + 4, 4),
+    yFor: (price) => {
+      const coord = pane.coord(price);
+      return coord == null ? null : paneTop + coord;
+    },
+    inAxis: (offsetX, offsetY) =>
+      offsetX >= canvasRect.right - margin &&
+      offsetX <= canvasRect.right + 80 &&
+      offsetY >= canvasRect.top &&
+      offsetY <= canvasRect.bottom,
+    priceAtLocal: (clientY) => pane.priceAt(clientY - canvasRect.top),
+  };
+}
+
 /**
  * 时间 → 画布 x。公开 API 只有 coordinateToTime（坐标 → 时间），
  * 所以采样一条单调曲线再按时间插值；周期不同的图也能对上同一时刻。
