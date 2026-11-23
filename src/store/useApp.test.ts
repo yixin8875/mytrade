@@ -682,6 +682,33 @@ describe('chartQuickAction', () => {
     useApp.getState().resetForAccountSwitch();
     expect(useApp.getState().alertPrefill).toBeNull();
   });
+
+  it('手数按品种最小/最大手数夹取', () => {
+    tradeReady();
+    useApp.setState({ draft: draft({ volume: 0.001 }) });
+    useApp.getState().chartQuickAction('buy', 3970);
+    expect(useApp.getState().draft.volume).toBe(0.01);
+
+    useApp.setState({ draft: draft({ volume: 500 }), toast: null });
+    useApp.getState().chartQuickAction('sell', 3990);
+    expect(useApp.getState().draft.volume).toBe(100);
+  });
+
+  it('没有本品种报价时告警默认上穿，下单标记待定价', () => {
+    tradeReady();
+    useApp.setState({ quote: { ...QUOTE, symbol: 'EURUSD' } });
+
+    useApp.getState().chartQuickAction('alert', 3970);
+    expect(useApp.getState().alertPrefill).toMatchObject({ kind: 'above' });
+
+    useApp.setState({ toast: null, alertPrefill: null, draft: draft() });
+    useApp.getState().chartQuickAction('buy', 3970);
+    expect(useApp.getState().draft).toMatchObject({ type: 'limit', price: 3970 });
+    expect(useApp.getState().toast).toMatchObject({
+      kind: 'info',
+      text: '已预填 XAUUSD 待定价，核对后下单',
+    });
+  });
 });
 
 describe('容器页与设置返回', () => {

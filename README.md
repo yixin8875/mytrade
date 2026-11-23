@@ -216,7 +216,7 @@ RELEASE_PROXY=http://127.0.0.1:12000 npm run release -- --notes "这一版改了
 
 - 顶栏铃铛打开图表右侧的告警面板：选品种、方向上穿/下穿、触发价、备注，可设置重复提醒与冷却秒数。打开时默认填入当前十字线价格或买价；面板覆盖在图表上，不挤压图表，也不再单独弹窗。
 - 网关每 0.5 秒检查一次报价，越线后通过 WebSocket 广播；前端按「声音」「桌面通知」开关播放提示音、弹系统通知（首次会请求浏览器通知权限）。
-- 第三方通道在 `gateway/config.json` 的 `alert_channels` 里配置，支持 `webhook` / `discord` / `telegram` / `wecom`，见[配置](#配置)。密钥只留在网关配置文件里，前端只能看到通道名称。
+- 第三方通道在 `gateway/config.json` 的 `alert_channels` 里配置，支持 `webhook` / `discord` / `telegram` / `wecom` / `feishu` / `dingtalk` / `bark` / `ntfy` / `email`，字段见 [docs/ALERT_CHANNELS.md](docs/ALERT_CHANNELS.md)。密钥只留在网关配置文件里，前端只能看到通道名称。
 
 ### 财经日历
 
@@ -406,7 +406,7 @@ cp gateway/config.example.json gateway/config.json
 | `trailing_step_points` | `5` | 默认移动止损每次至少改进的点数 |
 | `deviation_points` | `20` | 市价单允许滑点 |
 | `magic` | `260511` | 订单魔术号，用于对账 |
-| `alert_channels` | `[]` | 告警外部通道，元素如 `{"type":"webhook","url":"https://example.invalid/hook"}`；也支持 `discord` / `telegram` / `wecom`。含密钥，只写在本文件，前端只显示通道名 |
+| `alert_channels` | `[]` | 告警外部通道，元素如 `{"type":"webhook","url":"https://example.invalid/hook"}`；也支持 `discord` / `telegram` / `wecom` / `feishu` / `dingtalk` / `bark` / `ntfy` / `email`，各通道字段见 [docs/ALERT_CHANNELS.md](docs/ALERT_CHANNELS.md)。含密钥，只写在本文件，前端只显示通道名 |
 
 多账户也可以完全在界面里管理：打开「设置 → MT5 账户」，填写名称、登录号、服务器、`terminal64.exe` 路径和密码即可。密码经 Windows DPAPI 加密后保存在 `gateway/data/credentials.json`，只有当前 Windows 用户能解密，不会写入 `config.json`，也不会回发到前端。
 

@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import queue
+import smtplib
 import threading
+import time
+import urllib.parse
 import urllib.request
+from email.message import EmailMessage
 from typing import Any
 
 from store import Store
@@ -20,6 +27,17 @@ def alert_text(alert: dict) -> str:
 def post_json(url: str, payload: dict, headers: dict | None = None, timeout: float = 6.0) -> None:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     head = {"Content-Type": "application/json"}
+    if headers:
+        head.update({str(k): str(v) for k, v in headers.items()})
+    request = urllib.request.Request(url, data=data, headers=head, method="POST")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        response.read()
+
+
+def post_text(url: str, text: str, headers: dict | None = None, timeout: float = 6.0) -> None:
+    """POST 纯文本（ntfy 这类以 body 为消息内容的服务）。"""
+    data = text.encode("utf-8")
+    head = {"Content-Type": "text/plain; charset=utf-8"}
     if headers:
         head.update({str(k): str(v) for k, v in headers.items()})
     request = urllib.request.Request(url, data=data, headers=head, method="POST")
@@ -80,11 +98,160 @@ class WecomChannel(Channel):
         )
 
 
+def feishu_sign(timestamp: str, secret: str) -> str:
+    """飞书自定义机器人签名：以 `timestamp\\nsecret` 为密钥做 HMAC-SHA256 再 base64。"""
+    key = f"{timestamp}\n{secret}".encode("utf-8")
+    digest = hmac.new(key, digestmod=hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+def dingtalk_url(url: str, secret: str, timestamp_ms: int | None = None) -> str:
+    """钉钉加签：把 timestamp 与 sign 拼到 webhook 地址后面。"""
+    stamp = str(timestamp_ms if timestamp_ms is not None else int(time.time() * 1000))
+    string_to_sign = f"{stamp}\n{secret}".encode("utf-8")
+    digest = hmac.new(secret.encode("utf-8"), string_to_sign, hashlib.sha256).digest()
+    sign = urllib.parse.quote_plus(base64.b64encode(digest).decode("ascii"))
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}timestamp={stamp}&sign={sign}"
+
+
+class FeishuChannel(Channel):
+    """飞书 / Lark 自定义机器人；配置 secret 时附带签名。"""
+
+    kind = "feishu"
+
+    def __init__(self, config: dict, store: Store) -> None:
+        super().__init__(config, store)
+        self.url = str(config.get("url") or "")
+        if not self.url:
+            raise ValueError("feishu 需要 url")
+
+    def send(self, alert: dict) -> None:
+        payload: dict[str, Any] = {
+            "msg_type": "text",
+            "content": {"text": alert_text(alert)},
+        }
+        secret = str(self.config.get("secret") or "")
+        if secret:
+            stamp = str(int(time.time()))
+            payload["timestamp"] = stamp
+            payload["sign"] = feishu_sign(stamp, secret)
+        post_json(self.url, payload)
+
+
+class DingtalkChannel(Channel):
+    """钉钉群机器人；配置 secret 时按加签规则拼接时间戳与签名。"""
+
+    kind = "dingtalk"
+
+    def __init__(self, config: dict, store: Store) -> None:
+        super().__init__(config, store)
+        self.url = str(config.get("url") or "")
+        if not self.url:
+            raise ValueError("dingtalk 需要 url")
+
+    def send(self, alert: dict) -> None:
+        url = self.url
+        secret = str(self.config.get("secret") or "")
+        if secret:
+            url = dingtalk_url(url, secret)
+        post_json(url, {"msgtype": "text", "text": {"content": alert_text(alert)}})
+
+
+class BarkChannel(Channel):
+    """Bark（iOS）：url 形如 https://api.day.app/<device-key>。"""
+
+    kind = "bark"
+
+    def __init__(self, config: dict, store: Store) -> None:
+        super().__init__(config, store)
+        self.url = str(config.get("url") or "")
+        if not self.url:
+            raise ValueError("bark 需要 url")
+
+    def send(self, alert: dict) -> None:
+        payload: dict[str, Any] = {"title": "Tally", "body": alert_text(alert)}
+        for key in ("group", "sound", "level"):
+            value = self.config.get(key)
+            if value:
+                payload[key] = str(value)
+        post_json(self.url, payload)
+
+
+class NtfyChannel(Channel):
+    """ntfy：url 直接写到主题，如 https://ntfy.sh/mytrade；可选 headers 带 Authorization。"""
+
+    kind = "ntfy"
+
+    def __init__(self, config: dict, store: Store) -> None:
+        super().__init__(config, store)
+        self.url = str(config.get("url") or "")
+        if not self.url:
+            raise ValueError("ntfy 需要 url")
+
+    def send(self, alert: dict) -> None:
+        headers = {"Title": str(self.config.get("title") or "Tally")}
+        extra = self.config.get("headers")
+        if isinstance(extra, dict):
+            headers.update({str(k): str(v) for k, v in extra.items()})
+        priority = self.config.get("priority")
+        if priority:
+            headers["Priority"] = str(priority)
+        post_text(self.url, alert_text(alert), headers)
+
+
+class EmailChannel(Channel):
+    """SMTP 邮件；默认 465 + SSL，587 可配 ssl=false + starttls=true。"""
+
+    kind = "email"
+
+    def __init__(self, config: dict, store: Store) -> None:
+        super().__init__(config, store)
+        self.host = str(config.get("host") or "")
+        self.port = int(config.get("port") or 465)
+        self.user = str(config.get("user") or "")
+        self.password = str(config.get("password") or "")
+        self.sender = str(config.get("from") or self.user)
+        raw_to = config.get("to")
+        if isinstance(raw_to, list):
+            self.to = [str(item) for item in raw_to if item]
+        else:
+            self.to = [str(raw_to)] if raw_to else []
+        if not self.to and self.sender:
+            self.to = [self.sender]
+        self.ssl = bool(config.get("ssl", True))
+        self.starttls = bool(config.get("starttls", False))
+        if not self.host or not self.sender:
+            raise ValueError("email 需要 host / from")
+
+    def send(self, alert: dict) -> None:
+        message = EmailMessage()
+        message["Subject"] = "Tally 告警"
+        message["From"] = self.sender
+        message["To"] = ", ".join(self.to)
+        message.set_content(alert_text(alert))
+        if self.ssl:
+            client = smtplib.SMTP_SSL(self.host, self.port, timeout=15)
+        else:
+            client = smtplib.SMTP(self.host, self.port, timeout=15)
+        with client:
+            if self.starttls and not self.ssl:
+                client.starttls()
+            if self.user:
+                client.login(self.user, self.password)
+            client.send_message(message)
+
+
 CHANNELS: dict[str, type[Channel]] = {
     WebhookChannel.kind: WebhookChannel,
     DiscordChannel.kind: DiscordChannel,
     TelegramChannel.kind: TelegramChannel,
     WecomChannel.kind: WecomChannel,
+    FeishuChannel.kind: FeishuChannel,
+    DingtalkChannel.kind: DingtalkChannel,
+    BarkChannel.kind: BarkChannel,
+    NtfyChannel.kind: NtfyChannel,
+    EmailChannel.kind: EmailChannel,
 }
 
 

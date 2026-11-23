@@ -427,7 +427,7 @@ npm run tauri:build
 
 - 在「设置 → 告警」打开声音和桌面通知。
 - 首次使用桌面通知时，浏览器/系统会请求权限。
-- 第三方通道（Webhook / Discord / Telegram / 企业微信）在 `gateway/config.json` 的 `alert_channels` 里配置；密钥只留在网关配置文件里，界面只显示通道名。
+- 第三方通道（Webhook / Discord / Telegram / 企业微信 / 飞书 / 钉钉 / Bark / ntfy / 邮件）在 `gateway/config.json` 的 `alert_channels` 里配置，字段见 [ALERT_CHANNELS.md](ALERT_CHANNELS.md)；密钥只留在网关配置文件里，界面只显示通道名。
 
 ### 5.8 财经日历
 
@@ -762,7 +762,7 @@ npm run tauri:build
 ### 10.5 告警
 
 - 声音提示、桌面通知两个开关。
-- 外部通道在 `gateway/config.json` 的 `alert_channels` 里配置，支持 `webhook` / `discord` / `telegram` / `wecom`。
+- 外部通道在 `gateway/config.json` 的 `alert_channels` 里配置，支持 `webhook` / `discord` / `telegram` / `wecom` / `feishu` / `dingtalk` / `bark` / `ntfy` / `email`，字段见 [ALERT_CHANNELS.md](ALERT_CHANNELS.md)。
 - 密钥只留在网关配置文件里，前端只显示通道名称。
 
 ### 10.6 数据与备份

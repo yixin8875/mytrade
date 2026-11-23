@@ -7,13 +7,19 @@ import pytest
 
 import notify
 from notify import (
+    BarkChannel,
+    DingtalkChannel,
     DiscordChannel,
+    EmailChannel,
+    FeishuChannel,
     Notifier,
+    NtfyChannel,
     TelegramChannel,
     WebhookChannel,
     WecomChannel,
     alert_text,
     post_json,
+    post_text,
 )
 
 
@@ -124,6 +130,27 @@ def test_post_json_默认超时与无自定义头(monkeypatch):
     assert seen["timeout"] == 6.0
 
 
+def test_post_text_发送纯文本(monkeypatch):
+    seen = {}
+    response = FakeResponse()
+    monkeypatch.setattr(
+        notify.urllib.request,
+        "urlopen",
+        lambda request, timeout=None: seen.update(request=request, timeout=timeout) or response,
+    )
+
+    post_text("https://ntfy.sh/mytrade", "你好", {"Title": "Tally"}, timeout=2.0)
+
+    request = seen["request"]
+    assert request.full_url == "https://ntfy.sh/mytrade"
+    assert request.data.decode("utf-8") == "你好"
+    headers = {key.lower(): value for key, value in request.header_items()}
+    assert headers["content-type"] == "text/plain; charset=utf-8"
+    assert headers["title"] == "Tally"
+    assert seen["timeout"] == 2.0
+    assert response.read_called is True
+
+
 # ---------- 各通道请求体 ----------
 
 
@@ -191,6 +218,212 @@ def test_通道名称缺省用类型名():
     assert DiscordChannel({"name": "团队频道"}, store).label == "团队频道"
 
 
+# ---------- 新增通道 ----------
+
+
+def test_飞书使用文本消息结构(monkeypatch):
+    sent = []
+    monkeypatch.setattr(notify, "post_json", lambda *args: sent.append(args))
+    FeishuChannel({"url": "https://open.feishu.cn/hook"}, FakeStore()).send(make_alert())
+
+    assert sent[0] == (
+        "https://open.feishu.cn/hook",
+        {
+            "msg_type": "text",
+            "content": {"text": "[Tally] XAUUSD 上穿 2000，现价 2001.5（突破）"},
+        },
+    )
+
+
+def test_飞书配置密钥时附带官方签名(monkeypatch):
+    sent = []
+    monkeypatch.setattr(notify, "post_json", lambda *args: sent.append(args))
+    monkeypatch.setattr(notify.time, "time", lambda: 1_700_000_000)
+    FeishuChannel(
+        {"url": "https://open.feishu.cn/hook", "secret": "secret"}, FakeStore()
+    ).send(make_alert())
+
+    payload = sent[0][1]
+    assert payload["timestamp"] == "1700000000"
+    assert payload["sign"] == "fiWS2+gh28DOydAv7hzONH/mDn9+b1Y4Y5ivXWXy8vA="
+
+
+def test_钉钉加签拼接时间戳与签名(monkeypatch):
+    sent = []
+    monkeypatch.setattr(notify, "post_json", lambda *args: sent.append(args))
+    monkeypatch.setattr(notify.time, "time", lambda: 1_700_000_000)
+    DingtalkChannel(
+        {"url": "https://oapi.dingtalk.com/robot/send?access_token=t", "secret": "SEC"},
+        FakeStore(),
+    ).send(make_alert())
+
+    url, payload = sent[0]
+    assert url == (
+        "https://oapi.dingtalk.com/robot/send?access_token=t"
+        "&timestamp=1700000000000"
+        "&sign=r%2B2we0q01lkZqz38LA5IPNbHN81U1leRf3Au4PSQb6Q%3D"
+    )
+    assert payload == {
+        "msgtype": "text",
+        "text": {"content": "[Tally] XAUUSD 上穿 2000，现价 2001.5（突破）"},
+    }
+
+
+def test_钉钉没有密钥时用原地址(monkeypatch):
+    sent = []
+    monkeypatch.setattr(notify, "post_json", lambda *args: sent.append(args))
+    DingtalkChannel(
+        {"url": "https://oapi.dingtalk.com/robot/send?access_token=t"}, FakeStore()
+    ).send(make_alert())
+
+    assert sent[0][0] == "https://oapi.dingtalk.com/robot/send?access_token=t"
+
+
+def test_bark_发送标题正文与可选字段(monkeypatch):
+    sent = []
+    monkeypatch.setattr(notify, "post_json", lambda *args: sent.append(args))
+    BarkChannel(
+        {
+            "url": "https://api.day.app/key",
+            "group": "交易",
+            "sound": "alarm",
+            "level": "timeSensitive",
+        },
+        FakeStore(),
+    ).send(make_alert())
+
+    assert sent[0] == (
+        "https://api.day.app/key",
+        {
+            "title": "Tally",
+            "body": "[Tally] XAUUSD 上穿 2000，现价 2001.5（突破）",
+            "group": "交易",
+            "sound": "alarm",
+            "level": "timeSensitive",
+        },
+    )
+
+
+def test_ntfy_用纯文本与标题头(monkeypatch):
+    sent = []
+    monkeypatch.setattr(notify, "post_text", lambda *args: sent.append(args))
+    NtfyChannel(
+        {
+            "url": "https://ntfy.sh/mytrade",
+            "priority": 4,
+            "headers": {"Authorization": "Bearer t"},
+        },
+        FakeStore(),
+    ).send(make_alert())
+
+    url, text, headers = sent[0]
+    assert url == "https://ntfy.sh/mytrade"
+    assert text == "[Tally] XAUUSD 上穿 2000，现价 2001.5（突破）"
+    assert headers == {"Title": "Tally", "Authorization": "Bearer t", "Priority": "4"}
+
+
+def test_邮件用_ssl_登录并发送(monkeypatch):
+    clients = []
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=None):
+            self.host = host
+            self.port = port
+            self.timeout = timeout
+            self.logged = None
+            self.messages = []
+            self.tls = False
+            self.closed = False
+            clients.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.closed = True
+
+        def starttls(self):
+            self.tls = True
+
+        def login(self, user, password):
+            self.logged = (user, password)
+
+        def send_message(self, message):
+            self.messages.append(message)
+
+    monkeypatch.setattr(notify.smtplib, "SMTP_SSL", FakeSMTP)
+    EmailChannel(
+        {
+            "host": "smtp.example.com",
+            "port": 465,
+            "user": "u@example.com",
+            "password": "pw",
+            "from": "bot@example.com",
+            "to": ["a@example.com", "b@example.com"],
+        },
+        FakeStore(),
+    ).send(make_alert())
+
+    client = clients[0]
+    assert (client.host, client.port, client.timeout) == ("smtp.example.com", 465, 15)
+    assert client.logged == ("u@example.com", "pw")
+    assert client.closed is True
+    message = client.messages[0]
+    assert message["Subject"] == "Tally 告警"
+    assert message["From"] == "bot@example.com"
+    assert message["To"] == "a@example.com, b@example.com"
+    assert "XAUUSD 上穿 2000" in message.get_content()
+
+
+def test_邮件_非_ssl_走_starttls(monkeypatch):
+    clients = []
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=None):
+            self.host = host
+            self.port = port
+            self.logged = None
+            self.messages = []
+            self.tls = False
+            clients.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def starttls(self):
+            self.tls = True
+
+        def login(self, user, password):
+            self.logged = (user, password)
+
+        def send_message(self, message):
+            self.messages.append(message)
+
+    monkeypatch.setattr(notify.smtplib, "SMTP", FakeSMTP)
+    EmailChannel(
+        {
+            "host": "smtp.example.com",
+            "port": 587,
+            "ssl": False,
+            "starttls": True,
+            "from": "bot@example.com",
+            "to": "a@example.com",
+        },
+        FakeStore(),
+    ).send(make_alert())
+
+    assert clients[0].tls is True
+    assert clients[0].logged is None
+    assert clients[0].messages
+
+
+def test_新增通道已注册():
+    assert {"feishu", "dingtalk", "bark", "ntfy", "email"} <= set(notify.CHANNELS)
+
+
 # ---------- 通道装配 ----------
 
 
@@ -230,6 +463,19 @@ def test_通道构造失败会审计并跳过(monkeypatch):
         "type": "boom",
         "error": "bad config",
     }
+
+
+def test_缺少必填字段的通道在装配时跳过():
+    for kind in ("feishu", "dingtalk", "bark", "ntfy"):
+        store = FakeStore()
+        notifier = Notifier([{"type": kind}], store)
+        assert notifier.channels == []
+        assert store.payload("alert.channel.invalid")["type"] == kind
+
+    store = FakeStore()
+    notifier = Notifier([{"type": "email", "to": ["a@example.com"]}], store)
+    assert notifier.channels == []
+    assert store.payload("alert.channel.invalid")["type"] == "email"
 
 
 def test_info_返回所有通道名称():

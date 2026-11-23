@@ -398,7 +398,7 @@ draft → validating → sending → accepted → working → filled
 
 - 告警存 SQLite；工作线程 0.5 秒读一次订阅报价，用上一价格与现价判断上穿/下穿，跨过后广播 `alert` 事件。
 - `repeat=1` 时按 `cooldown_sec` 冷却后重新武装，否则触发一次即禁用；`trigger_count` / `triggered_at` 落库。
-- 前端负责声音（WebAudio 双音）与桌面通知（Notification API，需授权）；网关侧 `notify.py` 把同一事件推给 `alert_channels`（webhook / Discord / Telegram / 企业微信）。
+- 前端负责声音（WebAudio 双音）与桌面通知（Notification API，需授权）；网关侧 `notify.py` 把同一事件推给 `alert_channels`（webhook / Discord / Telegram / 企业微信 / 飞书 / 钉钉 / Bark / ntfy / 邮件）。
 - 通道配置只从 `gateway/config.json` 读取，`Config.public()` 只下发 `alert_channel_names`，URL/Token 不出网关。
 
 ### 6.9 执行质量
