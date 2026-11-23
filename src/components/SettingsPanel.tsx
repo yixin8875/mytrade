@@ -59,6 +59,7 @@ import { downloadDiagnostics } from '../lib/diagnostics';
 import { THEMES, useApp, type SettingsSection, type Theme } from '../store/useApp';
 import { fmtNum, templateStepsSummary } from '../lib/template';
 import { AccountManager } from './AccountManager';
+import { AlertChannelsCard } from './AlertChannelsCard';
 import { TemplateEditor } from './TemplateEditor';
 import { LayoutGallery, SyncToggles } from './LayoutPicker';
 import { AuditPanel } from '../views/Audit';
@@ -1355,6 +1356,7 @@ function DisciplineSection() {
 function RiskSection() {
   const health = useApp((s) => s.health);
   const notify = useApp((s) => s.notify);
+  const setSection = useApp((s) => s.setSettingsSection);
   const breakevenOffset = useApp((s) => s.breakevenOffset);
   const setBreakevenOffset = useApp((s) => s.setBreakevenOffset);
   const config = health?.config;
@@ -1686,12 +1688,22 @@ function RiskSection() {
             </Button>
           </div>
         </Row>
-        <Row label="告警通道">
-          <span className="text-[12px] text-muted-foreground">
-            {config.alert_channel_names?.length
-              ? config.alert_channel_names.join('、')
-              : '未配置第三方通道'}
-          </span>
+        <Row label="告警通道" hint="Webhook、Telegram、飞书等第三方推送。">
+          <div className="flex items-center gap-3">
+            <span className="max-w-[220px] truncate text-[12px] text-muted-foreground">
+              {config.alert_channel_names?.length
+                ? config.alert_channel_names.join('、')
+                : '未配置'}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSection('alerts')}
+              className="text-[12px] font-normal"
+            >
+              管理
+            </Button>
+          </div>
         </Row>
       </Card>
 
@@ -1763,7 +1775,6 @@ function AlertsSection() {
   const sound = useApp((s) => s.alertSound);
   const desktop = useApp((s) => s.alertDesktop);
   const setAlertPrefs = useApp((s) => s.setAlertPrefs);
-  const config = useApp((s) => s.health?.config);
 
   return (
     <>
@@ -1777,6 +1788,12 @@ function AlertsSection() {
             onChange={(value) => setAlertPrefs({ alertDesktop: value })}
           />
         </Row>
+      </Card>
+      <Card
+        title="推送通道"
+        description="价格告警会同时推送到这些通道。密钥只保存在本机网关配置里，读取时不会回显。"
+      >
+        <AlertChannelsCard />
       </Card>
     </>
   );

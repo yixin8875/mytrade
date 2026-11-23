@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import mt5_worker
+import worker_data
 from accounts import AccountError
 from mt5_worker import GatewayError, Mt5Worker
 
@@ -101,6 +102,10 @@ class FakeConfig:
         self.update_error: Exception | None = None
         self.save_error: Exception | None = None
         self.updates: list[dict] = []
+        self.alert_channels: list[dict] = []
+        self.public_channels: list[dict] = []
+        self.saved_channels: list[dict] = []
+        self.deleted_channels: list[str] = []
 
     def active_profile(self) -> dict:
         return next((p for p in self.profiles if p["id"] == self.active), self.profiles[0])
@@ -165,6 +170,40 @@ class FakeConfig:
             raise self.save_error
         self.allow_live = allow
         return self.public()
+
+    def channels_public(self) -> list[dict]:
+        return [dict(item) for item in self.public_channels]
+
+    def ensure_channel_ids(self) -> list[dict]:
+        return self.alert_channels
+
+    def save_channel(self, incoming: dict) -> dict:
+        if self.save_error:
+            raise self.save_error
+        self.saved_channels.append(dict(incoming))
+        channel = {
+            "id": "ch1",
+            "type": str(incoming.get("type") or ""),
+            "typeLabel": "Telegram",
+            "name": str(incoming.get("name") or "Telegram"),
+            "fields": {},
+            "secretKeys": [],
+        }
+        self.public_channels = [channel]
+        return {"channel": channel, "channels": self.public_channels}
+
+    def delete_channel(self, channel_id: str) -> dict:
+        if self.save_error:
+            raise self.save_error
+        self.deleted_channels.append(channel_id)
+        deleted = next(
+            (item for item in self.public_channels if item["id"] == channel_id),
+            {"id": channel_id},
+        )
+        self.public_channels = [
+            item for item in self.public_channels if item["id"] != channel_id
+        ]
+        return {"deleted": deleted, "channels": self.public_channels}
 
 
 class FakeAccountMgr:
@@ -1221,3 +1260,237 @@ def test_自动备份只在过期时创建(worker, monkeypatch):
 
     assert created == [True]
     assert any(kind == "data.backup.auto" for kind, _ in worker.store.audits)
+
+
+# ---------- 告警推送通道管理 ----------
+
+
+def audit_payload(worker, kind):
+    return next(payload for name, payload in worker.store.audits if name == kind)
+
+
+def test_通道列表返回公开结构与schema(worker):
+    worker.cfg.public_channels = [
+        {
+            "id": "ch1",
+            "type": "telegram",
+            "typeLabel": "Telegram",
+            "name": "群",
+            "fields": {"chatId": "1"},
+            "secretKeys": ["token"],
+        }
+    ]
+
+    result = worker._alerts_channels_list({})
+
+    assert result["channels"] == worker.cfg.public_channels
+    assert "telegram" in result["schema"]
+
+
+def test_保存通道热重载并只审计标识(worker, emitted):
+    reloads = []
+    worker._reload_notifier = lambda: reloads.append(True)
+
+    result = worker._alerts_channel_save(
+        {
+            "channel": {
+                "type": "telegram",
+                "name": "群",
+                "token": "secret-token",
+                "chatId": "1",
+            }
+        }
+    )
+
+    assert result["saved"]["id"] == "ch1"
+    assert worker.cfg.saved_channels[0]["token"] == "secret-token"
+    assert reloads == [True]
+    assert audit_payload(worker, "alert.channel.save") == {
+        "id": "ch1",
+        "type": "telegram",
+        "name": "群",
+    }
+    assert "secret-token" not in str(worker.store.audits)
+    assert any(name == "gateway" for name, _ in emitted)
+
+
+def test_保存通道错误映射(worker):
+    worker._reload_notifier = lambda: None
+    worker.cfg.save_error = ValueError("Bot Token不能为空")
+    assert (
+        code_for(
+            lambda: worker._alerts_channel_save({"channel": {"type": "telegram"}})
+        )
+        == "BAD_CHANNEL"
+    )
+
+    worker.cfg.save_error = OSError("disk full")
+    assert (
+        code_for(
+            lambda: worker._alerts_channel_save({"channel": {"type": "telegram"}})
+        )
+        == "CONFIG_SAVE"
+    )
+    assert code_for(lambda: worker._alerts_channel_save({})) == "BAD_CHANNEL"
+
+
+def test_删除通道热重载并返回剩余列表(worker, emitted):
+    reloads = []
+    worker._reload_notifier = lambda: reloads.append(True)
+    worker.cfg.public_channels = [
+        {
+            "id": "ch1",
+            "type": "discord",
+            "typeLabel": "Discord",
+            "name": "群",
+            "fields": {},
+            "secretKeys": ["url"],
+        }
+    ]
+
+    result = worker._alerts_channel_delete({"id": "ch1"})
+
+    assert worker.cfg.deleted_channels == ["ch1"]
+    assert reloads == [True]
+    assert result["deleted"]["id"] == "ch1"
+    assert audit_payload(worker, "alert.channel.delete") == {
+        "id": "ch1",
+        "type": "discord",
+        "name": "群",
+    }
+    assert any(name == "gateway" for name, _ in emitted)
+    assert code_for(lambda: worker._alerts_channel_delete({})) == "BAD_CHANNEL"
+
+
+def test_测试通道只发目标通道并回事件(worker, monkeypatch, emitted):
+    entry = {
+        "id": "ch1",
+        "type": "discord",
+        "name": "群",
+        "url": "https://discord.example/secret-key",
+    }
+    worker.cfg.alert_channels = [entry]
+    sent = []
+
+    class FakeChannel:
+        label = "群"
+
+        def send(self, alert):
+            sent.append(alert)
+
+    class FakeThread:
+        def __init__(self, target=None, args=(), **kwargs):
+            self.target = target
+            self.args = args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(
+        worker_data, "CHANNELS", {"discord": lambda config, store: FakeChannel()}
+    )
+    monkeypatch.setattr(worker_data.threading, "Thread", FakeThread)
+
+    result = worker._alerts_channel_test({"id": "ch1", "requestId": "r1"})
+
+    assert result == {"queued": True, "id": "ch1"}
+    assert sent and sent[0]["note"] == "测试告警"
+    event = next(data for name, data in emitted if name == "alertChannelTest")
+    assert event == {
+        "id": "ch1",
+        "requestId": "r1",
+        "label": "群",
+        "type": "discord",
+        "ok": True,
+    }
+    assert audit_payload(worker, "alert.channel.test") == {
+        "id": "ch1",
+        "type": "discord",
+        "ok": True,
+    }
+
+
+def test_测试通道失败时脱敏错误(worker, monkeypatch, emitted):
+    entry = {
+        "id": "ch1",
+        "type": "webhook",
+        "name": "群",
+        "url": "https://hooks.example/secret-key",
+    }
+    worker.cfg.alert_channels = [entry]
+
+    class FakeChannel:
+        label = "群"
+
+        def send(self, alert):
+            raise RuntimeError("401 for https://hooks.example/secret-key")
+
+    class FakeThread:
+        def __init__(self, target=None, args=(), **kwargs):
+            self.target = target
+            self.args = args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(
+        worker_data, "CHANNELS", {"webhook": lambda config, store: FakeChannel()}
+    )
+    monkeypatch.setattr(worker_data.threading, "Thread", FakeThread)
+
+    worker._alerts_channel_test({"id": "ch1"})
+
+    event = next(data for name, data in emitted if name == "alertChannelTest")
+    assert event["ok"] is False
+    assert "secret-key" not in event["error"]
+    assert "***" in event["error"]
+    assert audit_payload(worker, "alert.channel.test") == {
+        "id": "ch1",
+        "type": "webhook",
+        "ok": False,
+    }
+
+
+def test_测试通道不存在返回NO_CHANNEL(worker):
+    worker.cfg.alert_channels = []
+    assert code_for(lambda: worker._alerts_channel_test({"id": "nope"})) == "NO_CHANNEL"
+
+
+def test_通道管理方法已分派(worker):
+    worker._alerts_channels_list = lambda p: {"method": "list", "p": p}
+    worker._alerts_channel_save = lambda p: {"method": "save", "p": p}
+    worker._alerts_channel_delete = lambda p: {"method": "delete", "p": p}
+    worker._alerts_channel_test = lambda p: {"method": "test", "p": p}
+
+    for method in ("list", "save", "delete", "test"):
+        result = worker._dispatch(f"alerts.channels.{method}", {"x": 1})
+        assert result == {"method": method, "p": {"x": 1}}
+
+
+def test_重载通知器替换实例并按连接状态启动(worker, monkeypatch):
+    stopped = []
+
+    class FakeNotifier:
+        def __init__(self, configs, store):
+            self.configs = list(configs)
+            self.started = False
+
+        def start(self):
+            self.started = True
+
+        def stop(self):
+            stopped.append(self)
+
+    monkeypatch.setattr(mt5_worker, "Notifier", FakeNotifier)
+    worker.cfg.alert_channels = [{"type": "discord", "url": "https://x"}]
+    old = FakeNotifier([], worker.store)
+    worker._notifier = old
+
+    worker._connected = False
+    worker._reload_notifier()
+    assert stopped == [old]
+    assert worker._notifier.started is False
+
+    worker._connected = True
+    worker._reload_notifier()
+    assert worker._notifier.started is True

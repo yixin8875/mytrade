@@ -217,6 +217,65 @@ export interface GatewayConfig extends RiskLimits {
   alert_channel_names?: string[];
 }
 
+/** 设置页的推送通道管理：字段定义由网关下发，密钥值永远不回传 */
+export type AlertChannelFieldKind =
+  | 'text'
+  | 'password'
+  | 'number'
+  | 'select'
+  | 'bool'
+  | 'list'
+  | 'headers';
+
+export interface AlertChannelField {
+  key: string;
+  label: string;
+  kind: AlertChannelFieldKind;
+  required?: boolean;
+  secret?: boolean;
+  placeholder?: string;
+  hint?: string;
+  min?: number;
+  max?: number;
+  maxLength?: number;
+  default?: unknown;
+  options?: { value: string; label: string }[];
+}
+
+export interface AlertChannelTypeSpec {
+  label: string;
+  fields: AlertChannelField[];
+}
+
+export interface AlertChannelPublic {
+  id: string;
+  type: string;
+  typeLabel: string;
+  name: string;
+  /** 非密钥字段值；密钥字段只出现在 secretKeys 里 */
+  fields: Record<string, unknown>;
+  secretKeys: string[];
+}
+
+export interface AlertChannelsResponse {
+  channels: AlertChannelPublic[];
+  schema: Record<string, AlertChannelTypeSpec>;
+}
+
+export interface AlertChannelSaveResponse {
+  channels: AlertChannelPublic[];
+  saved: { id: string; type: string; name: string };
+}
+
+export interface AlertChannelTestEvent {
+  id: string;
+  requestId?: string;
+  label: string;
+  type: string;
+  ok: boolean;
+  error?: string;
+}
+
 export type DisciplineMode = 'off' | 'confirm' | 'block';
 
 /** 账户级门禁覆盖：只写要覆盖的键，其余跟随全局 */

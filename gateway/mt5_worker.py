@@ -112,6 +112,8 @@ class Mt5Worker(
         self._missed = Missed(store)
         self._score = Score(store, self._review)
         self._ai = AI(store, self._review, self._account_mgr.credentials, self._score)
+        # 通道配置可以在设置页热更新：换实例时用这把锁，不和 stop() 抢引用
+        self._notifier_lock = threading.Lock()
         self._notifier = Notifier(cfg.alert_channels, store)
         # 价格告警：DB 里读出来缓存在内存，每 0.5 秒扫一遍
         self._alerts: list[dict] = []
@@ -138,7 +140,8 @@ class Mt5Worker(
 
     def stop(self) -> None:
         self._stop.set()
-        self._notifier.stop()
+        with self._notifier_lock:
+            self._notifier.stop()
         self._thread.join(timeout=3)
         try:
             mt5.shutdown()
@@ -394,6 +397,21 @@ class Mt5Worker(
             },
         }
 
+    def _reload_notifier(self) -> None:
+        """通道配置变化后热替换发送队列；不 join 旧线程，避免 SMTP 超时卡住工作线程。"""
+        lock = getattr(self, "_notifier_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._notifier_lock = lock
+        with lock:
+            old = getattr(self, "_notifier", None)
+            new = Notifier(self.cfg.alert_channels, self.store)
+            self._notifier = new
+            if getattr(self, "_connected", False):
+                new.start()
+            if old is not None:
+                old.stop()
+
     # ---------- dispatch ----------
 
     def _dispatch(self, method: str, p: dict) -> Any:
@@ -570,6 +588,10 @@ class Mt5Worker(
             "alerts.update": self._alert_update,
             "alerts.delete": self._alert_delete,
             "alerts.test": self._alert_test,
+            "alerts.channels.list": self._alerts_channels_list,
+            "alerts.channels.save": self._alerts_channel_save,
+            "alerts.channels.delete": self._alerts_channel_delete,
+            "alerts.channels.test": self._alerts_channel_test,
             "watchlist.get": self._watchlist,
             "watchlist.set": self._watchlist_set,
             "diagnostics.get": self._diagnostics,

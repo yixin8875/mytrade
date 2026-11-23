@@ -309,7 +309,7 @@ uvicorn 主线程
 | 校验 | `trade.preview`（保证金/风险/点差/RR，不发送）、`trade.size`（按固定金额或余额 % 反推手数） |
 | 风控 | `risk.status`、`system.halt`（可带 `closeAll`）、`system.resume` |
 | 日志 | `journal.sync`、`journal.list`、`journal.stats`、`journal.tag`、`journal.screenshot.save` |
-| 告警 | `alerts.list`、`alerts.create`、`alerts.update`、`alerts.delete`、`alerts.test` |
+| 告警 | `alerts.list`、`alerts.create`、`alerts.update`、`alerts.delete`、`alerts.test`；通道管理 `alerts.channels.list`、`alerts.channels.save`、`alerts.channels.delete`、`alerts.channels.test` |
 | 自选 | `watchlist.get`、`watchlist.set` |
 | 执行质量 | `executions.get`、`executions.stats` |
 | 审计 | `audit.tail`、`audit.query`、`system.reconcile` |
@@ -399,6 +399,7 @@ draft → validating → sending → accepted → working → filled
 - 告警存 SQLite；工作线程 0.5 秒读一次订阅报价，用上一价格与现价判断上穿/下穿，跨过后广播 `alert` 事件。
 - `repeat=1` 时按 `cooldown_sec` 冷却后重新武装，否则触发一次即禁用；`trigger_count` / `triggered_at` 落库。
 - 前端负责声音（WebAudio 双音）与桌面通知（Notification API，需授权）；网关侧 `notify.py` 把同一事件推给 `alert_channels`（webhook / Discord / Telegram / 企业微信 / 飞书 / 钉钉 / Bark / ntfy / 邮件）。
+- 设置页通过 `alerts.channels.*` 管理通道：字段表由网关 `alert_channels.schema()` 下发，服务端同时校验；密钥只上行，读取只返回 `secretKeys` 标记。保存/删除后重建 Notifier，无需重启网关。
 - 通道配置只从 `gateway/config.json` 读取，`Config.public()` 只下发 `alert_channel_names`，URL/Token 不出网关。
 
 ### 6.9 执行质量

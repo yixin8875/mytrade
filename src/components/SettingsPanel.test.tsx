@@ -28,6 +28,9 @@ function resetApp() {
 
 function mockGateway() {
   const impl: CallImpl = (method) => {
+    if (method === 'alerts.channels.list') {
+      return Promise.resolve({ channels: [], schema: {} });
+    }
     if (method === 'data.backup.list') return Promise.resolve([]);
     if (method === 'data.info') {
       return Promise.resolve({
@@ -89,6 +92,20 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('button', { name: '立即对账' })).toBeInTheDocument();
     expect(
       screen.getByText('UTC 日期 · JSONL 文件 · 最多返回 300 条'),
+    ).toBeInTheDocument();
+  });
+
+  it('「告警」分区加载推送通道并显示空状态', async () => {
+    const spy = mockGateway();
+    const user = userEvent.setup();
+    render(<SettingsPanel />);
+
+    await user.click(screen.getByRole('button', { name: '告警' }));
+
+    expect(screen.getByText('推送通道')).toBeInTheDocument();
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('alerts.channels.list'));
+    expect(
+      await screen.findByText('还没有配置推送通道。添加后，价格告警会同时推送到这里。'),
     ).toBeInTheDocument();
   });
 

@@ -3,6 +3,9 @@ from __future__ import annotations
 from worker_base import *  # noqa: F401,F403
 from worker_base import _num  # noqa: F401
 
+import alert_channels
+from notify import CHANNELS
+
 
 class WorkerData:
     def _journal_filters(self, p: dict) -> dict:
@@ -173,14 +176,14 @@ class WorkerData:
         self.store.audit("alert.delete", {"id": alert_id})
         return {"deleted": alert_id}
 
-    def _alert_test(self, p: dict) -> dict:
+    def _test_alert_payload(self, p: dict) -> dict:
         symbol = str(p.get("symbol") or "").upper().strip()
         if not symbol:
             symbol = next((pos["symbol"] for pos in self._positions), "")
         info = mt5.symbol_info(symbol) if symbol else None
         tick = mt5.symbol_info_tick(symbol) if symbol else None
         price = float(tick.bid) if tick else 0.0
-        payload = {
+        return {
             "id": 0,
             "symbol": symbol or "TEST",
             "kind": "above",
@@ -190,10 +193,119 @@ class WorkerData:
             "at": int(time.time()),
             "test": True,
         }
+
+    def _alert_test(self, p: dict) -> dict:
+        payload = self._test_alert_payload(p)
         self._notifier.send(payload)
         self._emit("alert", payload)
         self.store.audit("alert.test", payload)
         return {"sent": True, "channels": self._notifier.info()}
+
+    # ---------- 告警推送通道管理 ----------
+
+    def _alerts_channels_list(self, _p: dict) -> dict:
+        return {
+            "channels": self.cfg.channels_public(),
+            "schema": alert_channels.schema(),
+        }
+
+    def _alerts_channel_save(self, p: dict) -> dict:
+        incoming = p.get("channel")
+        if not isinstance(incoming, dict):
+            raise GatewayError("BAD_CHANNEL", "channel 必须是对象")
+        try:
+            result = self.cfg.save_channel(incoming)
+        except ValueError as exc:
+            raise GatewayError("BAD_CHANNEL", str(exc)) from exc
+        except OSError as exc:
+            raise GatewayError("CONFIG_SAVE", f"保存配置失败：{exc}") from exc
+
+        self._reload_notifier()
+        saved = result["channel"]
+        # 审计只记标识，不写地址与密钥
+        self.store.audit(
+            "alert.channel.save",
+            {"id": saved["id"], "type": saved["type"], "name": saved["name"]},
+        )
+        self._emit("gateway", self.health())
+        return {"channels": result["channels"], "saved": result["channel"]}
+
+    def _alerts_channel_delete(self, p: dict) -> dict:
+        channel_id = str(p.get("id") or "").strip()
+        if not channel_id:
+            raise GatewayError("BAD_CHANNEL", "缺少通道 id")
+        try:
+            result = self.cfg.delete_channel(channel_id)
+        except ValueError as exc:
+            raise GatewayError("BAD_CHANNEL", str(exc)) from exc
+        except OSError as exc:
+            raise GatewayError("CONFIG_SAVE", f"保存配置失败：{exc}") from exc
+
+        self._reload_notifier()
+        deleted = result["deleted"]
+        self.store.audit(
+            "alert.channel.delete",
+            {
+                "id": deleted.get("id"),
+                "type": deleted.get("type"),
+                "name": deleted.get("name"),
+            },
+        )
+        self._emit("gateway", self.health())
+        return result
+
+    def _alerts_channel_test(self, p: dict) -> dict:
+        channel_id = str(p.get("id") or "").strip()
+        if not channel_id:
+            raise GatewayError("BAD_CHANNEL", "缺少通道 id")
+        channels = self.cfg.ensure_channel_ids()
+        entry = next((item for item in channels if item.get("id") == channel_id), None)
+        if entry is None:
+            raise GatewayError("NO_CHANNEL", "通道不存在，可能已被删除")
+        factory = CHANNELS.get(str(entry.get("type") or ""))
+        if factory is None:
+            raise GatewayError("BAD_CHANNEL", "未知通道类型")
+        try:
+            target = factory(entry, self.store)
+        except Exception as exc:  # noqa: BLE001 - 配置错误直接回给界面
+            raise GatewayError(
+                "BAD_CHANNEL", alert_channels.redact_error(exc, entry)
+            ) from exc
+
+        request_id = str(p.get("requestId") or "")
+        payload = self._test_alert_payload({})
+        # 只发这一个通道；SMTP 可能等 15 秒，不能占用工作线程
+        threading.Thread(
+            target=self._run_channel_test,
+            args=(entry, target, payload, request_id),
+            name="alert-channel-test",
+            daemon=True,
+        ).start()
+        return {"queued": True, "id": channel_id}
+
+    def _run_channel_test(self, entry: dict, target: Any, payload: dict, request_id: str) -> None:
+        channel_id = str(entry.get("id") or "")
+        ok = True
+        error = ""
+        try:
+            target.send(payload)
+        except Exception as exc:  # noqa: BLE001 - 结果通过事件回给界面
+            ok = False
+            error = alert_channels.redact_error(exc, entry)
+        self.store.audit(
+            "alert.channel.test",
+            {"id": channel_id, "type": entry.get("type"), "ok": ok},
+        )
+        event: dict = {
+            "id": channel_id,
+            "requestId": request_id,
+            "label": target.label,
+            "type": entry.get("type"),
+            "ok": ok,
+        }
+        if not ok:
+            event["error"] = error
+        self._emit("alertChannelTest", event)
 
     def _check_alerts(self) -> None:
         if not self._alerts:

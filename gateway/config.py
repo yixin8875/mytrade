@@ -5,6 +5,7 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 
+import alert_channels
 from paths import BASE_DIR
 
 
@@ -431,6 +432,83 @@ class Config:
         self._write_raw(raw)
         self.allow_live = bool(allow)
         return self.public()
+
+    def ensure_channel_ids(self) -> list[dict]:
+        """读取磁盘上的告警通道，补齐缺失的稳定 id；只有真的补了才写回。"""
+        raw = self._read_raw() or asdict(self)
+        stored = raw.get("alert_channels")
+        if stored is None:
+            stored = self.alert_channels
+        channels, changed = alert_channels.assign_ids(stored)
+        if changed:
+            raw["alert_channels"] = channels
+            self._write_raw(raw)
+        self.alert_channels = channels
+        return channels
+
+    def channels_public(self) -> list[dict]:
+        """设置页可见的通道列表（不含任何密钥值）。"""
+        return alert_channels.public_list(self.ensure_channel_ids())
+
+    def save_channel(self, incoming: dict) -> dict:
+        """新增或更新一个告警通道；密钥字段留空表示保持原值。"""
+        if not isinstance(incoming, dict):
+            raise ValueError("channel 必须是对象")
+        raw = self._read_raw() or asdict(self)
+        stored = raw.get("alert_channels")
+        if stored is None:
+            stored = self.alert_channels
+        channels, _ = alert_channels.assign_ids(stored)
+
+        channel_id = str(incoming.get("id") or "").strip()
+        existing = None
+        if channel_id:
+            existing = next(
+                (item for item in channels if item.get("id") == channel_id), None
+            )
+            if existing is None:
+                raise ValueError("通道不存在，可能已被删除")
+        elif len(channels) >= alert_channels.MAX_CHANNELS:
+            raise ValueError(f"最多只能配置 {alert_channels.MAX_CHANNELS} 个通道")
+
+        merged = alert_channels.merge(existing, incoming)
+        alert_channels.validate(merged)
+
+        if existing is None:
+            channels.append(merged)
+        else:
+            for index, item in enumerate(channels):
+                if item.get("id") == channel_id:
+                    channels[index] = merged
+                    break
+
+        raw["alert_channels"] = channels
+        self._write_raw(raw)
+        self.alert_channels = channels
+        public = alert_channels.public_list(channels)
+        saved = next((item for item in public if item["id"] == merged["id"]), None)
+        return {"channel": saved, "channels": public}
+
+    def delete_channel(self, channel_id: str) -> dict:
+        """删除一个告警通道；id 不存在时报错而不是静默成功。"""
+        raw = self._read_raw() or asdict(self)
+        stored = raw.get("alert_channels")
+        if stored is None:
+            stored = self.alert_channels
+        channels, _ = alert_channels.assign_ids(stored)
+        target = next((item for item in channels if item.get("id") == channel_id), None)
+        if target is None:
+            raise ValueError("通道不存在，可能已被删除")
+
+        channels = [item for item in channels if item.get("id") != channel_id]
+        raw["alert_channels"] = channels
+        self._write_raw(raw)
+        self.alert_channels = channels
+        deleted = alert_channels.public_list([target])
+        return {
+            "deleted": deleted[0] if deleted else {"id": channel_id},
+            "channels": alert_channels.public_list(channels),
+        }
 
     def public(self) -> dict:
         data = asdict(self)

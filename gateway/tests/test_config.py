@@ -457,3 +457,107 @@ def test_public_hides_endpoint_and_channel_secrets():
     assert data["accounts"][0]["risk"] == {"max_lot": 1.0}
     assert data["active_account"] == "a"
     assert "secret-token" not in str(data)
+
+
+def test_save_channel_persists_and_returns_public(memory_config):
+    cfg, disk = memory_config
+    disk["magic"] = 3
+
+    result = cfg.save_channel(
+        {"type": "telegram", "name": "交易群", "token": "secret-token", "chatId": "123"}
+    )
+
+    saved = result["channel"]
+    assert saved["id"]
+    assert saved["typeLabel"] == "Telegram"
+    assert saved["secretKeys"] == ["token"]
+    assert "secret-token" not in str(result)
+    assert disk["alert_channels"][0]["token"] == "secret-token"
+    assert disk["alert_channels"][0]["id"] == saved["id"]
+    assert disk["magic"] == 3
+    assert cfg.alert_channels[0]["token"] == "secret-token"
+
+
+def test_save_channel_keeps_blank_secret(memory_config):
+    cfg, disk = memory_config
+    first = cfg.save_channel(
+        {
+            "type": "feishu",
+            "name": "飞书",
+            "url": "https://open.feishu.cn/hook/old",
+            "secret": "sig",
+        }
+    )["channel"]
+
+    cfg.save_channel({"id": first["id"], "type": "feishu", "name": "改名", "url": ""})
+
+    stored = disk["alert_channels"][0]
+    assert stored["url"] == "https://open.feishu.cn/hook/old"
+    assert stored["secret"] == "sig"
+    assert stored["name"] == "改名"
+
+
+def test_save_channel_can_clear_secret(memory_config):
+    cfg, disk = memory_config
+    first = cfg.save_channel(
+        {"type": "feishu", "name": "飞书", "url": "https://x", "secret": "sig"}
+    )["channel"]
+
+    cfg.save_channel({"id": first["id"], "type": "feishu", "clear": ["secret"]})
+
+    assert "secret" not in disk["alert_channels"][0]
+    assert disk["alert_channels"][0]["url"] == "https://x"
+
+
+def test_save_channel_rejects_unknown_id(memory_config):
+    cfg, _ = memory_config
+    with pytest.raises(ValueError, match="不存在"):
+        cfg.save_channel({"id": "nope", "type": "discord", "url": "https://x"})
+
+
+def test_save_channel_validates_before_persisting(memory_config):
+    cfg, disk = memory_config
+    with pytest.raises(ValueError):
+        cfg.save_channel({"type": "telegram", "token": "t"})
+    assert "alert_channels" not in disk
+
+
+def test_delete_channel_removes_and_persists(memory_config):
+    cfg, disk = memory_config
+    first = cfg.save_channel(
+        {"type": "discord", "name": "D", "url": "https://d"}
+    )["channel"]
+
+    result = cfg.delete_channel(first["id"])
+
+    assert result["deleted"]["id"] == first["id"]
+    assert disk["alert_channels"] == []
+    assert cfg.alert_channels == []
+    with pytest.raises(ValueError, match="不存在"):
+        cfg.delete_channel(first["id"])
+
+
+def test_channels_public_hides_secrets_and_assigns_ids(memory_config):
+    cfg, disk = memory_config
+    disk["alert_channels"] = [
+        {"type": "webhook", "name": "群", "url": "https://secret.example/hook"}
+    ]
+
+    public = cfg.channels_public()
+
+    assert public[0]["secretKeys"] == ["url"]
+    assert "secret.example" not in str(public)
+    assert disk["alert_channels"][0]["id"]
+
+
+def test_ensure_channel_ids_does_not_rewrite_when_complete(memory_config, monkeypatch):
+    cfg, disk = memory_config
+    disk["alert_channels"] = [{"id": "keep", "type": "discord", "url": "https://x"}]
+    writes: list[dict] = []
+    monkeypatch.setattr(
+        Config, "_write_raw", staticmethod(lambda raw: writes.append(raw))
+    )
+
+    cfg.ensure_channel_ids()
+
+    assert writes == []

@@ -481,7 +481,7 @@ export function AlertsPanel() {
       </div>
 
       <div className="shrink-0 border-t border-border px-4 py-2.5 text-[11px] leading-relaxed text-muted-foreground/60">
-        第三方推送：{channels.length > 0 ? channels.join(' / ') : '未配置（见 config.json）'}。
+        第三方推送：{channels.length > 0 ? channels.join(' / ') : '未配置（设置 → 告警）'}。
         声音与桌面通知需要页面保持打开。
       </div>
     </aside>

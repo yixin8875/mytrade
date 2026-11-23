@@ -31,6 +31,7 @@ import { mountBootProgress } from './lib/boot';
 import { handleGlobalShortcut, syncPageFromHash, useApp } from './store/useApp';
 import type {
   Account,
+  AlertChannelTestEvent,
   AlertEvent,
   GatewayHealth,
   Order,
@@ -202,6 +203,15 @@ export default function App() {
           .call<PriceAlert[]>('alerts.list')
           .then((next) => state.setAlerts(next))
           .catch(() => {});
+      }),
+      gateway.on('alertChannelTest', (data) => {
+        const event = data as AlertChannelTestEvent;
+        const state = useApp.getState();
+        if (event.ok) {
+          state.notify('success', `通道「${event.label}」测试消息已发送`);
+        } else {
+          state.notify('error', `通道「${event.label}」测试失败：${event.error ?? '未知错误'}`);
+        }
       }),
     ];
 
