@@ -227,7 +227,7 @@ const HEALTH: GatewayHealth = {
   lastError: null,
   serverTime: 1763203600,
   serverOffset: 0,
-  version: '0.8.0',
+  version: '0.9.0',
 };
 
 function mockGateway() {
