@@ -22,10 +22,10 @@ import type {
  *  1. 读取指标输入 → 从网关取 K 线（按品种/周期共享缓存）；
  *  2. 调用 Piner 引擎，把整段 K 线喂进去跑一遍原生 Pine 脚本；
  *  3. 把结果写进 pineStudies 的共享表；
- *  4. 改一次 in_refresh 输入，让图表库重跑 main，把曲线画出来。
+ *  4. 有曲线输出时改一次 in_refresh 输入，让图表库重跑 main，把曲线画出来。
  *
- * 计算放在主线程（5000 根 bar 的简单脚本约 75ms）；如果后续脚本更重，
- * 再把 run() 挪到 Web Worker。
+ * 计算放在主线程（5000 根 bar 的简单脚本约 75ms），所以只在真正需要时才算：
+ * 换品种/周期/参数、新的一根 K 线收盘；纯绘图脚本不会因为盘中每笔报价重算。
  */
 
 const HISTORY_COUNT = 5000;
@@ -36,6 +36,11 @@ const BARS_TTL_MS = 60_000;
 const BARS_FAILURE_TTL_MS = 30_000;
 /** 输入值变化后至少等这么久再重算，避免拖动参数时连环计算 */
 const MIN_RECOMPUTE_GAP_MS = 250;
+/**
+ * 有曲线输出的指标要跟着最后一根 K 线走；盘中最多这么久重算一次。
+ * 绘图型脚本不需要盘中更新，这一项不适用。
+ */
+const LIVE_REFRESH_MS = 3000;
 
 interface CachedBars {
   bars: Bar[];
@@ -173,6 +178,45 @@ export function pickScript(
   return [...pool].sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0))[0];
 }
 
+/**
+ * 重算签名：这里变化了才需要重新跑一遍引擎。
+ *
+ * 最后一根 K 线是正在跳动的「未收盘」bar。绘图型脚本（关键价位、PDH/PDL 这类）
+ * 的价位一天才变一次，没必要每笔报价都重算 5000 根 bar，所以默认只用
+ * 「已收盘的那根」和 K 线数量做签名；有曲线输出的脚本盘中也要更新，
+ * 由 tick() 给它们额外带上最后一根，并按 LIVE_REFRESH_MS 限速。
+ */
+export function studySignature(args: {
+  scriptId: string;
+  symbol: string;
+  resolution: string;
+  inputs: Record<string, unknown>;
+  bars: Bar[] | undefined;
+  live: boolean;
+}): string {
+  const bars = args.bars ?? [];
+  // 只有一根时它就是最后一根，没有已收盘的可用
+  const closed = bars.length >= 2 ? bars[bars.length - 2] : bars[bars.length - 1];
+  const last = args.live ? bars[bars.length - 1] : undefined;
+  return JSON.stringify([
+    args.scriptId,
+    args.symbol,
+    args.resolution,
+    args.inputs,
+    bars.length,
+    closed?.time,
+    closed?.open,
+    closed?.high,
+    closed?.low,
+    closed?.close,
+    last?.time,
+    last?.open,
+    last?.high,
+    last?.low,
+    last?.close,
+  ]);
+}
+
 export function toInputValue(meta: PineInputMeta, value: unknown): unknown {
   switch (meta.type) {
     case 'int':
@@ -233,6 +277,8 @@ export class PineRunner {
   private scripts: PineScriptRecord[] = [];
   private scriptsSignature = '';
   private signatures = new Map<string, string>();
+  /** 只由已收盘 bar 决定的签名：用来判断「刚收盘了一根」，不受盘中跳动影响 */
+  private closedSignatures = new Map<string, string>();
   private timers = new Map<string, number>();
   private running = new Set<string>();
   private lastRunAt = new Map<string, number>();
@@ -320,6 +366,7 @@ export class PineRunner {
     this.renderer = null;
     for (const script of this.scripts) clearPineResult(this.contextId, script.id);
     this.signatures.clear();
+    this.closedSignatures.clear();
     this.running.clear();
   }
 
@@ -403,25 +450,41 @@ export class PineRunner {
       const script = pickScript(candidates, inputs);
       if (!script) continue;
 
-      const bars = barsCache.get(barsKey(symbol, resolution));
-      const lastBar = bars?.bars.length ? bars.bars[bars.bars.length - 1] : undefined;
-      const signature = JSON.stringify([
-        script.id,
+      const bars = barsCache.get(barsKey(symbol, resolution))?.bars;
+      const closedSignature = studySignature({
+        scriptId: script.id,
         symbol,
         resolution,
         inputs,
-        lastBar?.time,
-        lastBar?.open,
-        lastBar?.high,
-        lastBar?.low,
-        lastBar?.close,
-      ]);
+        bars,
+        live: false,
+      });
+      // 有曲线输出的指标跟着最后一根 K 线走；纯绘图脚本只在收盘后才需要重算
+      const signature =
+        script.plots.length > 0
+          ? studySignature({
+              scriptId: script.id,
+              symbol,
+              resolution,
+              inputs,
+              bars,
+              live: true,
+            })
+          : closedSignature;
       if (this.signatures.get(info.id) === signature) continue;
+      // 盘中逐笔重算 5000 根 bar 太贵：只有刚收盘的那根变了才立刻算，
+      // 其余（最后一根还在跳动）按 LIVE_REFRESH_MS 限速
+      if (
+        this.closedSignatures.get(info.id) === closedSignature &&
+        Date.now() - (this.lastRunAt.get(info.id) ?? 0) < LIVE_REFRESH_MS
+      ) {
+        continue;
+      }
       if (this.running.has(info.id) || this.timers.has(info.id)) continue;
 
       const timer = window.setTimeout(() => {
         this.timers.delete(info.id);
-        void this.compute(info.id, script, symbol, resolution, inputs, signature);
+        void this.compute(info.id, script, symbol, resolution, inputs, signature, closedSignature);
       }, COMPUTE_DELAY_MS);
       this.timers.set(info.id, timer);
     }
@@ -429,6 +492,7 @@ export class PineRunner {
     for (const studyId of [...this.signatures.keys()]) {
       if (alive.has(studyId)) continue;
       this.signatures.delete(studyId);
+      this.closedSignatures.delete(studyId);
       this.reportedErrors.delete(studyId);
       this.reportedWarnings.delete(studyId);
       this.refreshCounters.delete(studyId);
@@ -443,6 +507,7 @@ export class PineRunner {
     resolution: string,
     inputs: Record<string, unknown>,
     signature: string,
+    closedSignature: string,
   ): Promise<void> {
     if (this.disposed) return;
     const now = Date.now();
@@ -455,6 +520,7 @@ export class PineRunner {
     this.lastRunAt.set(studyId, now);
     this.running.add(studyId);
     this.signatures.set(studyId, signature);
+    this.closedSignatures.set(studyId, closedSignature);
     clearPineResult(this.contextId, script.id);
 
     try {
@@ -530,11 +596,12 @@ export class PineRunner {
       } else {
         this.reportedWarnings.delete(studyId);
       }
-      this.forceRecalc(studyId);
+      // 纯绘图脚本没有曲线可刷新：改 in_refresh 只会让图表库白白重算一遍
+      if (script.plots.length > 0) this.forceRecalc(studyId);
     } catch (error) {
       clearPineResult(this.contextId, script.id);
       this.renderer?.removeStudy(studyId);
-      this.forceRecalc(studyId);
+      if (script.plots.length > 0) this.forceRecalc(studyId);
       const message = (error as Error)?.message || 'Pine 脚本运行失败';
       const key = noteKey(script, symbol, resolution, inputs, [message]);
       if (this.reportedErrors.get(studyId) !== key) {

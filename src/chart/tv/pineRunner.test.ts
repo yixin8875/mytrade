@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import type { Bar } from '../../gateway/types';
 import type { PineInputMeta, PineScriptRecord } from '../../lib/pineScripts';
-import { noteKey, pickScript, pineColor, scriptsByName, toInputValue } from './pineRunner';
+import {
+  noteKey,
+  pickScript,
+  pineColor,
+  scriptsByName,
+  studySignature,
+  toInputValue,
+} from './pineRunner';
 
 function inputMeta(id: string): PineInputMeta {
   return { id, title: id, type: 'int', defval: 0 };
@@ -89,6 +97,49 @@ describe('pineColor', () => {
   it('leaves unknown color strings untouched', () => {
     expect(pineColor('red')).toBe('red');
     expect(pineColor('#4CAF5033')).toBe('#4CAF5033');
+  });
+});
+
+describe('studySignature', () => {
+  function makeBar(time: number, close: number): Bar {
+    return { time, open: close - 1, high: close + 1, low: close - 2, close, volume: 100 };
+  }
+
+  const base = {
+    scriptId: 'a',
+    symbol: 'XAUUSD',
+    resolution: '5',
+    inputs: { len: 10 },
+  };
+
+  it('ignores the forming bar for drawing-only scripts', () => {
+    const bars = [makeBar(0, 100), makeBar(300, 101), makeBar(600, 102)];
+    const closed = studySignature({ ...base, bars, live: false });
+
+    // 最后一根还在跳：报价变了也不该重算「关键价位」这类纯绘图脚本
+    const ticked = [bars[0], bars[1], { ...bars[2], close: 105, high: 106, low: 103 }];
+    expect(studySignature({ ...base, bars: ticked, live: false })).toBe(closed);
+    // 有曲线输出的脚本盘中仍要跟着走
+    expect(studySignature({ ...base, bars: ticked, live: true })).not.toBe(closed);
+  });
+
+  it('recalculates once a bar closes', () => {
+    const bars = [makeBar(0, 100), makeBar(300, 101), makeBar(600, 102)];
+    const before = studySignature({ ...base, bars, live: false });
+    const after = studySignature({ ...base, bars: [...bars, makeBar(900, 103)], live: false });
+
+    // 新的一根开盘：上一根变成已收盘，签名必须变，否则价位要等到下下根才更新
+    expect(after).not.toBe(before);
+  });
+
+  it('recalculates when inputs, script, symbol or resolution change', () => {
+    const bars = [makeBar(0, 100), makeBar(300, 101)];
+    const original = studySignature({ ...base, bars, live: false });
+
+    expect(studySignature({ ...base, bars, live: false, inputs: { len: 20 } })).not.toBe(original);
+    expect(studySignature({ ...base, bars, live: false, scriptId: 'b' })).not.toBe(original);
+    expect(studySignature({ ...base, bars, live: false, symbol: 'NQ' })).not.toBe(original);
+    expect(studySignature({ ...base, bars, live: false, resolution: '15' })).not.toBe(original);
   });
 });
 
