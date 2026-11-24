@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IChartWidgetApi } from '../../public/charting_library/charting_library';
 import { useApp } from '../store/useApp';
 import { DrawingTemplates, type DrawTemplate } from './DrawingTemplates';
@@ -10,23 +10,42 @@ const LEGACY_KEY = 'mytrade.drawTemplates';
 
 type StoredTemplates = Record<string, Record<string, DrawTemplate>>;
 
-function makeChart() {
+function makeChart(options: { selected?: boolean } = {}) {
+  const selected = options.selected ?? true;
   const setProperties = vi.fn();
+  const removeEntity = vi.fn();
+  const createMultipointShape = vi.fn(() => Promise.resolve('tmp'));
   const subscribe = vi.fn();
   const unsubscribe = vi.fn();
   const shape = {
     getProperties: () => ({ color: '#f00', linewidth: 2, text: 'hi' }),
+    getPoints: () => [
+      { time: 1, price: 2 },
+      { time: 3, price: 4 },
+    ],
     setProperties,
   };
+  const defaultShape = {
+    getProperties: () => ({ color: '#0f0', linewidth: 1, text: 'default' }),
+  };
   const chart = {
-    getAllShapes: () => [{ id: 's1', name: 'trend_line' }],
-    getShapeById: (id: string) => (id === 's1' ? shape : null),
+    getAllShapes: () => (selected ? [{ id: 's1', name: 'trend_line' }] : []),
+    getShapeById: (id: string) => (id === 's1' ? shape : id === 'tmp' ? defaultShape : null),
+    createMultipointShape,
+    removeEntity,
     selection: () => ({
-      allItems: () => ['s1'],
+      allItems: () => (selected ? ['s1'] : []),
       onChanged: () => ({ subscribe, unsubscribe }),
     }),
   } as unknown as IChartWidgetApi;
-  return { chart, setProperties, subscribe, unsubscribe };
+  return {
+    chart,
+    setProperties,
+    removeEntity,
+    createMultipointShape,
+    subscribe,
+    unsubscribe,
+  };
 }
 
 function drawTemplate(name: string, savedAt = 1): DrawTemplate {
@@ -41,41 +60,24 @@ function readMap(key: string): StoredTemplates {
   return JSON.parse(window.localStorage.getItem(key) ?? '{}') as StoredTemplates;
 }
 
-async function openPanel() {
-  await userEvent.click(screen.getByTitle(/拖动/));
+/** 面板入口在图表工具栏里，测试直接以展开状态渲染 */
+function renderPanel(chart: IChartWidgetApi, slot?: string) {
+  return render(
+    <DrawingTemplates chart={chart} slot={slot} open onClose={() => {}} />,
+  );
 }
-
-// jsdom 没有实现 Pointer Capture：userEvent 点击可拖动按钮会先触发 pointerdown，
-// 这里补上两个空实现，避免拖拽入口在测试里抛异常。
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', {
-    configurable: true,
-    value: vi.fn(),
-  });
-  Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', {
-    configurable: true,
-    value: vi.fn(),
-  });
-});
-
-afterAll(() => {
-  delete (HTMLElement.prototype as Partial<HTMLElement>).setPointerCapture;
-  delete (HTMLElement.prototype as Partial<HTMLElement>).releasePointerCapture;
-});
 
 afterEach(() => {
   window.localStorage.clear();
 });
 
 describe('DrawingTemplates', () => {
-  it('选中画线后保存模板，去掉 text 并写入主图槽位', async () => {
+  it('从「保存模板为…」进入命名视图，保存时去掉 text 并写入主图槽位', async () => {
     const { chart } = makeChart();
-    render(<DrawingTemplates chart={chart} />);
-    await openPanel();
+    renderPanel(chart);
 
-    expect(screen.getByText('已选中：趋势线')).toBeInTheDocument();
-
-    await userEvent.type(screen.getByPlaceholderText('模板名，如「红色粗线」'), '红色');
+    await userEvent.click(screen.getByRole('menuitem', { name: '保存模板为…' }));
+    await userEvent.type(screen.getByPlaceholderText('模板名称'), '红色');
     await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
     const map = readMap(MAIN_KEY);
@@ -86,15 +88,14 @@ describe('DrawingTemplates', () => {
     });
     expect(map.trend_line['红色'].props).toEqual({ color: '#f00', linewidth: 2 });
     expect(map.trend_line['红色'].props).not.toHaveProperty('text');
-    expect(screen.getByText('红色')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: '红色' })).toBeInTheDocument();
   });
 
   it('套用模板把属性写回选中画线，第二参跟随默认样式开关', async () => {
     window.localStorage.setItem(MAIN_KEY, JSON.stringify(stored()));
 
     const { chart, setProperties } = makeChart();
-    render(<DrawingTemplates chart={chart} />);
-    await openPanel();
+    renderPanel(chart);
 
     await userEvent.click(screen.getByTitle('应用到当前选中的画线'));
     expect(setProperties).toHaveBeenLastCalledWith({ color: '#f00', linewidth: 2 }, true);
@@ -106,43 +107,74 @@ describe('DrawingTemplates', () => {
     expect(setProperties).toHaveBeenLastCalledWith({ color: '#f00', linewidth: 2 }, false);
   });
 
+  it('应用默认模板：临时建一条同类画线读出默认属性后删除，再套到选中画线', async () => {
+    const { chart, setProperties, createMultipointShape, removeEntity } = makeChart();
+    const notify = vi.spyOn(useApp.getState(), 'notify');
+    renderPanel(chart);
+
+    await userEvent.click(screen.getByRole('menuitem', { name: '应用默认模板' }));
+
+    await waitFor(() => {
+      expect(setProperties).toHaveBeenCalledWith({ color: '#0f0', linewidth: 1 }, true);
+    });
+    expect(createMultipointShape).toHaveBeenCalledWith(
+      [
+        { time: 1, price: 2 },
+        { time: 3, price: 4 },
+      ],
+      expect.objectContaining({ shape: 'trend_line', disableSave: true, disableUndo: true }),
+    );
+    expect(removeEntity).toHaveBeenCalledWith('tmp', { disableUndo: true });
+    expect(notify).toHaveBeenCalledWith('success', '已恢复 1 条画线的默认样式，并设为默认样式');
+  });
+
+  it('没有选中画线时，保存与恢复默认都不可点', () => {
+    const { chart } = makeChart({ selected: false });
+    renderPanel(chart);
+
+    expect(screen.getByRole('menuitem', { name: '保存模板为…' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: '应用默认模板' })).toBeDisabled();
+    expect(screen.getByText('在图上选择一条画线后，可保存或恢复默认样式')).toBeInTheDocument();
+  });
+
   it('删除需要两次点击：第一次不删，第二次才移除并提示', async () => {
     window.localStorage.setItem(MAIN_KEY, JSON.stringify(stored()));
 
     const { chart } = makeChart();
     const notify = vi.spyOn(useApp.getState(), 'notify');
-    render(<DrawingTemplates chart={chart} />);
-    await openPanel();
+    renderPanel(chart);
 
     await userEvent.click(screen.getByTitle('删除模板（需再点一次确认）'));
-    expect(screen.getByText('红色')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: '红色' })).toBeInTheDocument();
     expect(readMap(MAIN_KEY).trend_line['红色']).toBeDefined();
     expect(screen.getByTitle('再点一次删除')).toBeInTheDocument();
 
     await userEvent.click(screen.getByTitle('再点一次删除'));
-    expect(screen.queryByText('红色')).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: '红色' })).not.toBeInTheDocument();
     expect(readMap(MAIN_KEY).trend_line).toBeUndefined();
     expect(notify).toHaveBeenCalledWith('success', '已删除模板「红色」');
   });
 
-  it('子槽位没有数据时回退读取主图模板', async () => {
+  it('子槽位没有数据时回退读取主图模板', () => {
     window.localStorage.setItem(MAIN_KEY, JSON.stringify(stored('主图模板')));
 
     const { chart } = makeChart();
-    render(<DrawingTemplates chart={chart} slot="c1" />);
-    await openPanel();
+    renderPanel(chart, 'c1');
 
-    expect(screen.getByText('主图模板')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: '主图模板' })).toBeInTheDocument();
   });
 
-  it('提供可拖动按钮，点击可开合模板面板', async () => {
+  it('Esc 关闭菜单；保存视图里的 Esc 先退回模板列表', async () => {
     const { chart } = makeChart();
-    render(<DrawingTemplates chart={chart} />);
+    const onClose = vi.fn();
+    render(<DrawingTemplates chart={chart} open onClose={onClose} />);
 
-    const trigger = screen.getByTitle(/拖动/);
-    expect(trigger.getAttribute('title')).toContain('拖动');
+    await userEvent.click(screen.getByRole('menuitem', { name: '保存模板为…' }));
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('menuitem', { name: '应用默认模板' })).toBeInTheDocument();
 
-    await userEvent.click(trigger);
-    expect(screen.getByTitle('关闭')).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

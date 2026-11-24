@@ -110,15 +110,19 @@ public/datafeeds/            # 可选，参考实现
 
 | Datafeed 方法 | 网关调用 | 注意 |
 |---|---|---|
-| `onReady(cb)` | `system.health` | `supported_resolutions: ['1','5','15','30','60','240','1D','1W']` |
-| `resolveSymbol` | `symbol.info` | `pricescale = 10 ** digits`、`mintick = tickSize`、`minmov = 1`、`session` 按券商服务器时区 |
+| `onReady(cb)` | `system.health` | `supported_resolutions` 列出菜单里的常用周期：`1/2/3/5/10/15/30/45/60/120/240/1D/1W/1M/12M` |
+| `resolveSymbol` | `symbol.info` | `pricescale = 10 ** digits`、`mintick = tickSize`、`minmov = 1`、`session` 按券商服务器时区；不写 `supported_resolutions`（放开自定义周期），用 `intraday_multipliers` / `daily` / `weekly` / `monthly_multipliers` 声明网关真正提供的周期 |
 | `getBars` | `history.get` | **MT5 返回的是服务器时间**，必须换算成 UTC，否则 K 线整体偏移 |
 | `subscribeBars` | `bars.subscribe` + `bar` 事件 | 用实时推送更新最后一根 |
 | `unsubscribeBars` | `bars.unsubscribe` | 切换周期/品种时务必解绑 |
 | `getServerTime` | `system.health.serverTime` | 用网关时间校正浏览器时钟 |
 | `searchSymbols` | `symbols.list` | 支持中文 description 搜索 |
 
-周期映射要和网关的 `TIMEFRAMES` 对齐：TV 用 `1/5/15/30/60/240/D/W/M`，本项目内部用 `1/5/15/30/60/240/1D/1W/1M`，在适配层做一次转换。
+周期分两层：
+
+- **网关提供的周期**（`worker_base.TIMEFRAMES`）：`1/5/15/30/60/240/1D/1W/1M`。`getBars` / `subscribeBars` 只会收到这些周期。
+- **图表库合成的周期**：`2/3/10/45` 分钟、`2` 小时、`12` 月，以及打开 `custom_resolutions` 后用户在「添加自定义周期…」里输入的任何周期（如 7 分钟、3 天）。库按 `*_multipliers` 取基础周期再合并成目标周期，网关不需要认识。
+- 秒级周期未开放：MT5 / 网关只提供 M1 及以上，`has_seconds` 保持 `false`。
 
 ### 4. 替换图表组件
 
@@ -161,6 +165,8 @@ public/datafeeds/            # 可选，参考实现
 - `getServerTime` 返回**秒**，且要和 K 线用同一个时间参照系。
 - 券商服务器时间不在 TradingView 支持的时区列表里（如 `Etc/GMT-2` 会被判定 unsupported）。做法：K 线时间原样当成 UTC 展示，网关下发 `serverOffset`，`getServerTime = 现在 + serverOffset`，时区用 `Etc/UTC`，图上时间与 MT5 完全一致。
 - `use_localstorage_for_settings` 关掉，避免调试时旧 layout 缓存干扰。
+- **原生画线模板菜单不在这套库里**：`drawing_templates`（浮动工具栏的「保存模板为… / 应用默认模板 / 模板列表」）官方标注仅 Trading Platform 提供；Charting Library 构建里只有 featureset 声明和 `save_load_adapter` 的画线模板方法，没有菜单 UI。应用内用自绘的「画线模板」菜单（`src/components/DrawingTemplates.tsx`）实现同样能力：入口注入在选中画线的浮动工具栏最左边（`src/chart/tv/floatingTemplates.ts`），菜单本身由 React 画在图表容器上。
+- **`study_templates` 必须配 `save_load_adapter`**：不传时库不会退回 localStorage，而是请求 `charts_storage_url`；本项目没配该地址，请求会变成 `library_path/undefined/undefined/study_templates`，模板列表加载失败，「保存指标模板…」点完不弹窗。现由 `src/chart/tv/templateStore.ts` 用 `mytrade.tv.studyTemplates` 实现 `getAllStudyTemplates / saveStudyTemplate / getStudyTemplateContent / removeStudyTemplate`。
 - **`createOrderLine` / `createPositionLine` / `createExecutionShape` 在 Charting Library 里是空实现**，调用直接抛 `only available on Trading Platform`（`bundles/library.*.js` 里写死的）。只有券商版 Trading Platform 才有 Broker API。
 - 替代方案：`createShape({ time, price }, { shape: 'horizontal_line', text, disableSave: true })` + `getShapeById(id).setProperties({ linecolor, textcolor })` / `setPoints([{ time, price }])`。拖动可用，但没有移动结束事件，靠 200ms 轮询 `getPoints()` 检测位置变化；拖动后 1.5s 内不按旧数据回拉，等券商回执。
 

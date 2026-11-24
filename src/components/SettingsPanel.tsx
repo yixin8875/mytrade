@@ -55,6 +55,7 @@ import {
   X,
 } from 'lucide-react';
 import { gateway } from '../gateway/client';
+import { resolutionLabel, SUPPORTED_RESOLUTIONS } from '../chart/tv/resolutions';
 import { downloadDiagnostics } from '../lib/diagnostics';
 import { THEMES, useApp, type SettingsSection, type Theme } from '../store/useApp';
 import { fmtNum, templateStepsSummary } from '../lib/template';
@@ -114,16 +115,10 @@ const NAV = [
 /** 设置分区清单：命令面板直接复用，新增分区不必两处各写一遍 */
 export const SETTINGS_NAV = NAV;
 
-const FRAMES: [string, string][] = [
-  ['1', '1m'],
-  ['5', '5m'],
-  ['15', '15m'],
-  ['30', '30m'],
-  ['60', '1h'],
-  ['240', '4h'],
-  ['1D', '1D'],
-  ['1W', '1W'],
-];
+const FRAMES: [string, string][] = SUPPORTED_RESOLUTIONS.map((value) => [
+  value,
+  resolutionLabel(value),
+]);
 
 type RiskKey =
   | 'max_lot'
@@ -947,6 +942,10 @@ function ChartSection() {
   const setLayout = useApp((s) => s.setLayout);
   const resolution = useApp((s) => s.resolution);
   const setResolution = useApp((s) => s.setResolution);
+  // 图表里可以加自定义周期（如 7m），设置页也要能显示当前值
+  const frames: [string, string][] = FRAMES.some(([value]) => value === resolution)
+    ? FRAMES
+    : [[resolution, resolutionLabel(resolution)], ...FRAMES];
 
   return (
     <>
@@ -964,14 +963,16 @@ function ChartSection() {
         <Row label="默认周期" hint="切换后主图立即生效，下次启动沿用。">
           <Select
             value={resolution}
-            onValueChange={(value) => setResolution(String(value))}
-            items={FRAMES.map(([value, label]) => ({ value, label }))}
+            onValueChange={(value) => {
+              if (value) setResolution(String(value));
+            }}
+            items={frames.map(([value, label]) => ({ value, label }))}
           >
             <SelectTrigger aria-label="默认周期" className="w-[92px] min-w-0 text-[12px]">
               <SelectValue />
             </SelectTrigger>
             <SelectPopup>
-              {FRAMES.map(([value, label]) => (
+              {frames.map(([value, label]) => (
                 <SelectItem key={value} value={value}>
                   {label}
                 </SelectItem>

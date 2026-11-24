@@ -195,6 +195,8 @@ interface AppStore {
   alerts: PriceAlert[];
   /** 交易台右侧的告警面板是否展开 */
   alertsOpen: boolean;
+  /** 告警面板锚在图表顶栏铃铛下方的页面坐标；null 时用默认位置 */
+  alertsAnchor: { left: number; top: number; width: number } | null;
   /** 交易台右侧的财经日历面板是否展开 */
   calendarOpen: boolean;
   /** 是否在图表上标注财经事件（存 localStorage） */
@@ -314,6 +316,7 @@ interface AppStore {
   setDockHeight: (height: number) => void;
   setDockCollapsed: (collapsed: boolean) => void;
   setDockTab: (tab: DockTab) => void;
+  setAlertsAnchor: (anchor: { left: number; top: number; width: number } | null) => void;
   setWatchColumnOpen: (open: boolean) => void;
   setRailPinned: (pinned: boolean) => void;
   setOrderEntryMode: (mode: OrderEntryMode) => void;
@@ -557,7 +560,8 @@ function loadLayoutSync(): ChartSync {
 
 function loadResolution(): string {
   const raw = readJson<unknown>(RES_KEY, '5');
-  return typeof raw === 'string' && raw ? raw : '5';
+  // 早期下拉把 null 写成了字符串 "null"，加载时挡掉，别让图表收到非法周期
+  return typeof raw === 'string' && raw && raw !== 'null' ? raw : '5';
 }
 
 interface AlertPrefs {
@@ -654,6 +658,7 @@ export const useApp = create<AppStore>((set, get) => ({
   riskStatus: null,
   alerts: [],
   alertsOpen: false,
+  alertsAnchor: null,
   calendarOpen: false,
   calendarOverlay: loadCalendarOverlay(),
   paletteOpen: false,
@@ -741,6 +746,7 @@ export const useApp = create<AppStore>((set, get) => ({
     if (wasArmed) get().notify('info', '已切换品种，下单模板已解除');
   },
   setResolution: (resolution) => {
+    if (!resolution || resolution === 'null') return;
     writeJson(RES_KEY, resolution);
     set({ resolution });
   },
@@ -770,6 +776,7 @@ export const useApp = create<AppStore>((set, get) => ({
     }),
   setRiskStatus: (riskStatus) => set({ riskStatus }),
   setAlerts: (alerts) => set({ alerts }),
+  setAlertsAnchor: (alertsAnchor) => set({ alertsAnchor }),
   setAlertsOpen: (open) => set(open ? { alertsOpen: true, calendarOpen: false } : { alertsOpen: false }),
   setCalendarOpen: (open) =>
     set(open ? { calendarOpen: true, alertsOpen: false } : { calendarOpen: false }),

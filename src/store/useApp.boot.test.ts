@@ -48,6 +48,21 @@ describe('useApp 启动读取 localStorage', () => {
     expect(state.risk).toEqual({ mode: 'percent', value: 1, auto: true });
   });
 
+  it('周期被存成字符串 "null" 时回退到 5 分钟，setResolution 也拒绝空值', async () => {
+    window.localStorage.setItem('mytrade.resolution', '"null"');
+
+    const state = await boot();
+    const { useApp } = await import('./useApp');
+    expect(state.resolution).toBe('5');
+
+    state.setResolution('null');
+    state.setResolution('');
+    expect(useApp.getState().resolution).toBe('5');
+
+    state.setResolution('7');
+    expect(useApp.getState().resolution).toBe('7');
+  });
+
   it('恢复上次选中的品种，而不是每次回到第一个可见品种', async () => {
     window.localStorage.setItem('mytrade.symbol', JSON.stringify('EURUSD'));
 

@@ -15,19 +15,10 @@ import type {
   Timezone,
 } from '../../../public/charting_library/charting_library';
 import type { Bar as GatewayBar, SymbolInfo } from '../../gateway/types';
+import { GATEWAY_RESOLUTIONS, SUPPORTED_RESOLUTIONS } from './resolutions';
 
-/** 与网关 TIMEFRAMES 一一对应 */
-export const SUPPORTED_RESOLUTIONS = [
-  '1',
-  '5',
-  '15',
-  '30',
-  '60',
-  '240',
-  '1D',
-  '1W',
-  '1M',
-] as ResolutionString[];
+/** 网关 TIMEFRAMES 真正能取到的分钟级周期，写进 symbolInfo 的 intraday_multipliers */
+const GATEWAY_INTRADAY = GATEWAY_RESOLUTIONS.filter((item) => /^\d+$/.test(item));
 
 const HISTORY_LIMIT = 5000;
 
@@ -142,7 +133,12 @@ export class GatewayDatafeed implements IDatafeedChartApi {
           has_weekly_and_monthly: true,
           has_empty_bars: false,
           has_seconds: false,
-          supported_resolutions: SUPPORTED_RESOLUTIONS,
+          // 不写 supported_resolutions：交给图表库按全局列表 + 自定义周期全放开。
+          // 网关真正提供的周期写在 multipliers 里，其余周期由图表库用它合成。
+          intraday_multipliers: GATEWAY_INTRADAY,
+          daily_multipliers: ['1'],
+          weekly_multipliers: ['1'],
+          monthly_multipliers: ['1'],
           volume_precision: 0,
           data_status: 'streaming',
           currency_code: info.currency || 'USD',

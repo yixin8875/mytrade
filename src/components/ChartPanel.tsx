@@ -20,12 +20,24 @@ import { SessionBoxManager } from '../chart/tv/sessionBoxes';
 import { customIndicators } from '../chart/tv/studies';
 import { publishCrosshair, publishRange, subscribeRange, type RangeState } from '../chart/tv/sync';
 import { buildQuickActionItems } from '../lib/chartQuickActions';
-import { ALERT_COLOR, alertChipText, alertsOnChart } from '../lib/chartAlerts';
+import {
+  ALERT_COLOR,
+  alertChipText,
+  alertKindFor,
+  alertsOnChart,
+  drawingAlertPrice,
+} from '../lib/chartAlerts';
+import { templateStore } from '../chart/tv/templateStore';
+import { mountFloatingToolbarButtons, templatePanelSpot } from '../chart/tv/floatingTemplates';
+import {
+  alertPanelSpot,
+  mountHeaderAlertButton,
+  type HeaderAlertHandle,
+} from '../chart/tv/headerAlert';
 import { ChartChips, measurePriceAxis, type ChartBand, type ChartChip } from './ChartChips';
 import { ChartQuickActions } from './ChartQuickActions';
 import { DrawingTemplates } from './DrawingTemplates';
 import { makeQuickMenuProcessor } from '../chart/tv/quickMenu';
-import { StudyTemplates } from './StudyTemplates';
 import type {
   ChartPropertiesOverrides,
   ChartingLibraryWidgetOptions,
@@ -35,7 +47,7 @@ import type {
   PineJS,
   ResolutionString,
 } from '../../public/charting_library/charting_library';
-import type { SymbolInfo } from '../gateway/types';
+import type { PriceAlert, SymbolInfo } from '../gateway/types';
 
 const SIDE_BUY = '#0f7a55';
 const SIDE_SELL = '#c2413a';
@@ -325,6 +337,11 @@ export function ChartPanel({
 
   const [chart, setChart] = useState<IChartWidgetApi | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** 浮动工具栏「模板」按钮打开的面板位置（图表容器内坐标） */
+  const [templateSpot, setTemplateSpot] = useState<{ left: number; top: number } | null>(null);
+  const floatingTemplateRef = useRef<(() => void) | null>(null);
+  /** 图表顶栏「指标模板」右侧的告警铃铛 */
+  const headerAlertRef = useRef<HeaderAlertHandle | null>(null);
 
   /**
    * 拖动落点要先体现在界面上，必须触发一次重渲染：
@@ -402,6 +419,11 @@ export function ChartPanel({
   const orders = allOrders.filter((item) => item.symbol === symbol);
   // 只标注这张图自己的品种，多图时不把别的品种的告警画过来
   const alerts = alertsOnChart(allAlerts, symbol);
+  // 顶栏铃铛的角标跟着当前图表上启用中的告警数量走
+  const alertCount = alerts.length;
+  useEffect(() => {
+    headerAlertRef.current?.setCount(alertCount);
+  }, [alertCount]);
   const digits = info?.digits ?? 5;
   const step = info?.volumeStep ?? 0.01;
 
@@ -442,6 +464,35 @@ export function ChartPanel({
     }
     markOptimistic(key, next);
     requestModify(key, next, send, fail, tol);
+  };
+
+  /**
+   * 保存告警拖动结果：价格变了，上穿/下穿也要按买价重算。
+   * 方向必须在拖动落点那一刻定下来，不能等 320ms 节流后再算——
+   * 行情在这段时间里冲过告警价，会把方向翻到用户看到的相反一侧，
+   * 触发时的提醒内容就会和图表上刚拖出来的方向对不上。
+   * 图上虚线和右侧小块共用这一套逻辑。
+   */
+  const saveAlertPrice = (alert: PriceAlert) => (price: number) => {
+    const state = useApp.getState();
+    const bid = state.quote && state.quote.symbol === alert.symbol ? state.quote.bid : null;
+    const kind = alertKindFor(roundPrice(price), bid);
+    moveTo(`alert:${alert.id}`, alert.price, price, async (value) => {
+      const updated = await gateway.call<PriceAlert>('alerts.update', {
+        id: alert.id,
+        price: value,
+        ...(kind ? { kind } : {}),
+      });
+      const next = useApp.getState();
+      next.setAlerts(
+        next.alerts.map((item) => (item.id === alert.id ? { ...item, ...updated } : item)),
+      );
+    });
+  };
+
+  /** 打开告警面板前记录铃铛位置，让面板贴着顶栏铃铛展开 */
+  const anchorAlerts = () => {
+    useApp.getState().setAlertsAnchor(alertPanelSpot(hostRef.current));
   };
 
   const chips: ChartChip[] = [];
@@ -842,12 +893,16 @@ export function ChartPanel({
 
   // 价格告警：右侧小块 + 图上的虚线，标出上穿 / 下穿价位与备注
   for (const alert of alerts) {
+    const key = `alert:${alert.id}`;
     chips.push({
-      key: `alert:${alert.id}`,
-      price: alert.price,
+      key,
+      // 拖动告警线后先按本地目标价显示，等 alerts.update 回执再落到真实数据
+      price: resolvePrice(key, alert.price, tol).price ?? alert.price,
       color: ALERT_COLOR,
       text: alertChipText(alert, digits),
       tags: [{ text: '告警', color: ALERT_COLOR }],
+      // 右侧小块和图上虚线一样可上下拖动改价，方向跟着重算
+      onMove: saveAlertPrice(alert),
     });
   }
 
@@ -936,6 +991,7 @@ export function ChartPanel({
         context_menu: {
           items_processor: makeQuickMenuProcessor(quickMenuItems, quickMenuPrice, (action, price) => {
             setActiveSlot(slot);
+            if (action === 'alert') anchorAlerts();
             useApp.getState().chartQuickAction(action, price, symbolRef.current);
           }),
         },
@@ -943,12 +999,59 @@ export function ChartPanel({
         // 不用库里那个只显示「应用默认」的内置模板菜单。
         // 主图把图表属性（倒计时、坐标、指标等）存进 localStorage，重启后保留；
         // 四图是四个 widget 共用一份存储，读写会互相覆盖，所以整格关掉本地存储。
+        // 允许在周期菜单里「添加自定义周期」（如 7 分钟、3 天），
+        // 这些周期由图表库按 symbolInfo 的 multipliers 从基础周期合成。
+        // custom_resolutions：允许「添加自定义周期」；
+        // study_templates：显示库自带的「指标模板」按钮（保存指标模板… / 我的模板），
+        // 模板内容由 templateStore 存进 localStorage。
+        save_load_adapter: templateStore,
+        enabled_features: ['custom_resolutions', 'study_templates'],
         disabled_features:
           slot === 'main'
             ? []
             : ['use_localstorage_for_settings', 'save_chart_properties_to_local_storage'],
       });
       widgetRef.current = widget;
+      // 模板 / 告警入口跟着选中画线的浮动工具栏出现，和 TradingView 原生位置一致
+      floatingTemplateRef.current = mountFloatingToolbarButtons(
+        host,
+        {
+          templates: (button) => {
+            const spot = templatePanelSpot(host, button);
+            // 再点一次按钮收起菜单；切到别的画线由下面的选择事件关掉
+            setTemplateSpot((current) => (current ? null : spot));
+          },
+          alert: () => {
+            setTemplateSpot(null);
+            try {
+              const active = widget.activeChart();
+              const selected = active.selection().allItems();
+              const shape = selected.length > 0 ? active.getShapeById(selected[0] as never) : null;
+              const points = (shape?.getPoints() ?? []) as Array<{ price: number }>;
+              const price = drawingAlertPrice(points);
+              if (price == null) {
+                useApp.getState().notify('error', '先选中一条画线再创建告警');
+                return;
+              }
+              // 和价格轴「+」同一套预填流程：方向按现价判断，确认后再添加
+              anchorAlerts();
+              useApp.getState().chartQuickAction('alert', price, symbolRef.current);
+            } catch (error) {
+              useApp.getState().notify('error', (error as Error).message || '创建告警失败');
+            }
+          },
+        },
+        () => setTemplateSpot(null),
+      );
+      // 顶栏原来的告警按钮迁到图表顶栏：指标模板右侧的铃铛，点一下开合告警面板
+      headerAlertRef.current = mountHeaderAlertButton(host, {
+        onPick: () => {
+          const state = useApp.getState();
+          const next = !state.alertsOpen;
+          if (next) anchorAlerts();
+          state.setAlertsOpen(next);
+        },
+      });
       registerWidget(slot, widget, host);
       // 旧调试脚本和截图仍从 window.__tv 取主图
       if (slot === 'main') {
@@ -959,6 +1062,11 @@ export function ChartPanel({
         // StrictMode 二次挂载或切换账户时，旧 widget 可能已经被替换，别再给它挂事件
         if (widgetRef.current !== widget) return;
         const active = widget.activeChart();
+        // 选中别的画线或点空白取消选择时，浮动工具栏里的模板菜单跟着收起
+        active
+          .selection()
+          .onChanged()
+          .subscribe(null, () => setTemplateSpot(null));
         // 右键菜单的 items_processor 可能在库的 mouse_down 订阅之前执行，
         // 所以在 iframe 文档的捕获阶段先把按下位置换算成价格。
         host.querySelector('iframe')?.contentDocument?.addEventListener(
@@ -1192,6 +1300,10 @@ export function ChartPanel({
       calendarLayerRef.current = null;
       pineRunnerRef.current?.dispose();
       pineRunnerRef.current = null;
+      floatingTemplateRef.current?.();
+      floatingTemplateRef.current = null;
+      headerAlertRef.current?.dispose();
+      headerAlertRef.current = null;
       registerWidget(slot, null);
       widgetRef.current?.remove();
       widgetRef.current = null;
@@ -1421,14 +1533,15 @@ export function ChartPanel({
       }
     }
 
-    // 价格告警：虚线、不可拖动（改价在告警面板里做），价格标签仍显示在轴上
+    // 价格告警：虚线、可直接拖动改价；拖动结果写回网关和本地列表
     for (const alert of alerts) {
-      specs.set(`alert:${alert.id}`, {
-        price: alert.price,
+      const key = `alert:${alert.id}`;
+      specs.set(key, {
+        price: resolvePrice(key, alert.price, tol).price ?? alert.price,
         color: ALERT_COLOR,
         text: '',
-        editable: false,
         dashed: true,
+        onMove: saveAlertPrice(alert),
       });
     }
 
@@ -1462,8 +1575,15 @@ export function ChartPanel({
         syncCrosshair={syncCrosshair}
       />
       {chart && <ChartQuickActions host={hostRef} chart={chart} symbol={symbol} />}
-      {chart && <DrawingTemplates chart={chart} slot={slot} />}
-      {chart && <StudyTemplates chart={chart} slot={slot} />}
+      {chart && (
+        <DrawingTemplates
+          chart={chart}
+          slot={slot}
+          open={!!templateSpot}
+          onClose={() => setTemplateSpot(null)}
+          anchor={templateSpot}
+        />
+      )}
       {error && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-background/90 px-6 text-center text-sm text-destructive-foreground">
           {error}

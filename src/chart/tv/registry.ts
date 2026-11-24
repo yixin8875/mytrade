@@ -21,6 +21,11 @@ export function registerWidget(
   }
 }
 
+/** 指定槽位的图表容器（没有则 null）；面板要按图内铃铛定位时用 */
+export function chartHost(slot: string): HTMLElement | null {
+  return hosts.get(slot) ?? null;
+}
+
 /** 主图容器：截图时要读它里面的 iframe/canvas 几何 */
 export function primaryHost(): HTMLElement | null {
   const main = hosts.get('main');

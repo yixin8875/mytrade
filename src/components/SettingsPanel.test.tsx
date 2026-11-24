@@ -137,6 +137,13 @@ describe('SettingsPanel', () => {
     );
   });
 
+  it('图表里选了自定义周期后，设置页「默认周期」显示对应标签', () => {
+    useApp.setState({ settingsSection: 'chart', resolution: '7' });
+    render(<SettingsPanel />);
+
+    expect(screen.getByLabelText('默认周期')).toHaveTextContent('7m');
+  });
+
   it('settingsReturn 为 overview 时「返回」回到概览', async () => {
     const user = userEvent.setup();
     useApp.setState({ settingsReturn: 'overview' });

@@ -1,49 +1,21 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from 'react';
-import { GripVertical, PencilRuler, Trash2, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useApp } from '../store/useApp';
 import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
-import type { IChartWidgetApi } from '../../public/charting_library/charting_library';
+import type {
+  IChartWidgetApi,
+  ILineDataSourceApi,
+  SupportedLineTools,
+} from '../../public/charting_library/charting_library';
 
 const LEGACY_KEY = 'mytrade.drawTemplates';
-const LEGACY_POS_KEY = 'mytrade.drawTemplatesPos';
-/** 模板与面板位置都按图表槽位分开，四图布局互不影响 */
+/** 模板按图表槽位分开，四图布局互不影响 */
 const storageKey = (slot: string) => `mytrade.drawTemplates:${slot}`;
-const posKey = (slot: string) => `mytrade.drawTemplatesPos:${slot}`;
 
-type PanelPos = { x: number; y: number };
-
-function readPos(slot: string): PanelPos | null {
-  try {
-    const raw =
-      window.localStorage.getItem(posKey(slot)) ??
-      (slot === 'main' ? window.localStorage.getItem(LEGACY_POS_KEY) : null);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object') return null;
-    const { x, y } = parsed as Partial<PanelPos>;
-    if (typeof x !== 'number' || typeof y !== 'number') return null;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    return { x, y };
-  } catch {
-    return null;
-  }
-}
-
-function writePos(slot: string, pos: PanelPos): void {
-  try {
-    window.localStorage.setItem(posKey(slot), JSON.stringify(pos));
-  } catch {
-    /* 忽略 */
-  }
-}
+/** 面板缺省位置：图表工具栏下方左侧 */
+const DEFAULT_ANCHOR = { left: 8, top: 44 };
 
 /** getAllShapes() 的 name 是工具名（horizontal_line），面板里换成中文 */
 const TOOL_LABELS: Record<string, string> = {
@@ -151,135 +123,110 @@ function writeTemplates(slot: string, map: TemplateMap): void {
   }
 }
 
-function fmtDate(ts: number): string {
-  if (!Number.isFinite(ts)) return '';
-  return new Date(ts).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+/**
+ * 取某个画线类型的出厂默认属性：用相同点位临时创建一个同类型画线，
+ * 读出它的属性后立刻删除。库没有直接暴露默认属性的 API。
+ */
+async function readDefaultProps(
+  chart: IChartWidgetApi,
+  shape: ILineDataSourceApi,
+  type: string,
+): Promise<Record<string, unknown>> {
+  const id = await chart.createMultipointShape(shape.getPoints(), {
+    // createMultipointShape 不接受光标/删除等工具，画线名称不会是它们
+    shape: type as Exclude<
+      SupportedLineTools,
+      'cursor' | 'dot' | 'arrow_cursor' | 'eraser' | 'measure' | 'zoom'
+    >,
+    disableSave: true,
+    disableSelection: true,
+    disableUndo: true,
+    lock: true,
+    showInObjectsTree: false,
+  });
+  try {
+    const temp = chart.getShapeById(id);
+    if (!temp) throw new Error('读取默认样式失败');
+    return temp.getProperties() as Record<string, unknown>;
+  } finally {
+    try {
+      chart.removeEntity(id, { disableUndo: true });
+    } catch {
+      /* 临时画线已被移除时忽略 */
+    }
+  }
+}
+
+function MenuItem({
+  disabled,
+  onClick,
+  children,
+}: {
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] text-foreground outline-none hover:bg-accent focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
 }
 
 /**
- * 画线样式模板：这个版本的 TradingView 自带「模板」菜单只有「应用默认」，
- * 保存/读取入口没有接出来，所以在这里直接基于公开的画线 API 做一套。
+ * 画线样式模板。这个版本的 TradingView 自带「模板」菜单只存在于 Trading Platform，
+ * Charting Library 里没有对应 UI，所以入口挂在选中画线的浮动工具栏上
+ * （见 chart/tv/floatingTemplates.ts），菜单按原生样子自己做：
+ * 保存模板为… / 应用默认模板 / 当前工具的模板列表。
  *
  * 保存：选中一条画线 → 读它的属性 → 存进 localStorage
- * 应用：把模板属性写回选中画线，并同时设为该类型画线的默认样式
+ * 应用：把模板属性写回选中画线，可选同时设为该类型画线的默认样式
  */
 export function DrawingTemplates({
   chart,
   slot = 'main',
+  open,
+  onClose,
+  anchor,
 }: {
   chart: IChartWidgetApi | null;
   slot?: string;
+  /** 由选中画线后浮动工具栏里的模板按钮控制开合 */
+  open: boolean;
+  onClose: () => void;
+  /** 面板相对图表容器的位置；缺省时放到工具栏下方左侧 */
+  anchor?: { left: number; top: number } | null;
 }) {
   const notify = useApp((s) => s.notify);
-  const [open, setOpen] = useState(false);
   const [templates, setTemplates] = useState<TemplateMap>(() => readTemplates(slot));
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [selection, setSelection] = useState<{ id: string; name: string } | null>(null);
+  const [view, setView] = useState<'list' | 'save'>('list');
   const [name, setName] = useState('');
   const [asDefault, setAsDefault] = useState(true);
+  const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  // 面板位置：默认左下角，拖过之后用 localStorage 里记住的位置（按槽位分开）
-  const [pos, setPos] = useState<PanelPos | null>(() => readPos(slot));
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const movedRef = useRef(false);
-  const dragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    originX: number;
-    originY: number;
-    hostW: number;
-    hostH: number;
-    width: number;
-    height: number;
-    moved: boolean;
-  } | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
-  const dragStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0) return;
-    const wrap = wrapRef.current;
-    const host = wrap?.parentElement;
-    if (!wrap || !host) return;
-    const hostRect = host.getBoundingClientRect();
-    const rect = wrap.getBoundingClientRect();
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: rect.left - hostRect.left,
-      originY: rect.top - hostRect.top,
-      hostW: hostRect.width,
-      hostH: hostRect.height,
-      width: rect.width,
-      height: rect.height,
-      moved: false,
-    };
-    movedRef.current = false;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const dragMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const drag = dragRef.current;
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    const dx = event.clientX - drag.startX;
-    const dy = event.clientY - drag.startY;
-    if (!drag.moved && Math.hypot(dx, dy) < 3) return;
-    drag.moved = true;
-    movedRef.current = true;
-    setPos({
-      x: Math.min(Math.max(drag.originX + dx, 0), Math.max(0, drag.hostW - drag.width)),
-      y: Math.min(Math.max(drag.originY + dy, 0), Math.max(0, drag.hostH - drag.height)),
-    });
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const dragEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const drag = dragRef.current;
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    dragRef.current = null;
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      /* 指针已释放 */
-    }
-    if (!drag.moved) return;
-    const dx = event.clientX - drag.startX;
-    const dy = event.clientY - drag.startY;
-    const next: PanelPos = {
-      x: Math.min(Math.max(drag.originX + dx, 0), Math.max(0, drag.hostW - drag.width)),
-      y: Math.min(Math.max(drag.originY + dy, 0), Math.max(0, drag.hostH - drag.height)),
-    };
-    setPos(next);
-    writePos(slot, next);
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  // 槽位变化时切到对应槽位的模板与面板位置
+  // 槽位变化时切到对应槽位的模板
   useEffect(() => {
     setTemplates(readTemplates(slot));
-    setPos(readPos(slot));
     setPendingDelete(null);
   }, [slot]);
 
-  // 窗口变小或图表切到四图时，把记住的位置收回可视范围
+  // 每次打开都从菜单首页开始
   useEffect(() => {
-    if (!pos) return;
-    const wrap = wrapRef.current;
-    const host = wrap?.parentElement;
-    if (!wrap || !host) return;
-    const rect = host.getBoundingClientRect();
-    const maxX = Math.max(0, rect.width - wrap.offsetWidth);
-    const maxY = Math.max(0, rect.height - wrap.offsetHeight);
-    if (pos.x > maxX || pos.y > maxY) {
-      const next = { x: Math.min(pos.x, maxX), y: Math.min(pos.y, maxY) };
-      setPos(next);
-      writePos(slot, next);
-    }
-  }, [pos]);
+    if (!open) return;
+    setView('list');
+    setName('');
+    window.setTimeout(() => panelRef.current?.focus(), 0);
+  }, [open]);
 
   // 选中画线：监听图表选择变化，只认画线（指标不在 getAllShapes 里）
   useEffect(() => {
@@ -309,20 +256,32 @@ export function DrawingTemplates({
     };
   }, [chart]);
 
-  // 当前类型可用的模板；没选中画线时把所有类型都列出来
-  const list = useMemo(() => {
-    const rows: DrawTemplate[] = [];
-    for (const [type, group] of Object.entries(templates)) {
-      if (selection && type !== selection.name) continue;
-      for (const item of Object.values(group)) rows.push(item);
-    }
-    return rows.sort((a, b) => b.savedAt - a.savedAt);
-  }, [templates, selection]);
-
-  // 打开面板时自动聚焦模板名输入框
+  // 点面板外关闭（图表内部的点击在 iframe 里，收不到）
   useEffect(() => {
-    if (open) window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [open]);
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      if (panelRef.current?.contains(event.target as Node)) return;
+      onClose();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [open, onClose]);
+
+  // 进入保存视图时聚焦名称输入框
+  useEffect(() => {
+    if (open && view === 'save') window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, [open, view]);
+
+  // 当前类型可用的模板；没选中画线时把所有类型都列出来
+  const groups = useMemo(() => {
+    return Object.entries(templates)
+      .filter(([type]) => !selection || type === selection.name)
+      .map(([type, group]) => ({
+        type,
+        items: Object.values(group).sort((a, b) => b.savedAt - a.savedAt),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [templates, selection]);
 
   const save = () => {
     if (!chart || !selection) {
@@ -357,6 +316,7 @@ export function DrawingTemplates({
       writeTemplates(slot, next);
       setTemplates(next);
       setName('');
+      setView('list');
       notify('success', `已保存模板「${trimmed}」`);
     } catch (error) {
       notify('error', (error as Error).message || '保存模板失败');
@@ -391,6 +351,51 @@ export function DrawingTemplates({
     if (failed.length > 0) notify('error', failed[0]);
   };
 
+  /** 把选中画线恢复成该工具类型的出厂样式 */
+  const applyDefaults = async () => {
+    if (!chart || busy) return;
+    const ids = (chart.selection().allItems() as unknown[]).map(String);
+    if (ids.length === 0) {
+      notify('error', '先在图上点选一条画线');
+      return;
+    }
+    const names = new Map<string, string>();
+    for (const shape of chart.getAllShapes()) names.set(String(shape.id), shape.name);
+    const defaults = new Map<string, Record<string, unknown>>();
+    let applied = 0;
+    const failed: string[] = [];
+    setBusy(true);
+    try {
+      for (const id of ids) {
+        try {
+          const type = names.get(id);
+          const shape = chart.getShapeById(id as never);
+          if (!type || !shape) continue;
+          let props = defaults.get(type);
+          if (!props) {
+            props = await readDefaultProps(chart, shape, type);
+            defaults.set(type, props);
+          }
+          shape.setProperties(styleProps(props), asDefault);
+          applied += 1;
+        } catch (error) {
+          failed.push((error as Error).message);
+        }
+      }
+    } finally {
+      setBusy(false);
+    }
+    if (applied > 0) {
+      notify(
+        'success',
+        `已恢复 ${applied} 条画线的默认样式${asDefault ? '，并设为默认样式' : ''}`,
+      );
+    }
+    if (failed.length > 0) {
+      notify('error', failed[0] || '该画线类型暂不支持恢复默认样式');
+    }
+  };
+
   const remove = (template: DrawTemplate) => {
     // 两次点击确认，避免误删
     if (pendingDelete !== template.name) {
@@ -412,148 +417,133 @@ export function DrawingTemplates({
     notify('success', `已删除模板「${template.name}」`);
   };
 
-  // 靠近底部时往上展开，靠近顶部时往下展开
-  const openUp = !pos || pos.y > 240;
+  if (!open) return null;
 
   return (
     <div
-      ref={wrapRef}
+      ref={panelRef}
+      role="menu"
+      tabIndex={-1}
       data-draw-templates={slot}
-      className={cn('absolute z-30', !pos && 'bottom-8 left-[58px]')}
-      style={pos ? { left: pos.x, top: pos.y } : undefined}
+      className="absolute z-30 w-[248px] rounded-lg border border-border bg-popover p-1 text-foreground shadow-lg/10 outline-none"
+      style={anchor ?? DEFAULT_ANCHOR}
       onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          if (view === 'save') setView('list');
+          else onClose();
+        }
+      }}
     >
-      <Button
-        variant={open ? 'secondary' : 'outline'}
-        size="sm"
-        onClick={() => {
-          // 拖动结束后的 click 不要误触发开合
-          if (movedRef.current) {
-            movedRef.current = false;
-            return;
-          }
-          setOpen((value) => !value);
-        }}
-        onPointerDown={dragStart}
-        onPointerMove={dragMove}
-        onPointerUp={dragEnd}
-        onPointerCancel={() => {
-          dragRef.current = null;
-        }}
-        title="单击开合模板面板；按住拖动可移动位置"
-        style={{ touchAction: 'none' }}
-        className="h-7 cursor-move select-none gap-1.5 bg-card/95 px-2 text-[11px] font-normal"
-      >
-        <GripVertical size={13} strokeWidth={1.5} className="opacity-60" />
-        <PencilRuler size={14} strokeWidth={1.5} />
-        画线模板
-      </Button>
-
-      {open && (
-        <div
-          className={cn(
-            'absolute left-0 w-[272px] rounded-xl border border-border bg-popover p-3 shadow-lg/5',
-            openUp ? 'bottom-8' : 'top-8',
-          )}
-        >
-          <div className="mb-2 flex items-center gap-1">
-            <span className="text-[12px] font-medium text-foreground">画线模板</span>
-            <span className="flex-1" />
+      {view === 'save' ? (
+        <div className="p-1.5">
+          <div className="px-0.5 pb-2 text-[12px] font-medium">保存模板为</div>
+          <input
+            ref={inputRef}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') save();
+            }}
+            placeholder="模板名称"
+            className="h-8 w-full rounded-lg border border-input bg-background px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25"
+          />
+          <div className="mt-2 flex justify-end gap-1.5">
             <Button
               variant="ghost"
-              size="icon-xs"
-              onClick={() => setOpen(false)}
-              className="h-6 w-6 text-muted-foreground hover:text-foreground"
-              title="关闭"
+              size="sm"
+              onClick={() => setView('list')}
+              className="h-7 px-2.5 text-[11px]"
             >
-              <X size={14} strokeWidth={1.5} />
+              取消
             </Button>
-          </div>
-
-          <div className="mb-2 rounded-md bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground">
-            {selection ? (
-              <span className="text-foreground">已选中：{toolLabel(selection.name)}</span>
-            ) : (
-              '在图上点选一条画线，再保存它的样式'
-            )}
-          </div>
-
-          <div className="flex gap-1.5">
-            <input
-              ref={inputRef}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') save();
-                if (event.key === 'Escape') setOpen(false);
-              }}
-              placeholder="模板名，如「红色粗线」"
-              className="h-7 min-w-0 flex-1 rounded-lg border border-input bg-background px-2 text-[11px] text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 placeholder:text-muted-foreground/60"
-            />
             <Button
               size="sm"
               onClick={save}
-              disabled={!selection}
-              className="h-7 shrink-0 px-2.5 text-[11px]"
+              disabled={!selection || !name.trim()}
+              className="h-7 px-2.5 text-[11px]"
             >
               保存
             </Button>
           </div>
+        </div>
+      ) : (
+        <>
+          <MenuItem disabled={!selection} onClick={() => setView('save')}>
+            保存模板为…
+          </MenuItem>
+          <MenuItem disabled={!selection || busy} onClick={() => void applyDefaults()}>
+            应用默认模板
+          </MenuItem>
 
-          <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] leading-relaxed text-muted-foreground">
+          {!selection && (
+            <div className="px-2.5 pb-1 pt-0.5 text-[10px] leading-relaxed text-muted-foreground/70">
+              在图上选择一条画线后，可保存或恢复默认样式
+            </div>
+          )}
+
+          <div className="my-1 h-px bg-border" />
+
+          <div className="max-h-[260px] overflow-auto">
+            {groups.length === 0 ? (
+              <div className="px-2.5 py-2 text-[11px] text-muted-foreground">
+                {selection ? `还没有「${toolLabel(selection.name)}」的模板` : '还没有保存过模板'}
+              </div>
+            ) : (
+              groups.map((group) => (
+                <div key={group.type} className="py-0.5">
+                  <div className="px-2.5 pb-0.5 pt-1 text-[10px] text-muted-foreground/70">
+                    {toolLabel(group.type)}
+                  </div>
+                  {group.items.map((template) => (
+                    <div
+                      key={template.name}
+                      className="group flex items-center rounded-md hover:bg-accent"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => apply(template)}
+                        title="应用到当前选中的画线"
+                        className="min-w-0 flex-1 truncate px-2.5 py-1.5 text-left text-[12px] text-foreground outline-none"
+                      >
+                        {template.name}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => remove(template)}
+                        title={
+                          pendingDelete === template.name ? '再点一次删除' : '删除模板（需再点一次确认）'
+                        }
+                        aria-label={`删除模板「${template.name}」`}
+                        className={cn(
+                          'mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-destructive/10 hover:text-destructive-foreground',
+                          pendingDelete === template.name
+                            ? 'bg-destructive/10 text-destructive-foreground'
+                            : 'text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+                        )}
+                      >
+                        <Trash2 size={12} strokeWidth={1.5} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="my-1 h-px bg-border" />
+          <label className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-accent/60">
             <Checkbox
               checked={asDefault}
               onCheckedChange={(checked) => setAsDefault(checked === true)}
               aria-label="应用时也设为该类型画线的默认样式"
               className="size-3.5"
             />
-            应用时也设为该类型画线的默认样式
+            套用时设为默认样式
           </label>
-
-          <div className="mt-2 max-h-[210px] overflow-auto">
-            {list.length === 0 ? (
-              <div className="py-3 text-center text-[11px] text-muted-foreground">
-                {selection ? `还没有「${toolLabel(selection.name)}」的模板` : '还没有保存过模板'}
-              </div>
-            ) : (
-              list.map((template) => (
-                <div
-                  key={`${template.type}:${template.name}`}
-                  className="group flex items-center gap-1 rounded-md px-1 py-1.5 hover:bg-accent"
-                >
-                  <button
-                    onClick={() => apply(template)}
-                    title="应用到当前选中的画线"
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <div className="truncate text-[11px] text-foreground">{template.name}</div>
-                    <div className="truncate text-[11px] text-muted-foreground/60">
-                      {toolLabel(template.type)} · {fmtDate(template.savedAt)}
-                    </div>
-                  </button>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={() => remove(template)}
-                    title={pendingDelete === template.name ? '再点一次删除' : '删除模板（需再点一次确认）'}
-                    className={cn(
-                      'h-6 w-6 shrink-0 hover:bg-destructive/10 hover:text-destructive-foreground',
-                      pendingDelete === template.name
-                        ? 'bg-destructive/10 text-destructive-foreground'
-                        : 'text-muted-foreground opacity-0 group-hover:opacity-100',
-                    )}
-                  >
-                    <Trash2 size={13} strokeWidth={1.5} />
-                  </Button>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className="mt-2 border-t border-border pt-2 text-[11px] leading-relaxed text-muted-foreground/60">
-            模板保存在本机。勾选「默认样式」后，之后新画的同类线也会用这套颜色、线宽和字体。
-          </div>
-        </div>
+        </>
       )}
     </div>
   );

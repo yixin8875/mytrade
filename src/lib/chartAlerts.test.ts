@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PriceAlert } from '../gateway/types';
-import { alertChipText, alertsOnChart } from './chartAlerts';
+import { alertChipText, alertKindFor, alertsOnChart, drawingAlertPrice } from './chartAlerts';
 
 function alert(overrides: Partial<PriceAlert> = {}): PriceAlert {
   return {
@@ -31,6 +31,38 @@ describe('alertsOnChart', () => {
 
   it('没有品种时返回空', () => {
     expect(alertsOnChart([alert()], '')).toEqual([]);
+  });
+});
+
+describe('drawingAlertPrice', () => {
+  it('单点画线取该点价格', () => {
+    expect(drawingAlertPrice([{ price: 3742.5 }])).toBe(3742.5);
+  });
+
+  it('多点画线取首尾中点', () => {
+    // 首 3700、尾 3800，中间点不参与
+    expect(drawingAlertPrice([{ price: 3700 }, { price: 3600 }, { price: 3800 }])).toBe(3750);
+  });
+
+  it('没有有效价格时返回 null', () => {
+    expect(drawingAlertPrice(null)).toBeNull();
+    expect(drawingAlertPrice([])).toBeNull();
+    expect(drawingAlertPrice([{ price: Number.NaN }])).toBeNull();
+  });
+});
+
+describe('alertKindFor', () => {
+  it('拖到现价下方是下穿，现价上方是上穿，等于现价算上穿', () => {
+    expect(alertKindFor(3610, 3620)).toBe('below');
+    expect(alertKindFor(3630, 3620)).toBe('above');
+    expect(alertKindFor(3620, 3620)).toBe('above');
+  });
+
+  it('没有有效买价时保持原方向', () => {
+    expect(alertKindFor(3610, null)).toBeNull();
+    expect(alertKindFor(3610, undefined)).toBeNull();
+    expect(alertKindFor(3610, 0)).toBeNull();
+    expect(alertKindFor(3610, Number.NaN)).toBeNull();
   });
 });
 

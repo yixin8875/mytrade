@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Bell, Pause, Pencil, Play, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gateway } from '../gateway/client';
+import { chartHost, currentSlot } from '../chart/tv/registry';
+import { alertPanelSpot } from '../chart/tv/headerAlert';
 import { useApp } from '../store/useApp';
 import { beep, desktopNotify, desktopPermission, requestDesktopPermission } from '../lib/alert';
 import { fmtPrice } from '../lib/format';
@@ -31,6 +33,7 @@ export function AlertsPanel() {
   const channels = channelNames ?? NO_CHANNELS;
   const prefill = useApp((s) => s.alertPrefill);
   const clearAlertPrefill = useApp((s) => s.clearAlertPrefill);
+  const anchor = useApp((s) => s.alertsAnchor);
 
   const [kind, setKind] = useState<'above' | 'below'>('above');
   const [price, setPrice] = useState('');
@@ -54,6 +57,14 @@ export function AlertsPanel() {
       .catch(() => {
         /* 网关没连上就保留旧列表 */
       });
+
+  // 快捷操作（Alt+A 等）打开面板时没有经过铃铛点击：按当前图表的铃铛兜底定位一次
+  useEffect(() => {
+    if (useApp.getState().alertsAnchor) return;
+    const spot = alertPanelSpot(chartHost(currentSlot()));
+    if (spot) useApp.getState().setAlertsAnchor(spot);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 面板打开时刷新，并用当前价（有十字线就用十字线）预填价格和方向
   useEffect(() => {
@@ -206,7 +217,11 @@ export function AlertsPanel() {
   return (
     <aside
       data-panel="alerts"
-      className="absolute inset-y-0 right-0 z-20 flex w-[320px] flex-col border-l border-border bg-card shadow-lg/5"
+      style={anchor ?? undefined}
+      className={cn(
+        'fixed z-30 flex max-h-[min(560px,calc(100vh-80px))] w-[320px] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-lg',
+        !anchor && 'left-3 top-14',
+      )}
     >
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
         <Bell size={14} strokeWidth={1.5} className="text-muted-foreground" />

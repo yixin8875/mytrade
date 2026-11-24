@@ -5,7 +5,8 @@ import { shouldPlacePrice } from '../chart/tv/placement';
 import { ReferenceLayer } from '../chart/tv/referenceLayer';
 import { ChartChips, type ChartBand } from '../components/ChartChips';
 import { DrawingTemplates } from '../components/DrawingTemplates';
-import { StudyTemplates } from '../components/StudyTemplates';
+import { templateStore } from '../chart/tv/templateStore';
+import { mountFloatingToolbarButtons, templatePanelSpot } from '../chart/tv/floatingTemplates';
 import { fmtPrice, fmtSigned, fmtVolume } from '../lib/format';
 import { useApp, type Theme } from '../store/useApp';
 import type { OrderType, Side, SymbolInfo } from '../gateway/types';
@@ -224,6 +225,8 @@ export function ReplayChart({
 
   const [chart, setChart] = useState<IChartWidgetApi | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** 浮动工具栏「模板」按钮打开的面板位置（图表容器内坐标） */
+  const [templateSpot, setTemplateSpot] = useState<{ left: number; top: number } | null>(null);
 
   const theme = useApp((s) => s.theme);
   const session = useReplay((s) => s.sessions.find((item) => item.id === sessionId));
@@ -303,6 +306,7 @@ export function ReplayChart({
     let disposed = false;
     let drawingsReady = false;
     let lastDrawings = '';
+    let removeFloatingTemplate: (() => void) | null = null;
 
     try {
       widget = new tv.widget({
@@ -327,7 +331,8 @@ export function ReplayChart({
           drawingTools: DRAWING_TOOLS,
           intervals: FAVORITE_INTERVALS,
         },
-        enabled_features: ['saveload_separate_drawings_storage'],
+        save_load_adapter: templateStore,
+        enabled_features: ['saveload_separate_drawings_storage', 'study_templates'],
         disabled_features: [
           'use_localstorage_for_settings',
           'save_chart_properties_to_local_storage',
@@ -343,6 +348,18 @@ export function ReplayChart({
         ],
       });
       widgetRef.current = widget;
+      // 复盘与交易台同一套入口：选中画线后的浮动工具栏里出现模板按钮
+      setTemplateSpot(null);
+      removeFloatingTemplate = mountFloatingToolbarButtons(
+        host,
+        {
+          templates: (button) => {
+            const spot = templatePanelSpot(host, button);
+            setTemplateSpot((current) => (current ? null : spot));
+          },
+        },
+        () => setTemplateSpot(null),
+      );
 
       const scheduleSave = () => {
         if (disposed) return;
@@ -396,6 +413,11 @@ export function ReplayChart({
       widget.chartReady().then(async () => {
         if (widgetRef.current !== widget || !widget) return;
         const active = widget.activeChart();
+        // 选中别的画线或取消选择时收起模板菜单
+        active
+          .selection()
+          .onChanged()
+          .subscribe(null, () => setTemplateSpot(null));
 
         // 恢复本会话上次的画线与指标（不影响交易台的 localStorage 布局）
         const saved = readChartState(sessionId);
@@ -522,6 +544,8 @@ export function ReplayChart({
       layerRef.current = null;
       referenceLayerRef.current?.dispose();
       referenceLayerRef.current = null;
+      removeFloatingTemplate?.();
+      removeFloatingTemplate = null;
       datafeedRef.current?.resetCache();
       datafeedRef.current = null;
       setChart(null);
@@ -777,8 +801,15 @@ export function ReplayChart({
       <div ref={hostRef} className="absolute inset-0" />
       <ChartChips chips={[]} bands={rBands} host={hostRef} chart={chart} syncCrosshair={false} />
       {/* 指标/画线模板与交易台同一套面板；回放槽位没存过模板时沿用主图那套 */}
-      {chart && <DrawingTemplates chart={chart} slot="replay" />}
-      {chart && <StudyTemplates chart={chart} slot="replay" />}
+      {chart && (
+        <DrawingTemplates
+          chart={chart}
+          slot="replay"
+          open={!!templateSpot}
+          onClose={() => setTemplateSpot(null)}
+          anchor={templateSpot}
+        />
+      )}
       <div className="pointer-events-none absolute bottom-8 right-[72px] z-10 flex items-center gap-1 text-[10px] text-console-faint">
         <Lock size={14} strokeWidth={1.5} />
         复盘 · 模拟

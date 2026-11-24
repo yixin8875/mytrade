@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
-import { Bell, CalendarDays } from 'lucide-react';
+import { CalendarDays } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
@@ -44,9 +44,6 @@ export function TopBar() {
   const health = useApp((s) => s.health);
   const account = useApp((s) => s.account);
   const riskStatus = useApp((s) => s.riskStatus);
-  const alerts = useApp((s) => s.alerts);
-  const alertsOpen = useApp((s) => s.alertsOpen);
-  const setAlertsOpen = useApp((s) => s.setAlertsOpen);
   const calendarOpen = useApp((s) => s.calendarOpen);
   const setCalendarOpen = useApp((s) => s.setCalendarOpen);
   const notify = useApp((s) => s.notify);
@@ -61,7 +58,6 @@ export function TopBar() {
   const allowLive = health?.config?.allow_live ?? false;
   // 实盘账户默认锁在只读，只有配置文件显式开启 allow_live 才允许切换
   const modeLocked = realAccount && !allowLive;
-  const activeAlerts = alerts.filter((item) => item.enabled).length;
 
   const toggleMode = async () => {
     if (!terminal) {
@@ -156,22 +152,6 @@ export function TopBar() {
       <Separator orientation="vertical" className="h-5" />
 
       <SymbolTabs />
-
-      <Button
-        variant={alertsOpen ? 'secondary' : 'ghost'}
-        size="sm"
-        onClick={() => setAlertsOpen(!alertsOpen)}
-        aria-pressed={alertsOpen}
-        data-alerts-toggle
-        title="价格告警面板"
-        className="gap-1.5 px-2 font-normal text-[12px]"
-      >
-        <Bell size={14} strokeWidth={1.5} />
-        告警
-        {activeAlerts > 0 && (
-          <span className="num font-mono text-[11px] text-muted-foreground/70">{activeAlerts}</span>
-        )}
-      </Button>
 
       <Button
         variant={calendarOpen ? 'secondary' : 'ghost'}
