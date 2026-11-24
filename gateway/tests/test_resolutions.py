@@ -108,9 +108,12 @@ def test_月数小于2直接报错():
 class FakeMt5:
     """只提供 _history / _ensure_symbol 用到的接口。"""
 
-    def __init__(self, rates):
+    def __init__(self, rates, range_error_before=None):
         self.rates = rates
         self.requests = []
+        self.range_requests = []
+        # 模拟券商/MT5 对 1970 年附近的起点直接抛 OSError
+        self.range_error_before = range_error_before
 
     def symbol_info(self, name):
         return types.SimpleNamespace(name=name, digits=2, visible=True, description=name)
@@ -122,15 +125,18 @@ class FakeMt5:
         self.requests.append((symbol, tf, pos, count))
         return self.rates[-count:]
 
-    def copy_rates_range(self, *args):
-        return None
+    def copy_rates_range(self, symbol, tf, start, end):
+        self.range_requests.append((symbol, tf, start, end))
+        if self.range_error_before is not None and start.year < self.range_error_before:
+            raise OSError("Invalid argument")
+        return self.rates
 
     def last_error(self):
         return (0, "ok")
 
 
-def make_worker(monkeypatch, rates):
-    fake = FakeMt5(rates)
+def make_worker(monkeypatch, rates, range_error_before=None):
+    fake = FakeMt5(rates, range_error_before=range_error_before)
     monkeypatch.setattr(mt5_worker, "mt5", fake)
     w = Mt5Worker.__new__(Mt5Worker)
     w._bar_subs = {}
@@ -193,6 +199,35 @@ def test_history保留原生1M行为(monkeypatch):
         }
         for b in MONTH_BARS
     ]
+
+
+def test_极早的from被钳到安全下限(monkeypatch):
+    # 图表首次加载自定义周期会要几十年的数据；MT5 对 1970 附近起点抛异常
+    w, fake = make_worker(monkeypatch, MONTH_BARS, range_error_before=1975)
+
+    result = w._history(
+        {
+            "symbol": "XAUUSD",
+            "resolution": "1M",
+            "count": 10,
+            "from": -802137600,
+            "to": ts(2024, 6, 30),
+        }
+    )
+
+    assert result["bars"]
+    assert fake.range_requests[0][2].year == 1980
+
+
+def test_只有to时同样钳住过长的回溯窗口(monkeypatch):
+    w, fake = make_worker(monkeypatch, MONTH_BARS, range_error_before=1975)
+
+    result = w._history(
+        {"symbol": "XAUUSD", "resolution": "1M", "count": 5000, "to": ts(2024, 6, 30)}
+    )
+
+    assert result["bars"]
+    assert fake.range_requests[0][2].year == 1980
 
 
 def test_history未知周期仍报错(monkeypatch):

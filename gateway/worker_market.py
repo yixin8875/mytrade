@@ -4,6 +4,10 @@ from worker_base import *  # noqa: F401,F403
 from worker_base import _num  # noqa: F401
 from resolutions import aggregate_month_bars, month_multiple
 
+# MT5 的 copy_rates_range 对 1970 年附近的起点会直接抛 OSError：图表首次加载
+# 自定义周期（如「3 个月」）会一次要几十年数据，这里用 1980 作为安全下限。
+MIN_RANGE_TS = int(datetime(1980, 1, 1).timestamp())
+
 
 class WorkerMarket:
     def _missed_bars(self, symbol: str, start: int, end: int) -> list[dict[str, Any]]:
@@ -171,12 +175,13 @@ class WorkerMarket:
                 start_ts = float(from_ts)
             else:
                 start_ts = end_ts - RES_SECONDS.get(fetch_resolution, 60) * fetch_count * 1.2
+            start_ts = max(start_ts, MIN_RANGE_TS)
             try:
                 # MetaTrader5 会把 datetime 当成本地墙钟时间换算成时间戳；
                 # 而 K 线 time 我们按「服务器时间当作 UTC」处理，所以这里也要用
                 # 本地墙钟构造，才能查到对应的服务器时间区间。
                 date_to = datetime.fromtimestamp(end_ts)
-                date_from = datetime.fromtimestamp(max(0.0, start_ts))
+                date_from = datetime.fromtimestamp(start_ts)
                 rates = mt5.copy_rates_range(symbol, tf, date_from, date_to)
             except Exception:
                 rates = None
@@ -189,18 +194,22 @@ class WorkerMarket:
                 probe_end = float(from_ts)
                 probe_span = RES_SECONDS.get(fetch_resolution, 60) * max(60, fetch_count) * 1.2
                 for _ in range(6):
-                    probe_start = probe_end - probe_span
+                    probe_start = max(MIN_RANGE_TS, probe_end - probe_span)
                     try:
                         got = mt5.copy_rates_range(
                             symbol,
                             tf,
-                            datetime.fromtimestamp(max(0.0, probe_start)),
+                            datetime.fromtimestamp(probe_start),
                             datetime.fromtimestamp(probe_end),
                         )
                     except Exception:
                         got = None
                     if got is not None and len(got) > 0:
                         rates = got[-fetch_count:]
+                        break
+                    if probe_start <= MIN_RANGE_TS:
+                        # 已经探到下限还没有数据，再往前只会重复同一个区间
+                        rates = []
                         break
                     probe_end = probe_start
                 else:

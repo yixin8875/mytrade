@@ -110,7 +110,7 @@ public/datafeeds/            # 可选，参考实现
 
 | Datafeed 方法 | 网关调用 | 注意 |
 |---|---|---|
-| `onReady(cb)` | `system.health` | `supported_resolutions` 列出菜单里的常用周期：`1/2/3/5/10/15/30/45/60/120/240/1D/1W/1M/12M` |
+| `onReady(cb)` | `system.health` | `supported_resolutions` 列出菜单里的常用周期：`1/2/3/5/10/15/30/45/60/120/240/1D/1W/1M/3M/12M`（3M/6M/12M 由网关从 1M 月线按日历聚合） |
 | `resolveSymbol` | `symbol.info` | `pricescale = 10 ** digits`、`mintick = tickSize`、`minmov = 1`、`session` 按券商服务器时区；不写 `supported_resolutions`（放开自定义周期），用 `intraday_multipliers` / `daily` / `weekly` / `monthly_multipliers` 声明网关真正提供的周期 |
 | `getBars` | `history.get` | **MT5 返回的是服务器时间**，必须换算成 UTC，否则 K 线整体偏移 |
 | `subscribeBars` | `bars.subscribe` + `bar` 事件 | 用实时推送更新最后一根 |

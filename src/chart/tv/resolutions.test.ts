@@ -3,7 +3,7 @@ import { GATEWAY_RESOLUTIONS, resolutionLabel, SUPPORTED_RESOLUTIONS } from './r
 
 describe('SUPPORTED_RESOLUTIONS', () => {
   it('包含原生菜单里的分 / 小时 / 天 / 周 / 月常用周期', () => {
-    for (const value of ['1', '2', '3', '5', '10', '15', '30', '45', '60', '120', '240', '1D', '1W', '1M', '12M']) {
+    for (const value of ['1', '2', '3', '5', '10', '15', '30', '45', '60', '120', '240', '1D', '1W', '1M', '3M', '12M']) {
       expect(SUPPORTED_RESOLUTIONS).toContain(value);
     }
   });
@@ -32,6 +32,7 @@ describe('resolutionLabel', () => {
     expect(resolutionLabel('240')).toBe('4h');
     expect(resolutionLabel('1D')).toBe('1D');
     expect(resolutionLabel('2W')).toBe('2W');
+    expect(resolutionLabel('3M')).toBe('3M');
     expect(resolutionLabel('12M')).toBe('12M');
   });
 

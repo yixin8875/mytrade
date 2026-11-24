@@ -20,11 +20,12 @@ export const SUPPORTED_RESOLUTIONS = [
   '1D',
   '1W',
   '1M',
+  '3M',
   '12M',
 ] as ResolutionString[];
 
-/** 网关 TIMEFRAMES 真正能取到的周期，写进 symbolInfo 的 *_multipliers */
-export const GATEWAY_RESOLUTIONS = ['1', '5', '15', '30', '60', '240', '1D', '1W', '1M'];
+/** 网关真正能取到的周期（3M 由 1M 聚合），写进 symbolInfo 的 *_multipliers */
+export const GATEWAY_RESOLUTIONS = ['1', '5', '15', '30', '60', '240', '1D', '1W', '1M', '3M'];
 
 /** 设置页 / 下拉里显示的短标签：7 -> 7m，120 -> 2h，1D / 1W / 1M 原样 */
 export function resolutionLabel(resolution: string): string {
