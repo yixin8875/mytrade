@@ -180,6 +180,24 @@ describe('ChartQuickActions', () => {
     );
   });
 
+  it('指针移到「+」上时按钮保持可点，不会闪烁消失', async () => {
+    const { doc } = setup();
+    const button = await hoverAxis(doc);
+
+    // 移到覆盖层按钮上时，iframe 收到 mouseleave
+    act(() => {
+      doc.dispatchEvent(new MouseEvent('mouseleave'));
+    });
+    act(() => {
+      button.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 240));
+
+    expect(screen.getByLabelText('图表快捷操作')).toBeInTheDocument();
+    await userEvent.click(button);
+    expect(await screen.findByText('XAUUSD · 3742.00')).toBeInTheDocument();
+  });
+
   it('告警 / 日历面板打开时不显示', async () => {
     useApp.setState({ alertsOpen: true });
     const { doc } = setup();

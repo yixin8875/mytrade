@@ -133,9 +133,10 @@ export function ChartQuickActions({
       );
     };
 
-    const leave = () => {
-      if (!openRef.current) setSpot(null);
-    };
+    // 指针移到「+」上时也会触发 iframe 的 mouseleave。这里不能立刻收起，
+    // 否则按钮在 pointerdown 前就被卸载，点击永远落空，看起来还会一直闪烁。
+    // 延迟收起，等按钮自己的 pointerenter 取消；真正离开图表由面板的 pointerleave 兜底。
+    const leave = () => scheduleHide();
     doc.addEventListener('mousemove', handler, true);
     doc.addEventListener('mouseleave', leave);
     return () => {
@@ -143,7 +144,7 @@ export function ChartQuickActions({
       doc.removeEventListener('mouseleave', leave);
       boxRef.current = { at: 0, box: null };
     };
-  }, [chart, host, symbol, cancelHide]);
+  }, [chart, host, symbol, cancelHide, scheduleHide]);
 
   // 鼠标离开整个图表容器时收起（iframe 外面的事件不会再经过十字线）
   useEffect(() => {
@@ -194,6 +195,8 @@ export function ChartQuickActions({
           title="添加警报 / 买入 / 卖出"
           className="pointer-events-auto absolute flex size-5 items-center justify-center rounded-md border border-border bg-popover text-muted-foreground shadow-sm/5 outline-none transition-colors hover:border-ring hover:bg-accent hover:text-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 data-[popup-open]:border-ring data-[popup-open]:bg-accent data-[popup-open]:text-foreground"
           style={{ top: spot.top, right: spot.right }}
+          onPointerEnter={cancelHide}
+          onPointerLeave={scheduleHide}
         >
           <Plus size={13} strokeWidth={2} />
         </MenuTrigger>

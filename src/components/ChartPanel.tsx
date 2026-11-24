@@ -20,6 +20,7 @@ import { SessionBoxManager } from '../chart/tv/sessionBoxes';
 import { customIndicators } from '../chart/tv/studies';
 import { publishCrosshair, publishRange, subscribeRange, type RangeState } from '../chart/tv/sync';
 import { buildQuickActionItems } from '../lib/chartQuickActions';
+import { ALERT_COLOR, alertChipText, alertsOnChart } from '../lib/chartAlerts';
 import { ChartChips, measurePriceAxis, type ChartBand, type ChartChip } from './ChartChips';
 import { ChartQuickActions } from './ChartQuickActions';
 import { DrawingTemplates } from './DrawingTemplates';
@@ -369,6 +370,7 @@ export function ChartPanel({
   const preview = useApp((s) => s.preview);
   const allPositions = useApp((s) => s.positions);
   const allOrders = useApp((s) => s.orders);
+  const allAlerts = useApp((s) => s.alerts);
   const patchDraft = useApp((s) => s.patchDraft);
   const resetDraft = useApp((s) => s.resetDraft);
   const setSymbol = useApp((s) => s.setSymbol);
@@ -398,6 +400,8 @@ export function ChartPanel({
 
   const positions = allPositions.filter((item) => item.symbol === symbol);
   const orders = allOrders.filter((item) => item.symbol === symbol);
+  // 只标注这张图自己的品种，多图时不把别的品种的告警画过来
+  const alerts = alertsOnChart(allAlerts, symbol);
   const digits = info?.digits ?? 5;
   const step = info?.volumeStep ?? 0.01;
 
@@ -834,6 +838,17 @@ export function ChartPanel({
         });
       }
     }
+  }
+
+  // 价格告警：右侧小块 + 图上的虚线，标出上穿 / 下穿价位与备注
+  for (const alert of alerts) {
+    chips.push({
+      key: `alert:${alert.id}`,
+      price: alert.price,
+      color: ALERT_COLOR,
+      text: alertChipText(alert, digits),
+      tags: [{ text: '告警', color: ALERT_COLOR }],
+    });
   }
 
   // ---- 创建 widget（只创建一次，之后靠 setSymbol / setResolution 同步）----
@@ -1406,10 +1421,21 @@ export function ChartPanel({
       }
     }
 
+    // 价格告警：虚线、不可拖动（改价在告警面板里做），价格标签仍显示在轴上
+    for (const alert of alerts) {
+      specs.set(`alert:${alert.id}`, {
+        price: alert.price,
+        color: ALERT_COLOR,
+        text: '',
+        editable: false,
+        dashed: true,
+      });
+    }
+
     layer.sync(specs);
     // draftAnchor 不放进依赖：市价草稿每跳都变，会把价格线同步刷爆。
     // 止损/止盈引导线只在开启划线时按当时报价定位，用户拖动后以拖动结果为准。
-  }, [chart, draft, draftHere, orders, positions, symbol, notify]);
+  }, [chart, draft, draftHere, orders, positions, alerts, symbol, notify]);
 
   const waiting = conn !== 'open' || !health?.connected || !symbol;
 
