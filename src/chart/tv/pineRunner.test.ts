@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { PineScriptRecord } from '../../lib/pineScripts';
-import { noteKey, pineColor, scriptsByName, toInputValue } from './pineRunner';
+import type { PineInputMeta, PineScriptRecord } from '../../lib/pineScripts';
+import { noteKey, pickScript, pineColor, scriptsByName, toInputValue } from './pineRunner';
+
+function inputMeta(id: string): PineInputMeta {
+  return { id, title: id, type: 'int', defval: 0 };
+}
 
 function record(patch: Partial<PineScriptRecord>): PineScriptRecord {
   return {
@@ -25,21 +29,52 @@ describe('scriptsByName', () => {
     ]);
 
     // 图表库的 study.name 取 description：新模板是 shorttitle，旧模板是全名
-    expect(byName.get('完整 A')?.id).toBe('a');
-    expect(byName.get('SHORT_A')?.id).toBe('a');
-    expect(byName.get('完整 B')?.id).toBe('b');
+    expect(byName.get('完整 A')?.map((script) => script.id)).toEqual(['a']);
+    expect(byName.get('SHORT_A')?.map((script) => script.id)).toEqual(['a']);
+    expect(byName.get('完整 B')?.map((script) => script.id)).toEqual(['b']);
   });
 
-  it('skips names shared by two scripts', () => {
+  it('keeps every script sharing the same shorttitle', () => {
     const byName = scriptsByName([
       record({ id: 'a', title: '脚本 A', shortTitle: 'DUP' }),
       record({ id: 'b', title: '脚本 B', shortTitle: 'DUP' }),
     ]);
 
-    // 重名时无法判断这块指标属于哪个脚本，宁可跳过也不画错
-    expect(byName.has('DUP')).toBe(false);
-    expect(byName.get('脚本 A')?.id).toBe('a');
-    expect(byName.get('脚本 B')?.id).toBe('b');
+    // 同名脚本（保存时标题加「(2)」、shorttitle 不变）以前会被整组跳过，
+    // 导致已挂上的指标一直空着；现在保留候选，交给 pickScript 按输入挑
+    expect(byName.get('DUP')?.map((script) => script.id)).toEqual(['a', 'b']);
+    expect(byName.get('脚本 A')?.map((script) => script.id)).toEqual(['a']);
+    expect(byName.get('脚本 B')?.map((script) => script.id)).toEqual(['b']);
+  });
+});
+
+describe('pickScript', () => {
+  it('prefers the script whose inputs match the study', () => {
+    const older = record({
+      id: 'a',
+      shortTitle: 'DUP',
+      savedAt: 2,
+      inputs: [inputMeta('len')],
+    });
+    const newer = record({
+      id: 'b',
+      shortTitle: 'DUP',
+      savedAt: 1,
+      inputs: [inputMeta('len'), inputMeta('src')],
+    });
+
+    // 指标只有 len 输入 → 是用 older 创建的，即使 newer 保存得更晚也选 older
+    expect(pickScript([older, newer], { len: 10 })?.id).toBe('a');
+    expect(pickScript([older, newer], { len: 10, src: 'close' })?.id).toBe('b');
+    expect(pickScript([older], {})?.id).toBe('a');
+  });
+
+  it('falls back to the newest copy when inputs cannot tell them apart', () => {
+    const older = record({ id: 'a', shortTitle: 'DUP', savedAt: 1, inputs: [] });
+    const newer = record({ id: 'b', shortTitle: 'DUP', savedAt: 5, inputs: [] });
+
+    expect(pickScript([older, newer], {})?.id).toBe('b');
+    expect(pickScript([], {})).toBeUndefined();
   });
 });
 

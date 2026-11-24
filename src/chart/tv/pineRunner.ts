@@ -134,23 +134,43 @@ export function pineColor(value: unknown): string {
 /**
  * 图表库用指标的 description 作为 study.name；Pine 脚本有 shorttitle 时我们把它
  * 当成 description，所以挂载后的指标名可能是 shorttitle，也可能是完整标题
- * （旧图表模板里保存的还是完整标题）。两种名字都要能找回脚本；
- * 两个脚本重名时无法判断归属，宁可跳过也不画错。
+ * （旧图表模板里保存的还是完整标题）。两种名字都要能找回脚本。
+ * 同一个名字可能对应多个脚本：保存同名脚本时标题会自动加「(2)」，但 shorttitle
+ * 不变，这时由 pickScript 按指标实际输入再挑。
  */
-export function scriptsByName(scripts: PineScriptRecord[]): Map<string, PineScriptRecord> {
-  const namesOf = (script: PineScriptRecord) =>
-    [...new Set([script.title, script.shortTitle].filter((name): name is string => !!name))];
-  const counts = new Map<string, number>();
+export function scriptsByName(scripts: PineScriptRecord[]): Map<string, PineScriptRecord[]> {
+  const byName = new Map<string, PineScriptRecord[]>();
   for (const script of scripts) {
-    for (const name of namesOf(script)) counts.set(name, (counts.get(name) ?? 0) + 1);
-  }
-  const byName = new Map<string, PineScriptRecord>();
-  for (const script of scripts) {
-    for (const name of namesOf(script)) {
-      if (counts.get(name) === 1) byName.set(name, script);
+    const names = [...new Set([script.title, script.shortTitle].filter((name): name is string => !!name))];
+    for (const name of names) {
+      const list = byName.get(name);
+      if (list) list.push(script);
+      else byName.set(name, [script]);
     }
   }
   return byName;
+}
+
+/**
+ * 同名脚本里挑出当前指标对应的那一份。
+ * 优先输入集合完全吻合的脚本（指标是用它创建的）；多个都吻合时取最新保存的
+ * ——那通常是同一个脚本的另一份副本，画哪份结果都一样。
+ */
+export function pickScript(
+  candidates: PineScriptRecord[],
+  inputs: Record<string, unknown>,
+): PineScriptRecord | undefined {
+  if (candidates.length <= 1) return candidates[0];
+  const ids = new Set(Object.keys(inputs));
+  const matching = candidates.filter((script) =>
+    script.inputs.length > 0
+      ? script.inputs.every((meta) => ids.has(meta.id))
+      : ids.size === 0,
+  );
+  // 输入集合完全相等最可靠；子集只能说「可能」，没把握时再看保存时间
+  const exact = matching.filter((script) => script.inputs.length === ids.size);
+  const pool = exact.length > 0 ? exact : matching.length > 0 ? matching : candidates;
+  return [...pool].sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0))[0];
 }
 
 export function toInputValue(meta: PineInputMeta, value: unknown): unknown {
@@ -349,8 +369,8 @@ export class PineRunner {
     const alive = new Set<string>();
 
     for (const info of studies) {
-      const script = byName.get(info.name);
-      if (!script) continue;
+      const candidates = byName.get(info.name);
+      if (!candidates || candidates.length === 0) continue;
       alive.add(info.id);
       let api: IStudyApi;
       try {
@@ -378,6 +398,10 @@ export class PineRunner {
       } catch {
         continue;
       }
+
+      // 同 shorttitle 的多份脚本：按指标实际输入挑出创建它的那一份
+      const script = pickScript(candidates, inputs);
+      if (!script) continue;
 
       const bars = barsCache.get(barsKey(symbol, resolution));
       const lastBar = bars?.bars.length ? bars.bars[bars.bars.length - 1] : undefined;

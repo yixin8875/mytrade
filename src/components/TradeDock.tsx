@@ -49,10 +49,22 @@ const TABS: { key: DockTab; label: string }[] = [
   { key: 'closed', label: '已平仓' },
 ];
 
-const GRID_POSITION = 'grid-cols-[112px_1fr_74px_84px_84px_84px_90px_90px]';
-const GRID_ORDER = 'grid-cols-[112px_1fr_62px_62px_88px_88px_88px_68px]';
-const GRID_DEAL = 'grid-cols-[92px_1fr_54px_58px_88px_84px_76px_64px]';
-const GRID_CLOSED = 'grid-cols-[92px_1fr_54px_88px_88px_80px_56px_70px]';
+// 操作列要同时放下「保本 / 平掉一半 / 平仓」三个按钮。
+// 按钮的 text-[10px] 会被基类的 sm:text-sm 顶成 14px，所以还要加 sm:text-[10px]
+// 压回 10px；否则三个按钮约 144px，90px 的操作列装不下，会向左盖住盈亏数字。
+// 其余列按比例分配宽度并带最小宽度：窗口变窄时一起收缩、变宽时一起铺开，
+// 不会像固定 112px + 单列 1fr 那样把空档全堆在「品种/方向」和「手数」之间。
+const GRID_POSITION =
+  'grid-cols-[minmax(96px,1.2fr)_minmax(52px,0.8fr)_minmax(64px,1fr)_minmax(76px,1fr)_minmax(76px,1fr)_minmax(76px,1fr)_minmax(82px,1fr)_minmax(112px,1fr)]';
+// 三张记录表沿用持仓表的思路：每列带最小宽度按比例铺开。
+// 原来的固定宽度 + 单列 1fr 在宽托盘上会把空档全堆进「类型 / 品种」列，
+// 窄托盘上又把那一列压到放不下文字，表头和数据一起挤位。
+const GRID_ORDER =
+  'grid-cols-[minmax(96px,1.2fr)_minmax(60px,0.8fr)_minmax(52px,0.7fr)_minmax(72px,1fr)_minmax(80px,1fr)_minmax(80px,1fr)_minmax(72px,0.9fr)_minmax(68px,0.8fr)]';
+const GRID_DEAL =
+  'grid-cols-[minmax(92px,0.9fr)_minmax(96px,1.4fr)_minmax(44px,0.6fr)_minmax(52px,0.7fr)_minmax(76px,1fr)_minmax(76px,1fr)_minmax(88px,1.1fr)_minmax(56px,0.6fr)]';
+const GRID_CLOSED =
+  'grid-cols-[minmax(92px,1fr)_minmax(96px,1.3fr)_minmax(44px,0.5fr)_minmax(52px,0.6fr)_minmax(140px,1.6fr)_minmax(76px,1fr)_minmax(56px,0.6fr)_minmax(48px,0.5fr)]';
 
 function fmtTime(ts: number | null | undefined): string {
   if (!ts) return '—';
@@ -428,6 +440,7 @@ export function TradeDock() {
         />
       )}
 
+      {!dockCollapsed && (
       <div className="flex h-8 shrink-0 items-stretch border-b border-border bg-muted/50 pl-1">
         <Tabs
           value={dockTab}
@@ -531,16 +544,22 @@ export function TradeDock() {
           </Button>
         </div>
       </div>
+      )}
 
       {dockCollapsed ? (
         <button
           onClick={() => setDockCollapsed(false)}
-          className="flex flex-1 items-center px-3 text-[11px] text-muted-foreground hover:text-foreground"
+          aria-label="展开托盘"
+          title="展开托盘"
+          className="flex h-full flex-1 items-center gap-2 px-3 text-[11px] text-muted-foreground hover:text-foreground"
         >
-          持仓 {positions.length} · 挂单 {orders.length} · 盈亏{' '}
-          <span className={clsx('num ml-1 font-mono', signedClass(totalProfit(positions)))}>
-            {fmtSigned(totalProfit(positions))}
+          <span className="truncate">
+            持仓 {positions.length} · 挂单 {orders.length} · 盈亏{' '}
+            <span className={clsx('num font-mono', signedClass(totalProfit(positions)))}>
+              {fmtSigned(totalProfit(positions))}
+            </span>
           </span>
+          <ChevronUp size={14} strokeWidth={1.5} className="ml-auto shrink-0" />
         </button>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
@@ -614,13 +633,13 @@ export function TradeDock() {
                       >
                         {fmtSigned(position.profit)}
                       </span>
-                      <span className="flex items-center justify-end gap-1">
+                      <span className="flex min-w-0 items-center justify-end gap-0.5">
                         <Button
                           variant="ghost"
                           size="xs"
                           onClick={() => void breakeven(position)}
                           disabled={busy === position.ticket}
-                          className="px-1.5 text-[10px] text-muted-foreground"
+                          className="shrink-0 px-1 text-[10px] sm:text-[10px] text-muted-foreground"
                         >
                           保本
                         </Button>
@@ -630,7 +649,7 @@ export function TradeDock() {
                           onClick={() => void closeHalf(position)}
                           disabled={busy === position.ticket}
                           className={clsx(
-                            'px-1.5 text-[10px]',
+                            'shrink-0 px-1 text-[10px] sm:text-[10px]',
                             confirmHalf !== position.ticket && 'text-muted-foreground',
                           )}
                         >
@@ -642,7 +661,7 @@ export function TradeDock() {
                           onClick={() => void close(position.ticket)}
                           disabled={busy === position.ticket}
                           className={clsx(
-                            'px-1.5 text-[10px]',
+                            'shrink-0 px-1 text-[10px] sm:text-[10px]',
                             confirmClose !== position.ticket &&
                               'text-destructive-foreground hover:bg-destructive/10',
                           )}
@@ -844,7 +863,7 @@ export function TradeDock() {
                         variant="ghost"
                         size="xs"
                         onClick={() => void cancelOrderWithUndo(order, notify)}
-                        className="px-1.5 text-[10px] text-destructive-foreground hover:bg-destructive/10"
+                        className="shrink-0 px-1 text-[10px] sm:text-[10px] text-destructive-foreground hover:bg-destructive/10"
                       >
                         撤单
                       </Button>

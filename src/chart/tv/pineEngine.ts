@@ -405,15 +405,18 @@ function asText(value: unknown): string | undefined {
 
 /**
  * Pine 的 x 坐标默认是 bar_index；用 xloc.bar_time 创建的对象存的是毫秒时间戳。
- * 超出当前 K 线范围的 bar_index 直接丢弃（图表库也画不出来）。
+ * 超出最后一根 K 线的 bar_index 是脚本有意向未来投影（例如「关键价位」把标签
+ * 放在最新一根右边），按最后一根的时间步长外推；只丢弃负下标。
  */
 function barTimeAt(bars: Bar[], value: unknown, xloc?: unknown): number | undefined {
   const number = asNumber(value);
   if (number == null) return undefined;
   if (xloc === 'bar_time') return number > 1e11 ? Math.round(number / 1000) : Math.round(number);
   const index = Math.round(number);
-  if (index < 0 || index >= bars.length) return undefined;
-  return bars[index].time;
+  if (index < 0 || bars.length === 0) return undefined;
+  if (index < bars.length) return bars[index].time;
+  const last = bars[bars.length - 1].time;
+  return last + (index - (bars.length - 1)) * barStepSeconds(bars);
 }
 
 /** plotshape 的 y 位置：引擎只给 location，价格要按 K 线补。 */

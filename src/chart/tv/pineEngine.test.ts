@@ -20,6 +20,37 @@ function bars(count: number, stepSeconds: number, base = 100, slope = 1): Bar[] 
 }
 
 describe('runPine', () => {
+  it('projects drawings to the right of the last bar', async () => {
+    const source = `//@version=6
+indicator('projection', overlay = true)
+if barstate.islast
+    line.new(bar_index - 5, close, bar_index + 10, close)
+    label.new(bar_index + 10, close, 'L')
+`;
+    const list = bars(60, 300);
+    const result = await runPine({
+      source,
+      bars: list,
+      symbol: 'NQ',
+      resolution: '5',
+    });
+
+    const lastTime = list[list.length - 1].time;
+    // 「关键价位」把标签放在最新一根右侧：bar_index 超出 K 线数组时要按步长外推，
+    // 不能直接丢弃，否则整条线和标签都画不出来。
+    const line = result.visuals.drawings.find(
+      (drawing): drawing is Extract<typeof drawing, { kind: 'line' }> => drawing.kind === 'line',
+    );
+    expect(line?.points[0].time).toBe(lastTime - 5 * 300);
+    expect(line?.points[1].time).toBe(lastTime + 10 * 300);
+
+    const label = result.visuals.drawings.find(
+      (drawing): drawing is Extract<typeof drawing, { kind: 'label' }> =>
+        drawing.kind === 'label',
+    );
+    expect(label?.time).toBe(lastTime + 10 * 300);
+  });
+
   it('computes numeric plots with Piner', async () => {
     const source = `//@version=6
 indicator('sma')

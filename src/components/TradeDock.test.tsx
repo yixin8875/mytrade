@@ -98,6 +98,10 @@ describe('TradeDock', () => {
     expect(useApp.getState().dockCollapsed).toBe(true);
     expect(document.querySelector('[data-dock]')).toHaveStyle({ height: '32px' });
     expect(window.localStorage.getItem('mytrade.dockCollapsed')).toBe('1');
+    // 收起后只留一条摘要：页签行和清仓按钮都不能再渲染出来，
+    // 否则会被 32px 的托盘高度撑到状态栏上
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '收起托盘' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '展开托盘' }));
     expect(useApp.getState().dockCollapsed).toBe(false);
