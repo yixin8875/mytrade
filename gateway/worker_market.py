@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from worker_base import *  # noqa: F401,F403
 from worker_base import _num  # noqa: F401
+from resolutions import aggregate_month_bars, month_multiple
 
 
 class WorkerMarket:
@@ -147,10 +148,15 @@ class WorkerMarket:
         symbol = str(p.get("symbol") or "")
         resolution = str(p.get("resolution") or "1")
         count = max(10, min(int(p.get("count") or 1000), 5000))
-        tf = TIMEFRAMES.get(resolution)
+        # 3M/6M/12M 不是 MT5 原生周期：先取 1M 月线，再按日历聚合成每 n 个月一根
+        months = month_multiple(resolution)
+        fetch_resolution = "1M" if months else resolution
+        tf = TIMEFRAMES.get(fetch_resolution)
         if tf is None:
             raise GatewayError("BAD_RESOLUTION", f"不支持的周期: {resolution}")
         info = self._ensure_symbol(symbol)
+        # 一根 n 月线需要 n 根月线；上限 2 万根避免一次请求太久
+        fetch_count = min(20000, count * months) if months else count
 
         # TradingView 往左滚时会带着 from/to 再要一段更早的 K 线。
         # copy_rates_from_pos 只能取「最近 N 根」，所以有 to 时改走区间查询。
@@ -164,7 +170,7 @@ class WorkerMarket:
             if from_ts:
                 start_ts = float(from_ts)
             else:
-                start_ts = end_ts - RES_SECONDS.get(resolution, 60) * count * 1.2
+                start_ts = end_ts - RES_SECONDS.get(fetch_resolution, 60) * fetch_count * 1.2
             try:
                 # MetaTrader5 会把 datetime 当成本地墙钟时间换算成时间戳；
                 # 而 K 线 time 我们按「服务器时间当作 UTC」处理，所以这里也要用
@@ -174,14 +180,14 @@ class WorkerMarket:
                 rates = mt5.copy_rates_range(symbol, tf, date_from, date_to)
             except Exception:
                 rates = None
-            if rates is not None and len(rates) > count:
-                rates = rates[-count:]
+            if rates is not None and len(rates) > fetch_count:
+                rates = rates[-fetch_count:]
             # 请求的窗口可能正好落在周末/休市，直接返回空会让图表以为左侧
             # 再没有数据而停止翻页。这里往前找最近一段有数据的区间返回，
             # 图表跨过休市继续加载更早的 K 线。
             if (rates is None or len(rates) == 0) and from_ts:
                 probe_end = float(from_ts)
-                probe_span = RES_SECONDS.get(resolution, 60) * max(60, count) * 1.2
+                probe_span = RES_SECONDS.get(fetch_resolution, 60) * max(60, fetch_count) * 1.2
                 for _ in range(6):
                     probe_start = probe_end - probe_span
                     try:
@@ -194,7 +200,7 @@ class WorkerMarket:
                     except Exception:
                         got = None
                     if got is not None and len(got) > 0:
-                        rates = got[-count:]
+                        rates = got[-fetch_count:]
                         break
                     probe_end = probe_start
                 else:
@@ -202,7 +208,7 @@ class WorkerMarket:
             if rates is None:
                 rates = []
         else:
-            rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
+            rates = mt5.copy_rates_from_pos(symbol, tf, 0, fetch_count)
         if rates is None:
             raise GatewayError("NO_DATA", f"无法读取 {symbol} 历史数据: {mt5.last_error()}")
         bars = [
@@ -216,6 +222,8 @@ class WorkerMarket:
             }
             for r in rates
         ]
+        if months:
+            bars = aggregate_month_bars(bars, months)[-count:]
         return {
             "symbol": symbol,
             "resolution": resolution,
@@ -243,6 +251,12 @@ class WorkerMarket:
         resolution = str(p.get("resolution") or "1")
         key = (symbol, resolution)
         if key not in self._bar_subs:
+            if month_multiple(resolution):
+                # 图表库自己合成 3M/12M，不需要网关推送；Pine 只读历史
+                raise GatewayError(
+                    "BAD_RESOLUTION",
+                    f"{resolution} 仅支持历史 K 线，暂不支持实时订阅",
+                )
             tf = TIMEFRAMES.get(resolution)
             if tf is None:
                 raise GatewayError("BAD_RESOLUTION", f"不支持的周期: {resolution}")

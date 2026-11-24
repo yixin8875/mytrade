@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PineScriptRecord } from '../../lib/pineScripts';
-import { pineColor, scriptsByName, toInputValue } from './pineRunner';
+import { noteKey, pineColor, scriptsByName, toInputValue } from './pineRunner';
 
 function record(patch: Partial<PineScriptRecord>): PineScriptRecord {
   return {
@@ -54,6 +54,21 @@ describe('pineColor', () => {
   it('leaves unknown color strings untouched', () => {
     expect(pineColor('red')).toBe('red');
     expect(pineColor('#4CAF5033')).toBe('#4CAF5033');
+  });
+});
+
+describe('noteKey', () => {
+  it('leaves the last bar out so one warning is not re-toasted every tick', () => {
+    const script = record({ id: 'a' });
+    const inputs = { in_refresh: 0 };
+    const first = noteKey(script, 'XAUUSD', '3M', inputs, ['不支持 3M']);
+
+    // 行情跳动只改最后一根 K 线，不在键里 → 同一个提醒只弹一次
+    expect(noteKey(script, 'XAUUSD', '3M', { ...inputs }, ['不支持 3M'])).toBe(first);
+    // 输入 / 周期 / 提醒文字变了才重新提醒
+    expect(noteKey(script, 'XAUUSD', '3M', { in_refresh: 1 }, ['不支持 3M'])).not.toBe(first);
+    expect(noteKey(script, 'XAUUSD', '12M', inputs, ['不支持 3M'])).not.toBe(first);
+    expect(noteKey(script, 'XAUUSD', '3M', inputs, ['不支持 12M'])).not.toBe(first);
   });
 });
 

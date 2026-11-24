@@ -32,6 +32,8 @@ const HISTORY_COUNT = 5000;
 const POLL_MS = 1200;
 const COMPUTE_DELAY_MS = 350;
 const BARS_TTL_MS = 60_000;
+/** 取数失败后这段时间内不再重试，避免脚本不被支持时每个 tick 都打一次网关 */
+const BARS_FAILURE_TTL_MS = 30_000;
 /** 输入值变化后至少等这么久再重算，避免拖动参数时连环计算 */
 const MIN_RECOMPUTE_GAP_MS = 250;
 
@@ -40,8 +42,14 @@ interface CachedBars {
   at: number;
 }
 
+interface BarsFailure {
+  at: number;
+  message: string;
+}
+
 const barsCache = new Map<string, CachedBars>();
 const barsLoading = new Map<string, Promise<Bar[]>>();
+const barsFailures = new Map<string, BarsFailure>();
 
 function barsKey(symbol: string, resolution: string): string {
   return `${symbol}|${resolution}`;
@@ -51,17 +59,44 @@ async function loadBars(symbol: string, resolution: string): Promise<Bar[]> {
   const key = barsKey(symbol, resolution);
   const cached = barsCache.get(key);
   if (cached && Date.now() - cached.at < BARS_TTL_MS) return cached.bars;
+  const failure = barsFailures.get(key);
+  if (failure && Date.now() - failure.at < BARS_FAILURE_TTL_MS) {
+    throw new Error(failure.message);
+  }
   const loading = barsLoading.get(key);
   if (loading) return loading;
   const promise = gateway
     .call<{ bars: Bar[] }>('history.get', { symbol, resolution, count: HISTORY_COUNT })
     .then((result) => {
+      barsFailures.delete(key);
       barsCache.set(key, { bars: result.bars, at: Date.now() });
       return result.bars;
+    })
+    .catch((error: unknown) => {
+      barsFailures.set(key, {
+        at: Date.now(),
+        message: (error as Error)?.message || '取 K 线失败',
+      });
+      throw error;
     })
     .finally(() => barsLoading.delete(key));
   barsLoading.set(key, promise);
   return promise;
+}
+
+/**
+ * 提醒去重键：只由脚本、品种、周期、输入和提醒文字决定。
+ * 不能带上最后一根 K 线的 OHLC——行情每跳一下签名就变，
+ * 同一个提醒（例如「不支持 3M」）会每个 tick 重弹一次。
+ */
+export function noteKey(
+  script: PineScriptRecord,
+  symbol: string,
+  resolution: string,
+  inputs: Record<string, unknown>,
+  notes: string[],
+): string {
+  return JSON.stringify([script.id, symbol, resolution, inputs, notes]);
 }
 
 function updateLiveBar(payload: { symbol?: string; resolution?: string; bar?: Bar }): void {
@@ -463,8 +498,9 @@ export class PineRunner {
         ...(unsupported.length > 0 ? [`暂不渲染 ${unsupported.join('、')}`] : []),
       ];
       if (notes.length > 0) {
-        if (this.reportedWarnings.get(studyId) !== signature) {
-          this.reportedWarnings.set(studyId, signature);
+        const key = noteKey(script, symbol, resolution, inputs, notes);
+        if (this.reportedWarnings.get(studyId) !== key) {
+          this.reportedWarnings.set(studyId, key);
           useApp.getState().notify('info', `${script.title}：${notes.slice(0, 2).join('；')}`);
         }
       } else {
@@ -476,8 +512,9 @@ export class PineRunner {
       this.renderer?.removeStudy(studyId);
       this.forceRecalc(studyId);
       const message = (error as Error)?.message || 'Pine 脚本运行失败';
-      if (this.reportedErrors.get(studyId) !== signature) {
-        this.reportedErrors.set(studyId, signature);
+      const key = noteKey(script, symbol, resolution, inputs, [message]);
+      if (this.reportedErrors.get(studyId) !== key) {
+        this.reportedErrors.set(studyId, key);
         useApp.getState().notify('error', `${script.title}：${message}`);
       }
     } finally {
