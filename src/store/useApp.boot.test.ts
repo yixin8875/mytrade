@@ -48,6 +48,22 @@ describe('useApp 启动读取 localStorage', () => {
     expect(state.risk).toEqual({ mode: 'percent', value: 1, auto: true });
   });
 
+  it('恢复上次选中的品种，而不是每次回到第一个可见品种', async () => {
+    window.localStorage.setItem('mytrade.symbol', JSON.stringify('EURUSD'));
+
+    const state = await boot();
+
+    expect(state.symbol).toBe('EURUSD');
+  });
+
+  it('没有全局品种记录时沿用主图上次的品种', async () => {
+    window.localStorage.setItem('mytrade.cellSymbols', JSON.stringify(['XAUUSD', 'EURUSD']));
+
+    const state = await boot();
+
+    expect(state.symbol).toBe('XAUUSD');
+  });
+
   it('旧的「日期范围」同步开关迁移到「时间」', async () => {
     window.localStorage.setItem(
       'mytrade.layoutSync',

@@ -252,7 +252,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
           variant="ghost"
           onClick={() => setPrivacy(!privacy)}
           className={cn(
-            'mb-1 h-8.5 w-full justify-start gap-2.5 px-2.5 text-[13px] font-normal',
+            'mb-1 h-8.5 w-full justify-start gap-2.5 px-2.5 text-left text-[13px] font-normal',
             privacy && 'bg-accent font-medium text-accent-foreground',
           )}
           title="隐私模式下，复盘与报表页的金额显示为 ••••；交易台不受影响"
@@ -274,7 +274,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
           onClick={() => setPage('settings')}
           aria-current={page === 'settings' ? 'page' : undefined}
           className={cn(
-            'mb-1 h-8.5 w-full justify-start gap-2.5 px-2.5 text-[13px] font-normal',
+            'mb-1 h-8.5 w-full justify-start gap-2.5 px-2.5 text-left text-[13px] font-normal',
             page === 'settings' && 'bg-accent font-medium text-accent-foreground',
           )}
         >
@@ -291,7 +291,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
             variant="ghost"
             onClick={() => void checkForUpdates(true)}
             title="检查 GitHub 上的新版本"
-            className="mb-1 h-8.5 w-full justify-start gap-2.5 px-2.5 text-[13px] font-normal"
+            className="mb-1 h-8.5 w-full justify-start gap-2.5 px-2.5 text-left text-[13px] font-normal"
           >
             <RefreshCw size={16} strokeWidth={1.5} className="text-muted-foreground" />
             <span className="flex-1">检查更新</span>

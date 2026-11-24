@@ -55,8 +55,13 @@ async function refresh(): Promise<void> {
     state.setSymbols(symbols);
 
     const current = useApp.getState();
+    // 优先恢复上次选中的品种；换账户后品种不在列表里时再退回第一个可见品种
+    const remembered =
+      current.symbol && symbols.some((item) => item.name === current.symbol)
+        ? current.symbol
+        : '';
     const next =
-      current.symbol || symbols.find((item) => item.visible)?.name || symbols[0]?.name || '';
+      remembered || symbols.find((item) => item.visible)?.name || symbols[0]?.name || '';
     if (next && next !== current.symbol) current.setSymbol(next);
 
     const [account, positions, orders, riskStatus, alerts] = await Promise.all([

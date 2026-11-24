@@ -286,6 +286,7 @@ describe('setSymbol', () => {
     const state = useApp.getState();
 
     expect(state.symbol).toBe('EURUSD');
+    expect(JSON.parse(window.localStorage.getItem('mytrade.symbol') ?? '""')).toBe('EURUSD');
     expect(state.quote).toBeNull();
     expect(state.templateArmed).toBe(false);
     expect(state.draft).toEqual(draft());

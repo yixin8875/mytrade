@@ -485,6 +485,7 @@ const PREFS_KEY = 'mytrade.alertPrefs';
 const WATCH_KEY = 'mytrade.watchlist';
 const TAG_KEY = 'mytrade.orderTag';
 const OPEN_SYMBOLS_KEY = 'mytrade.openSymbols';
+const SYMBOL_KEY = 'mytrade.symbol';
 const DOCK_HEIGHT_KEY = 'mytrade.dockHeight';
 const DOCK_COLLAPSED_KEY = 'mytrade.dockCollapsed';
 const DOCK_TAB_KEY = 'mytrade.dockTab';
@@ -591,6 +592,19 @@ function loadOpenSymbols(): string[] {
   return raw.filter((item): item is string => typeof item === 'string' && !!item).slice(0, 12);
 }
 
+/** 上次选中的品种；启动时优先恢复，避免每次回到市场报价里字母序第一个。 */
+function loadSymbol(): string {
+  const raw = readJson<unknown>(SYMBOL_KEY, '');
+  if (typeof raw === 'string' && raw.trim()) return raw.trim();
+  // 老版本只记了每格图表的品种：首次升级时以主图为准，避免多出一个默认标签
+  const cells = readJson<unknown>('mytrade.cellSymbols', []);
+  if (Array.isArray(cells)) {
+    const first = cells.find((item): item is string => typeof item === 'string' && !!item.trim());
+    if (first) return first.trim();
+  }
+  return '';
+}
+
 function loadDockHeight(): number {
   const raw = Number(readJson<unknown>(DOCK_HEIGHT_KEY, 208));
   if (!Number.isFinite(raw)) return 208;
@@ -628,7 +642,7 @@ export const useApp = create<AppStore>((set, get) => ({
   health: null,
   latency: null,
   symbols: [],
-  symbol: '',
+  symbol: loadSymbol(),
   resolution: loadResolution(),
   quote: null,
   account: null,
@@ -712,6 +726,7 @@ export const useApp = create<AppStore>((set, get) => ({
           ? base
           : [...base, symbol].slice(-12);
       writeJson(OPEN_SYMBOLS_KEY, openSymbols);
+      writeJson(SYMBOL_KEY, symbol);
       return {
         symbol,
         openSymbols,
