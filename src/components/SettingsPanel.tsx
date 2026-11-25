@@ -14,6 +14,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogPanel,
   DialogPopup,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -45,6 +46,7 @@ import {
   KeyRound,
   ListChecks,
   Palette,
+  Pencil,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -58,7 +60,7 @@ import { gateway } from '../gateway/client';
 import { resolutionLabel, SUPPORTED_RESOLUTIONS } from '../chart/tv/resolutions';
 import { downloadDiagnostics } from '../lib/diagnostics';
 import { THEMES, useApp, type SettingsSection, type Theme } from '../store/useApp';
-import { fmtNum, templateStepsSummary } from '../lib/template';
+import { fmtNum, templateRiskLabel, templateStepsSummary } from '../lib/template';
 import { AccountManager } from './AccountManager';
 import { AlertChannelsCard } from './AlertChannelsCard';
 import { TemplateEditor } from './TemplateEditor';
@@ -985,7 +987,7 @@ function ChartSection() {
   );
 }
 
-/** 设置页：模板列表 + 编辑器；编辑器与下单票弹层共用 */
+/** 设置页：模板列表 + 弹窗编辑器；编辑器与下单票弹层共用 */
 function TemplateSection() {
   const templates = useApp((s) => s.templates);
   const activeTemplateId = useApp((s) => s.activeTemplateId);
@@ -993,37 +995,74 @@ function TemplateSection() {
   const addTemplate = useApp((s) => s.addTemplate);
   const createTemplate = useApp((s) => s.createTemplate);
   const deleteTemplate = useApp((s) => s.deleteTemplate);
+  const currency = useApp((s) => s.account?.currency ?? '');
 
   const template = templates.find((item) => item.id === activeTemplateId) ?? templates[0];
+  /** 正在弹窗里编辑的模板；null = 关闭 */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editing = editingId ? templates.find((item) => item.id === editingId) ?? null : null;
+  const closeEditor = () => setEditingId(null);
+
+  const openEditor = (id: string) => {
+    setActiveTemplate(id);
+    setEditingId(id);
+  };
+
+  /** 新建/复制后自动打开新模板的编辑弹窗 */
+  const openFreshTemplate = (create: () => void) => {
+    create();
+    setEditingId(useApp.getState().activeTemplateId);
+  };
 
   return (
     <>
       <Card
         title="模板"
-        description="可以有多个模板（如「日内」「波段」），下单票的模板栏可快速切换；点「启用」后风险、止盈与阶段才会带入这一单。"
+        description="可以有多个模板（如「日内」「波段」），下单票的模板栏可快速切换。开启「下单默认启用」的模板会在新开单时自动套用；没有默认模板时按基础风险 1% + 1R 止盈。"
       >
         <div className="space-y-2">
           {templates.map((item) => (
             <div
               key={item.id}
               className={clsx(
-                'flex items-center gap-2 rounded-lg border px-3 py-2 transition-colors',
-                item.id === template.id
-                  ? 'border-brand bg-muted/70'
-                  : 'border-border',
+                'flex items-center gap-1.5 rounded-lg border px-3 py-2 transition-colors',
+                item.id === template.id ? 'border-brand bg-muted/70' : 'border-border',
               )}
             >
               <button
                 onClick={() => setActiveTemplate(item.id)}
                 className="min-w-0 flex-1 text-left"
+                title={item.id === template.id ? '当前模板' : '设为当前模板'}
               >
-                <div className="text-[12px] text-foreground">{item.name}</div>
-                <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
-                  {fmtNum(item.riskPercent)}% 风险 ·{' '}
+                <div className="flex items-center gap-1.5 text-[12px] text-foreground">
+                  <span className="truncate">{item.name}</span>
+                  {item.id === template.id && (
+                    <span className="shrink-0 rounded bg-brand/10 px-1 py-px text-[10px] text-brand">
+                      当前
+                    </span>
+                  )}
+                  {item.autoApply && (
+                    <span className="shrink-0 rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">
+                      下单默认
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 truncate text-[11px] leading-relaxed text-muted-foreground">
+                  {templateRiskLabel(item, currency)} 风险 ·{' '}
                   {item.rewardR > 0 ? `止盈 ${fmtNum(item.rewardR)}R` : '不自动设止盈'} ·{' '}
                   {templateStepsSummary(item)}
                 </div>
               </button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => openEditor(item.id)}
+                title="编辑模板"
+                aria-label="编辑模板"
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                <Pencil size={13} strokeWidth={1.5} />
+              </Button>
               <Button
                 variant="ghost"
                 size="icon-xs"
@@ -1041,7 +1080,7 @@ function TemplateSection() {
           <Button
             variant="outline"
             size="sm"
-            onClick={createTemplate}
+            onClick={() => openFreshTemplate(createTemplate)}
             className="text-[12px] font-normal"
           >
             新建空白模板
@@ -1049,7 +1088,7 @@ function TemplateSection() {
           <Button
             variant="outline"
             size="sm"
-            onClick={addTemplate}
+            onClick={() => openFreshTemplate(addTemplate)}
             className="text-[12px] font-normal"
           >
             复制当前模板
@@ -1057,22 +1096,46 @@ function TemplateSection() {
         </div>
       </Card>
 
-      <Card
-        title={`编辑「${template.name}」`}
-        description="风险按账户净值百分比算手数；止盈按 R 倍数放置；阶段在浮盈到达对应 R 时依次执行。"
+      <Dialog
+        open={editing != null}
+        onOpenChange={(next) => {
+          if (!next) closeEditor();
+        }}
       >
-        <TemplateEditor templateId={template.id} />
-      </Card>
+        <DialogPopup className="console-scope w-[min(620px,94vw)]">
+          <DialogHeader>
+            <DialogTitle className="text-[15px] font-medium">
+              编辑「{editing?.name ?? ''}」
+            </DialogTitle>
+            <DialogDescription className="text-[12px] leading-relaxed">
+              风险按净值百分比或固定金额算手数；止盈按 R 倍数放置；阶段在浮盈到达对应 R 时依次执行。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="max-h-[min(68vh,640px)] overflow-y-auto pt-2">
+            {editing && <TemplateEditor templateId={editing.id} />}
+          </DialogPanel>
+          <DialogFooter variant="bare">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={closeEditor}
+              className="text-[12px] font-normal"
+            >
+              完成
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
 
       <Card title="模板怎么执行" description="点「启用」后带入这一单；成交后的阶段由网关管理。">
         <ul className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
-          <li>· 风险改为净值百分比，并打开自动手数；设好止损后手数自动算。</li>
+          <li>
+            · 风险按「净值百分比」或「固定金额」套用，并打开自动手数；设好止损后手数自动算。
+          </li>
           <li>
             · 已有委托价时保留限价/停损，否则准备市价草稿；图纸上拖出止损后，止盈按 R 倍数自动放置。
           </li>
-          <li>
-            · 挂单同样可以带模板：成交后自动登记阶段计划；撤单或过期则不再登记。
-          </li>
+          <li>· 挂单同样可以带模板：成交后自动登记阶段计划；撤单或过期则不再登记。</li>
           <li>
             · 成交后网关每 0.4 秒检查一次浮盈：到阶段触发价先按比例平仓，再把止损移到开仓价；
             计划持久化，重启后仍然保留；只读或急停期间暂停执行，恢复后继续。

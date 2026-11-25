@@ -8,9 +8,12 @@ export const MAX_TEMPLATE_STEPS = MAX_STEP_COUNT;
 export const DEFAULT_TEMPLATE: TradeTemplate = {
   id: 'default',
   name: '默认模板',
+  riskMode: 'percent',
   riskPercent: 0.5,
+  riskAmount: 100,
   rewardR: 2,
   steps: [{ atR: 1, closePercent: null, moveBreakeven: true }],
+  autoApply: false,
 };
 
 /** 模板里的数字显示：2 → "2"，0.50 → "0.5" */
@@ -31,9 +34,23 @@ export function templateStepsSummary(template: TradeTemplate): string {
   return template.steps.map(stepSummary).join(' · ');
 }
 
-/** 模板一行摘要：0.5% · 2R · 1R→保本 */
-export function templateSummary(template: TradeTemplate): string {
-  const parts = [`${fmtNum(template.riskPercent)}%`];
+/** 模板的风险口径换算成下单票的风险设置；模板一律强制自动手数 */
+export function templateRisk(template: TradeTemplate): RiskSettings {
+  return template.riskMode === 'amount'
+    ? { mode: 'amount', value: template.riskAmount, auto: true }
+    : { mode: 'percent', value: template.riskPercent, auto: true };
+}
+
+/** 模板风险文案：0.5% / 固定 100（可带账户货币） */
+export function templateRiskLabel(template: TradeTemplate, currency = ''): string {
+  if (template.riskMode !== 'amount') return `${fmtNum(template.riskPercent)}%`;
+  const unit = currency ? ` ${currency}` : '';
+  return `固定 ${fmtNum(template.riskAmount)}${unit}`;
+}
+
+/** 模板一行摘要：0.5% · 2R · 1R→保本；金额口径可带账户货币 */
+export function templateSummary(template: TradeTemplate, currency = ''): string {
+  const parts = [templateRiskLabel(template, currency)];
   if (template.rewardR > 0) parts.push(`${fmtNum(template.rewardR)}R`);
   parts.push(templateStepsSummary(template));
   return parts.join(' · ');
@@ -90,10 +107,11 @@ export function templateTpTarget({
 
 /** 启用模板后风险被改过（换模式、关自动手数、改数值）都算偏离 */
 export function isRiskDeviated(template: TradeTemplate, risk: RiskSettings): boolean {
+  const target = templateRisk(template);
   return (
-    risk.mode !== 'percent' ||
+    risk.mode !== target.mode ||
     !risk.auto ||
-    Math.abs(risk.value - template.riskPercent) > 1e-9
+    Math.abs(risk.value - target.value) > 1e-9
   );
 }
 

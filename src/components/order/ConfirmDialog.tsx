@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import { fmtMoney, fmtPrice, fmtVolume } from '../../lib/format';
-import { fmtNum } from '../../lib/template';
+import { fmtNum, templateRiskLabel } from '../../lib/template';
 import type {
   DisciplineGate,
   DisciplineRule,
@@ -34,6 +34,7 @@ export function ConfirmDialog({
   templateArmed,
   template,
   steps,
+  currency = '',
   riskDeviated,
   tpManual,
   disciplineEnabled,
@@ -67,6 +68,8 @@ export function ConfirmDialog({
   orderTag: string;
   templateArmed: boolean;
   template: TradeTemplate;
+  /** 账户货币，风险金额模式显示在模板参数里 */
+  currency?: string;
   steps: string;
   riskDeviated: boolean;
   tpManual: boolean;
@@ -129,7 +132,7 @@ export function ConfirmDialog({
               label="模板参数"
               value={
                 templateArmed
-                  ? `${fmtNum(template.riskPercent)}% 风险 · ${
+                  ? `${templateRiskLabel(template, currency)} 风险 · ${
                       template.rewardR > 0 ? `止盈 ${fmtNum(template.rewardR)}R` : '不自动设止盈'
                     }`
                   : '—'

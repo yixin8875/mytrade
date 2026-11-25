@@ -25,6 +25,7 @@
     "@fontsource-variable/inter": "^5.3.0",
     "@heyphat/piner": "0.13.0",
     "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-notification": "^2.8.1",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.14.1",
     "class-variance-authority": "^0.7.1",

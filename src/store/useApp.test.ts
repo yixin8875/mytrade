@@ -226,6 +226,62 @@ describe('下单模板', () => {
     expect(savedTemplates().list[0].steps).toHaveLength(2);
   });
 
+  it('设为下单默认启用的模板同一时间只有一个', () => {
+    useApp.getState().createTemplate();
+    const second = useApp.getState().templates[1];
+
+    useApp.getState().setAutoApply(second.id);
+    expect(useApp.getState().templates.map((item) => item.autoApply)).toEqual([false, true]);
+    expect(savedTemplates().list[1].autoApply).toBe(true);
+
+    useApp.getState().setAutoApply('default');
+    expect(useApp.getState().templates.map((item) => item.autoApply)).toEqual([true, false]);
+
+    useApp.getState().setAutoApply(null);
+    expect(useApp.getState().templates.map((item) => item.autoApply)).toEqual([false, false]);
+  });
+
+  it('复制默认启用的模板不会复制默认位', () => {
+    useApp.getState().setAutoApply('default');
+    useApp.getState().addTemplate();
+    expect(useApp.getState().templates.map((item) => item.autoApply)).toEqual([true, false]);
+  });
+
+  it('新开单自动启用默认模板：切到该模板并套用风险', () => {
+    useApp.getState().createTemplate();
+    const second = useApp.getState().templates[1];
+    useApp.getState().updateTemplate(second.id, { riskMode: 'amount', riskAmount: 150 });
+    useApp.getState().setAutoApply(second.id);
+    useApp.getState().setActiveTemplate('default');
+
+    useApp.getState().armDefaultTemplate();
+    const state = useApp.getState();
+
+    expect(state.templateArmed).toBe(true);
+    expect(state.activeTemplateId).toBe(second.id);
+    expect(state.risk).toEqual({ mode: 'amount', value: 150, auto: true });
+  });
+
+  it('已手动启用模板时 armDefaultTemplate 不覆盖当前选择', () => {
+    useApp.getState().createTemplate();
+    const second = useApp.getState().templates[1];
+    useApp.getState().setAutoApply(second.id);
+    useApp.getState().setActiveTemplate('default');
+    useApp.getState().setTemplateArmed(true);
+    useApp.getState().patchRisk({ value: 2 });
+
+    useApp.getState().armDefaultTemplate();
+
+    expect(useApp.getState().activeTemplateId).toBe('default');
+    expect(useApp.getState().risk.value).toBe(2);
+  });
+
+  it('没有默认模板时 armDefaultTemplate 不改变启用状态', () => {
+    useApp.getState().setAutoApply(null);
+    useApp.getState().armDefaultTemplate();
+    expect(useApp.getState().templateArmed).toBe(false);
+  });
+
   it('最后一条模板不能删除', () => {
     useApp.getState().deleteTemplate('default');
     expect(useApp.getState().templates).toHaveLength(1);

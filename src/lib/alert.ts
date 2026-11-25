@@ -1,6 +1,21 @@
-/** 告警的本机提醒：提示音 + 系统桌面通知（浏览器 Notification API） */
+/**
+ * 告警的本机提醒：提示音 + 系统桌面通知。
+ * 桌面端（Tauri）走 plugin-notification，WebView2 自带的 Notification 不会弹系统通知；
+ * 浏览器开发态继续用 Web Notification API。
+ */
+
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from '@tauri-apps/plugin-notification';
 
 let audio: AudioContext | null = null;
+
+/** 是否运行在 Tauri 桌面壳里 */
+function inTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
 
 /** 两声短促提示音；没有音频设备或被浏览器策略限制时静默 */
 export function beep(): void {
@@ -28,15 +43,30 @@ export function beep(): void {
 }
 
 export function desktopSupported(): boolean {
-  return typeof Notification !== 'undefined';
+  return inTauri() || typeof Notification !== 'undefined';
 }
 
-export function desktopPermission(): NotificationPermission {
+export async function desktopPermission(): Promise<NotificationPermission> {
+  if (inTauri()) {
+    try {
+      return (await isPermissionGranted()) ? 'granted' : 'default';
+    } catch {
+      return 'denied';
+    }
+  }
   return typeof Notification === 'undefined' ? 'denied' : Notification.permission;
 }
 
 /** 用户点开「桌面通知」时调用；必须由点击触发才会弹权限框 */
 export async function requestDesktopPermission(): Promise<boolean> {
+  if (inTauri()) {
+    try {
+      if (await isPermissionGranted()) return true;
+      return (await requestPermission()) === 'granted';
+    } catch {
+      return false;
+    }
+  }
   if (typeof Notification === 'undefined') return false;
   if (Notification.permission === 'granted') return true;
   if (Notification.permission === 'denied') return false;
@@ -48,10 +78,16 @@ export async function requestDesktopPermission(): Promise<boolean> {
 }
 
 export function desktopNotify(title: string, body: string): void {
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   try {
+    if (inTauri()) {
+      // 插件会注入 window.Notification；权限没落定前不发，避免后端拒绝产生未处理异常
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+      sendNotification({ title, body });
+      return;
+    }
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     new Notification(title, { body, tag: 'mytrade-alert' });
   } catch {
-    /* 部分浏览器在非活动标签页会拒绝创建，忽略 */
+    /* 系统关闭了通知、或页面非活动时创建失败，忽略 */
   }
 }

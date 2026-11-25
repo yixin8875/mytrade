@@ -28,17 +28,17 @@ afterEach(() => {
 });
 
 describe('desktopSupported / desktopPermission', () => {
-  it('没有 Notification API 时视为不支持', () => {
+  it('没有 Notification API 时视为不支持', async () => {
     vi.stubGlobal('Notification', undefined);
     expect(desktopSupported()).toBe(false);
-    expect(desktopPermission()).toBe('denied');
+    await expect(desktopPermission()).resolves.toBe('denied');
   });
 
-  it('有 API 时返回浏览器权限', () => {
+  it('有 API 时返回浏览器权限', async () => {
     FakeNotification.permission = 'granted';
     vi.stubGlobal('Notification', FakeNotification);
     expect(desktopSupported()).toBe(true);
-    expect(desktopPermission()).toBe('granted');
+    await expect(desktopPermission()).resolves.toBe('granted');
   });
 });
 

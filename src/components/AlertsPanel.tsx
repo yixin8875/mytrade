@@ -202,11 +202,12 @@ export function AlertsPanel() {
     }
     const ok = await requestDesktopPermission();
     if (!ok) {
+      const permission = await desktopPermission();
       notify(
         'error',
-        desktopPermission() === 'denied'
-          ? '浏览器已拒绝通知权限，请在地址栏的站点设置里允许'
-          : '当前浏览器不支持桌面通知',
+        permission === 'denied'
+          ? '通知权限被拒绝，请在系统设置里允许 Tally 发送通知后重试'
+          : '当前环境不支持桌面通知',
       );
       return;
     }

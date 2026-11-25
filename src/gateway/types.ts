@@ -471,16 +471,22 @@ export interface TemplateStep {
   moveBreakeven: boolean;
 }
 
-/** 一键下单模板：风险占比、最终止盈、分批止盈阶段 */
+/** 一键下单模板：风险口径、最终止盈、分批止盈阶段 */
 export interface TradeTemplate {
   id: string;
   name: string;
-  /** 单笔风险占账户净值的百分比 */
+  /** 单笔风险口径：percent = 账户净值百分比；amount = 固定亏损金额 */
+  riskMode: 'percent' | 'amount';
+  /** 单笔风险占账户净值的百分比（riskMode = percent 时生效） */
   riskPercent: number;
+  /** 单笔固定亏损金额，按账户货币计（riskMode = amount 时生效） */
+  riskAmount: number;
   /** 最终止盈放在入场价外的 R 倍数；0 = 模板不自动设止盈 */
   rewardR: number;
   /** 按 atR 升序执行；空数组 = 成交后不管理 */
   steps: TemplateStep[];
+  /** 下单默认启用：新开草稿时自动套用；同时最多一个模板为 true */
+  autoApply: boolean;
 }
 
 /** 按风险算手数的设置 */

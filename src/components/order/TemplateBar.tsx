@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, Pencil, Plus, Settings2 } from 'lucide-react';
+import { Check, ChevronDown, Pencil, Plus, Settings2, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { fmtMoney, fmtPrice } from '../../lib/format';
 import { fmtNum, templateSummary } from '../../lib/template';
@@ -29,6 +29,7 @@ export function TemplateBar({
   onSelect,
   onCreate,
   onOpenSettings,
+  onToggleDefault,
   onRestoreRisk,
   onUseTemplateTp,
 }: {
@@ -53,6 +54,8 @@ export function TemplateBar({
   onSelect: (id: string) => void;
   onCreate: () => void;
   onOpenSettings: () => void;
+  /** 把当前模板设为/取消「下单默认启用」 */
+  onToggleDefault: () => void;
   onRestoreRisk: () => void;
   onUseTemplateTp: () => void;
 }) {
@@ -177,9 +180,16 @@ export function TemplateBar({
                   )}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12px] text-foreground">{item.name}</span>
+                  <span className="flex items-center gap-1.5 text-[12px] text-foreground">
+                    <span className="truncate">{item.name}</span>
+                    {item.autoApply && (
+                      <span className="shrink-0 rounded bg-brand/10 px-1 py-px text-[10px] text-brand">
+                        默认
+                      </span>
+                    )}
+                  </span>
                   <span className="block truncate text-[10px] text-muted-foreground">
-                    {templateSummary(item)}
+                    {templateSummary(item, currency)}
                   </span>
                 </span>
               </button>
@@ -195,6 +205,23 @@ export function TemplateBar({
           >
             <Plus size={13} strokeWidth={1.8} />
             新建模板
+          </button>
+          <button
+            onClick={() => {
+              setTemplateMenu(false);
+              onToggleDefault();
+            }}
+            className={cn(
+              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-accent hover:text-foreground',
+              template.autoApply ? 'text-brand' : 'text-muted-foreground',
+            )}
+          >
+            <Star
+              size={13}
+              strokeWidth={1.6}
+              fill={template.autoApply ? 'currentColor' : 'none'}
+            />
+            {template.autoApply ? '取消下单默认启用' : '设为下单默认启用'}
           </button>
           <button
             onClick={() => {
@@ -240,8 +267,13 @@ export function TemplateBar({
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground">
             <span>
-              风险 {fmtNum(risk.value)}%
-              {sizing ? ` ≈ ${fmtMoney(sizing.targetRisk)}${currency}` : ''}
+              风险{' '}
+              {risk.mode === 'percent'
+                ? `${fmtNum(risk.value)}%`
+                : `固定 ${fmtMoney(risk.value)}${currency}`}
+              {risk.mode === 'percent' && sizing
+                ? ` ≈ ${fmtMoney(sizing.targetRisk)}${currency}`
+                : ''}
             </span>
             {tpTarget != null ? (
               <span>

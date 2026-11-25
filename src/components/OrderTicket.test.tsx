@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { GatewayHealth, Quote, SymbolInfo } from '../gateway/types';
@@ -156,6 +156,78 @@ describe('OrderTicket 下单模式', () => {
     expect(document.querySelector('[data-confirm="order"]')).toBeNull();
     // 取消只关弹窗，草稿保留，方便改价后再提交
     expect(useApp.getState().draft.active).toBe(true);
+  });
+
+  it('默认模板随卖出一步启用：风险与 2R 止盈直接带入', async () => {
+    const user = userEvent.setup();
+    useApp.setState({
+      templates: [
+        {
+          id: 'td',
+          name: '默认启用',
+          riskMode: 'percent',
+          riskPercent: 0.7,
+          riskAmount: 100,
+          rewardR: 2,
+          steps: [],
+          autoApply: true,
+        },
+      ],
+      activeTemplateId: 'td',
+      templateArmed: false,
+    });
+    render(<OrderTicket />);
+
+    await user.click(screen.getByTitle('以市价卖出'));
+    expect(useApp.getState().templateArmed).toBe(true);
+    expect(useApp.getState().risk).toEqual({ mode: 'percent', value: 0.7, auto: true });
+
+    await user.click(screen.getByRole('button', { name: '100点' }));
+    const draft = useApp.getState().draft;
+    expect(draft.sl).toBe(2001);
+    expect(draft.tp).toBe(1998);
+  });
+
+  it('切换模板立即同步风险，不用再点启用', async () => {
+    const user = userEvent.setup();
+    useApp.setState({
+      templates: [
+        {
+          id: 'a',
+          name: 'A模板',
+          riskMode: 'percent',
+          riskPercent: 0.5,
+          riskAmount: 100,
+          rewardR: 2,
+          steps: [],
+          autoApply: true,
+        },
+        {
+          id: 'b',
+          name: 'B模板',
+          riskMode: 'percent',
+          riskPercent: 1.5,
+          riskAmount: 100,
+          rewardR: 1,
+          steps: [],
+          autoApply: false,
+        },
+      ],
+      activeTemplateId: 'a',
+      templateArmed: false,
+    });
+    render(<OrderTicket />);
+
+    await user.click(screen.getByTitle('以市价买入'));
+    expect(useApp.getState().risk.value).toBe(0.5);
+
+    await user.click(screen.getByRole('button', { name: /A模板/ }));
+    const menu = document.querySelector('[data-modal]') as HTMLElement;
+    await user.click(within(menu).getByRole('button', { name: /B模板/ }));
+
+    expect(useApp.getState().activeTemplateId).toBe('b');
+    expect(useApp.getState().templateArmed).toBe(true);
+    expect(useApp.getState().risk.value).toBe(1.5);
   });
 
   it('挂单按价格推导限价 / 停损，点差内价格禁止提交', async () => {

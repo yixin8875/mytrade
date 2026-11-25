@@ -7,9 +7,12 @@ import { useTemplateSync } from './useTemplateSync';
 const TEMPLATE: TradeTemplate = {
   id: 't1',
   name: '1R',
+  riskMode: 'percent',
   riskPercent: 1,
+  riskAmount: 100,
   rewardR: 1,
   steps: [],
+  autoApply: false,
 };
 
 const DRAFT: DraftOrder = {
@@ -57,6 +60,46 @@ describe('useTemplateSync', () => {
     rerender({ entry: 2005 });
 
     expect(patchDraft).toHaveBeenCalledWith({ tp: 2020 });
+  });
+
+  it('未启用模板时止盈按基础 1R 跟随', () => {
+    const patchDraft = vi.fn();
+    renderHook(() =>
+      useTemplateSync({
+        info: GOLD_INFO,
+        tick: GOLD_INFO.tickSize,
+        digits: GOLD_INFO.digits,
+        template: TEMPLATE,
+        armed: false,
+        draft: { ...DRAFT, tp: null },
+        risk: RISK,
+        rulerEntry: 2000,
+        entryMode: 'regular',
+        patchDraft,
+        patchRisk: vi.fn(),
+      }),
+    );
+    expect(patchDraft).toHaveBeenCalledWith({ tp: 2010 });
+  });
+
+  it('金额口径模板把固定亏损金额套到下单票', () => {
+    const patchRisk = vi.fn();
+    renderHook(() =>
+      useTemplateSync({
+        info: GOLD_INFO,
+        tick: GOLD_INFO.tickSize,
+        digits: GOLD_INFO.digits,
+        template: { ...TEMPLATE, riskMode: 'amount', riskAmount: 150 },
+        armed: true,
+        draft: DRAFT,
+        risk: RISK,
+        rulerEntry: 2000,
+        entryMode: 'regular',
+        patchDraft: vi.fn(),
+        patchRisk,
+      }),
+    );
+    expect(patchRisk).toHaveBeenCalledWith({ mode: 'amount', value: 150, auto: true });
   });
 
   it('用户手动改过止盈后，价格跳动不再抢回', () => {

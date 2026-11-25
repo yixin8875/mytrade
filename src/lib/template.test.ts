@@ -7,6 +7,8 @@ import {
   isTpManual,
   normalizeTemplateSteps,
   stepSummary,
+  templateRisk,
+  templateRiskLabel,
   templateStepsSummary,
   templateSummary,
   templateTpTarget,
@@ -109,6 +111,28 @@ describe('isRiskDeviated', () => {
   });
 });
 
+describe('固定金额风险口径', () => {
+  const amountTemplate = {
+    ...DEFAULT_TEMPLATE,
+    riskMode: 'amount' as const,
+    riskAmount: 150,
+  };
+
+  it('templateRisk 按口径换算，且一律自动手数', () => {
+    expect(templateRisk(DEFAULT_TEMPLATE)).toEqual({ mode: 'percent', value: 0.5, auto: true });
+    expect(templateRisk(amountTemplate)).toEqual({ mode: 'amount', value: 150, auto: true });
+  });
+
+  it('摘要与偏离都按金额口径', () => {
+    expect(templateRiskLabel(amountTemplate, 'USD')).toBe('固定 150 USD');
+    expect(templateRiskLabel(amountTemplate)).toBe('固定 150');
+    expect(templateSummary(amountTemplate)).toBe('固定 150 · 2R · 1R→保本');
+    expect(isRiskDeviated(amountTemplate, risk({ mode: 'amount', value: 150 }))).toBe(false);
+    expect(isRiskDeviated(amountTemplate, risk({ mode: 'amount', value: 140 }))).toBe(true);
+    expect(isRiskDeviated(amountTemplate, risk({ mode: 'percent', value: 0.5 }))).toBe(true);
+  });
+});
+
 describe('isTpManual', () => {
   it('半跳以内视为一致', () => {
     expect(isTpManual(2020, 2020.004, 0.01)).toBe(false);
@@ -137,9 +161,12 @@ describe('模板摘要', () => {
       templateSummary({
         id: 't',
         name: 't',
+        riskMode: 'percent',
         riskPercent: 1,
+        riskAmount: 100,
         rewardR: 0,
         steps: [{ atR: 1, closePercent: 50, moveBreakeven: true }],
+        autoApply: false,
       }),
     ).toBe('1% · 1R 平50%→保本');
   });

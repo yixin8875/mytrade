@@ -7,9 +7,10 @@ import { fmtMoney, fmtPrice, fmtVolume, roundVolume } from '../lib/format';
 import { defaultPrice } from '../lib/orderPrice';
 import { classifyPending } from '../lib/pendingOrder';
 import {
-  fmtNum,
   isRiskDeviated,
   isTpManual,
+  templateRisk,
+  templateRiskLabel,
   templateStepsSummary,
   templateSummary,
   templateTpTarget,
@@ -48,6 +49,8 @@ export function OrderTicket() {
   const createTemplate = useApp((s) => s.createTemplate);
   const templateArmed = useApp((s) => s.templateArmed);
   const setTemplateArmed = useApp((s) => s.setTemplateArmed);
+  const armDefaultTemplate = useApp((s) => s.armDefaultTemplate);
+  const setAutoApply = useApp((s) => s.setAutoApply);
   const riskStatus = useApp((s) => s.riskStatus);
   const setPage = useApp((s) => s.setPage);
   const setSettingsSection = useApp((s) => s.setSettingsSection);
@@ -76,7 +79,7 @@ export function OrderTicket() {
   const currency = health?.account?.currency ?? '';
   const paused = mode === 'readonly' || !!riskStatus?.halted;
   const stepsText = templateStepsSummary(template);
-  const summaryText = templateSummary(template);
+  const summaryText = templateSummary(template, currency);
   const riskDeviated = templateArmed && isRiskDeviated(template, risk);
   // R 标尺的入场价：市价单跟随当前报价，挂单用草稿价。
   // 市价草稿在图上没有入场线，止损止盈和 R 都以这个价为准。
@@ -110,12 +113,15 @@ export function OrderTicket() {
     setPreview,
   });
 
+  const hasDefaultTemplate = templates.some((item) => item.autoApply);
   const { tpTouched, setTpTouched } = useTemplateSync({
     info,
     tick,
     digits,
     template,
     armed: templateArmed,
+    // 没有默认模板时按基础 1R 预填止盈；有默认模板但手动停用时不动止盈
+    fallbackRewardR: hasDefaultTemplate ? 0 : 1,
     draft,
     risk,
     rulerEntry,
@@ -190,6 +196,7 @@ export function OrderTicket() {
 
   const activate = () => {
     if (!info) return;
+    armDefaultTemplate();
     const volume = Math.max(info.minVolume, Math.min(info.maxVolume, draft.volume));
     if (draft.type === 'market') {
       patchDraft({
@@ -219,7 +226,7 @@ export function OrderTicket() {
       return;
     }
     if (!info) return;
-    patchRisk({ mode: 'percent', value: template.riskPercent, auto: true });
+    patchRisk(templateRisk(template));
     setTpTouched(false);
     // 已经有委托价的草稿（限价/停损）保留类型；否则准备一张市价草稿
     const keepPending = draft.active && draft.type !== 'market' && draft.price > 0;
@@ -240,16 +247,29 @@ export function OrderTicket() {
     setActiveTemplate(id);
     const next = templates.find((item) => item.id === id);
     if (!next) return;
-    if (templateArmed) {
-      patchRisk({ mode: 'percent', value: next.riskPercent, auto: true });
-      setTpTouched(false);
-      notify('info', `已切换到「${next.name}」：${templateSummary(next)}`);
+    // 切换即生效：风险、止盈和阶段都跟着新模板走，不用再点「启用」
+    patchRisk(templateRisk(next));
+    setTpTouched(false);
+    setTemplateArmed(true);
+    if (draft.active) {
+      notify('info', `已切换到「${next.name}」：${templateSummary(next, currency)}`);
     }
   };
 
+  /** 模板栏菜单里快速切换「下单默认启用」 */
+  const toggleAutoApply = () => {
+    setAutoApply(template.autoApply ? null : template.id);
+    notify(
+      'info',
+      template.autoApply
+        ? '已取消下单默认模板，新开单不再自动启用'
+        : `「${template.name}」将作为下单默认模板`,
+    );
+  };
+
   const restoreTemplateRisk = () => {
-    patchRisk({ mode: 'percent', value: template.riskPercent, auto: true });
-    notify('info', `已恢复模板风险 ${fmtNum(template.riskPercent)}%`);
+    patchRisk(templateRisk(template));
+    notify('info', `已恢复模板风险 ${templateRiskLabel(template, currency)}`);
   };
 
   const openTemplateSettings = () => {
@@ -260,6 +280,7 @@ export function OrderTicket() {
   /** 常规模式点买/卖：直接开一张市价草稿，图上出现跟随现价的委托线 */
   const startMarket = (side: Side) => {
     if (!info) return;
+    armDefaultTemplate();
     setTpTouched(false);
     patchDraft({
       active: true,
@@ -274,6 +295,7 @@ export function OrderTicket() {
     if (!info) return;
     // 已经是当前页签时不重置用户填好的价格
     if (draft.active && pending === (draft.type !== 'market')) return;
+    armDefaultTemplate();
     if (!pending) {
       patchDraft({
         active: true,
@@ -660,6 +682,7 @@ export function OrderTicket() {
             notify('info', '已新建空白模板，可点铅笔编辑');
           }}
           onOpenSettings={openTemplateSettings}
+          onToggleDefault={toggleAutoApply}
           onRestoreRisk={restoreTemplateRisk}
           onUseTemplateTp={() => {
             setTpTouched(false);
@@ -782,6 +805,7 @@ export function OrderTicket() {
           templateArmed={templateArmed}
           template={template}
           steps={stepsText}
+          currency={currency}
           riskDeviated={riskDeviated}
           tpManual={tpManual}
           disciplineEnabled={disciplineEnabled}

@@ -4,7 +4,7 @@ import { DEFAULT_ACCENT, normalizeHex } from '../lib/accent';
 import { fallbackQuickPrice, type ChartQuickAction } from '../lib/chartQuickActions';
 import { roundToTick } from '../lib/orderPrice';
 import { classifyPending } from '../lib/pendingOrder';
-import { DEFAULT_TEMPLATE, normalizeTemplateSteps } from '../lib/template';
+import { DEFAULT_TEMPLATE, normalizeTemplateSteps, templateRisk } from '../lib/template';
 import type {
   Account,
   ConnState,
@@ -294,6 +294,10 @@ interface AppStore {
   /** 新建一个空白模板（与「复制当前模板」区分） */
   createTemplate: () => void;
   deleteTemplate: (id: string) => void;
+  /** 设定下单默认启用的模板；null = 取消默认 */
+  setAutoApply: (id: string | null) => void;
+  /** 新开草稿时套用默认模板；已经启用模板时保持当前选择 */
+  armDefaultTemplate: () => void;
   setTemplateArmed: (armed: boolean) => void;
   setSettingsSection: (section: SettingsSection) => void;
   setLayout: (layout: ChartLayout) => void;
@@ -400,12 +404,16 @@ function makeTemplate(raw: TemplateInput = {}): TradeTemplate {
       typeof raw.name === 'string' && raw.name.trim()
         ? raw.name.trim().slice(0, 24)
         : '默认模板',
+    riskMode: raw.riskMode === 'amount' ? 'amount' : 'percent',
     riskPercent: numIn(raw.riskPercent, 0.01, 100, 0.5),
+    // 固定金额上限放到 1e9，够覆盖大多数账户货币；金额模式之外只是保留值
+    riskAmount: numIn(raw.riskAmount, 0.01, 1_000_000_000, 100),
     rewardR: numIn(raw.rewardR, 0, 50, 2),
     steps:
       hasSteps || legacyBreakeven <= 0
         ? steps
         : [{ atR: legacyBreakeven, closePercent: null, moveBreakeven: true }],
+    autoApply: raw.autoApply === true,
   };
 }
 
@@ -795,6 +803,25 @@ export const useApp = create<AppStore>((set, get) => ({
       saveTemplates({ templates: state.templates, activeTemplateId: id });
       return { activeTemplateId: id };
     }),
+  setAutoApply: (id) =>
+    set((state) => {
+      const templates = state.templates.map((item) =>
+        item.autoApply === (item.id === id) ? item : { ...item, autoApply: item.id === id },
+      );
+      if (templates.every((item, index) => item === state.templates[index])) return {};
+      saveTemplates({ templates, activeTemplateId: state.activeTemplateId });
+      return { templates };
+    }),
+  armDefaultTemplate: () => {
+    const state = get();
+    // 用户已经手动选好模板时不要覆盖
+    if (state.templateArmed) return;
+    const auto = state.templates.find((item) => item.autoApply);
+    if (!auto) return;
+    if (state.activeTemplateId !== auto.id) state.setActiveTemplate(auto.id);
+    state.patchRisk(templateRisk(auto));
+    state.setTemplateArmed(true);
+  },
   updateTemplate: (id, patch) =>
     set((state) => {
       const templates = state.templates.map((item) =>
@@ -810,6 +837,8 @@ export const useApp = create<AppStore>((set, get) => ({
         ...base,
         id: newTemplateId(),
         name: `${base.name.slice(0, 20)} 副本`,
+        // 默认启用只保留在原模板上，副本不抢默认位
+        autoApply: false,
       });
       const templates = [...state.templates, copy];
       saveTemplates({ templates, activeTemplateId: copy.id });
@@ -1011,7 +1040,7 @@ export const useApp = create<AppStore>((set, get) => ({
       stopsLevelPoints: info?.stopsLevelPoints,
       point: info?.point,
     });
-    current.setTemplateArmed(false);
+    current.armDefaultTemplate();
     current.patchDraft({
       active: true,
       symbol,
@@ -1162,6 +1191,6 @@ export function handleGlobalShortcut(event: KeyboardEvent): void {
   const side = key === 'b' ? 'buy' : 'sell';
   const price = side === 'buy' ? state.quote.ask : state.quote.bid;
   state.patchDraft({ side, type: 'market', active: true, price });
-  state.setTemplateArmed(false);
+  state.armDefaultTemplate();
   state.notify('info', `${side === 'buy' ? '买入' : '卖出'}市价草稿已就绪，核对后发送`);
 }

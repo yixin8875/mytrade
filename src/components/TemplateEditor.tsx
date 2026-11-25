@@ -10,6 +10,8 @@ import {
 } from '../lib/template';
 import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
+import { SegmentedControl, SegmentedControlItem } from './ui/segmented-control';
+import { Switch } from './ui/switch';
 import type { TemplateStep } from '../gateway/types';
 
 type Tone = 'console' | 'tv';
@@ -105,6 +107,8 @@ export function TemplateEditor({
   const templates = useApp((s) => s.templates);
   const activeTemplateId = useApp((s) => s.activeTemplateId);
   const updateTemplate = useApp((s) => s.updateTemplate);
+  const setAutoApply = useApp((s) => s.setAutoApply);
+  const currency = useApp((s) => s.account?.currency ?? '');
   const template =
     templates.find((item) => item.id === (templateId ?? activeTemplateId)) ?? templates[0];
 
@@ -120,18 +124,26 @@ export function TemplateEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [template.id, signature]);
 
-  const commitNumber = (
-    field: 'riskPercent' | 'rewardR',
-    raw: string,
-    input: HTMLInputElement,
-  ) => {
+  const commitReward = (raw: string, input: HTMLInputElement) => {
     const value = Number(raw);
-    const [min, max] = field === 'riskPercent' ? [0.01, 100] : [0, 50];
     const next =
       raw.trim() === '' || !Number.isFinite(value)
-        ? template[field]
-        : Math.min(max, Math.max(min, value));
-    updateTemplate(template.id, { [field]: next });
+        ? template.rewardR
+        : Math.min(50, Math.max(0, value));
+    updateTemplate(template.id, { rewardR: next });
+    input.value = fmtNum(next);
+  };
+
+  /** 风险按当前口径写回：百分比存 riskPercent，固定金额存 riskAmount */
+  const commitRisk = (raw: string, input: HTMLInputElement) => {
+    const isAmount = template.riskMode === 'amount';
+    const current = isAmount ? template.riskAmount : template.riskPercent;
+    const value = Number(raw);
+    const next =
+      raw.trim() === '' || !Number.isFinite(value)
+        ? current
+        : Math.min(isAmount ? 1_000_000_000 : 100, Math.max(0.01, value));
+    updateTemplate(template.id, isAmount ? { riskAmount: next } : { riskPercent: next });
     input.value = fmtNum(next);
   };
 
@@ -217,26 +229,65 @@ export function TemplateEditor({
         />
       </label>
 
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
+        <div className="min-w-0">
+          <div className={cn('text-[12px]', styles.ink)}>下单默认启用</div>
+          <div className={cn('mt-0.5 text-[11px] leading-relaxed', styles.muted)}>
+            新开单直接带入这个模板的风险、止盈和阶段；同时只能有一个默认模板。
+          </div>
+        </div>
+        <Switch
+          checked={template.autoApply}
+          onCheckedChange={(value) => setAutoApply(value ? template.id : null)}
+          aria-label="下单默认启用"
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <span className={styles.label}>单笔风险</span>
+        <SegmentedControl size="sm" className="h-7">
+          {(
+            [
+              ['percent', '净值 %'],
+              ['amount', '固定金额'],
+            ] as const
+          ).map(([value, label]) => (
+            <SegmentedControlItem
+              key={value}
+              onClick={() => updateTemplate(template.id, { riskMode: value })}
+              data-checked={template.riskMode === value ? '' : undefined}
+              aria-pressed={template.riskMode === value}
+              className="h-6 px-2 text-[11px]"
+            >
+              {label}
+            </SegmentedControlItem>
+          ))}
+        </SegmentedControl>
+      </div>
+
       <div className="grid grid-cols-2 gap-2">
         <label className="block">
-          <span className={cn('mb-1.5 block', styles.label)}>单笔风险</span>
+          <span className={cn('mb-1.5 block', styles.label)}>
+            {template.riskMode === 'amount' ? '单笔亏损' : '风险比例'}
+          </span>
           <div className="flex items-center gap-1.5">
             <input
-              key={`${template.id}-risk`}
+              key={`${template.id}-risk-${template.riskMode}`}
               type="number"
               min={0.01}
-              max={100}
-              step={0.1}
-              defaultValue={fmtNum(template.riskPercent)}
-              onBlur={(event) =>
-                commitNumber('riskPercent', event.currentTarget.value, event.currentTarget)
-              }
+              step={template.riskMode === 'amount' ? 10 : 0.1}
+              defaultValue={fmtNum(
+                template.riskMode === 'amount' ? template.riskAmount : template.riskPercent,
+              )}
+              onBlur={(event) => commitRisk(event.currentTarget.value, event.currentTarget)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') event.currentTarget.blur();
               }}
               className={cn(styles.field, 'w-full text-right')}
             />
-            <span className={cn('shrink-0', styles.muted)}>%</span>
+            <span className={cn('shrink-0', styles.muted)}>
+              {template.riskMode === 'amount' ? currency || '金额' : '%'}
+            </span>
           </div>
         </label>
         <label className="block">
@@ -249,9 +300,7 @@ export function TemplateEditor({
               max={50}
               step={0.1}
               defaultValue={fmtNum(template.rewardR)}
-              onBlur={(event) =>
-                commitNumber('rewardR', event.currentTarget.value, event.currentTarget)
-              }
+              onBlur={(event) => commitReward(event.currentTarget.value, event.currentTarget)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') event.currentTarget.blur();
               }}
@@ -261,6 +310,12 @@ export function TemplateEditor({
           </div>
         </label>
       </div>
+
+      {template.riskMode === 'amount' && !compact && (
+        <p className={cn('text-[11px] leading-relaxed', styles.muted)}>
+          固定亏损按账户货币计：启用后手数由「亏损金额 ÷ 止损距离」反算。
+        </p>
+      )}
 
       <div className={cn('border-t pt-3', styles.divider)}>
         <div className="flex items-start justify-between gap-3">
@@ -395,7 +450,9 @@ export function TemplateEditor({
             size="xs"
             onClick={() =>
               updateTemplate(template.id, {
+                riskMode: DEFAULT_TEMPLATE.riskMode,
                 riskPercent: DEFAULT_TEMPLATE.riskPercent,
+                riskAmount: DEFAULT_TEMPLATE.riskAmount,
                 rewardR: DEFAULT_TEMPLATE.rewardR,
                 steps: DEFAULT_TEMPLATE.steps,
               })
