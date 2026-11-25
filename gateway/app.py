@@ -84,7 +84,7 @@ async def lifespan(_: FastAPI):
     log.info("MT5 worker stopped")
 
 
-app = FastAPI(title="Tally Gateway", version="0.9.6", lifespan=lifespan)
+app = FastAPI(title="Tally Gateway", version="0.9.7", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(ALLOWED_ORIGINS),
