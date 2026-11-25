@@ -315,4 +315,77 @@ plot(close +)
     expect(message).toContain('Pine 运行失败');
     expect(message).not.toContain('PineTS');
   });
+
+  it('uses true UTC for sessions and maps drawing times back to server time', async () => {
+    // 图表 bar 是券商服务器时间（用例按 UTC+2）；2024-01-02 是周二、纽约冬令时，
+    // 09:30-10:00 美东 = 14:30-15:00 UTC = 16:30-17:00 服务器时间。
+    const step = 300;
+    const dayStart = Date.UTC(2024, 0, 2, 0, 0, 0) / 1000; // 服务器当日 00:00
+    const list: Bar[] = Array.from({ length: 288 }, (_, index) => {
+      const inWindow = index >= 198 && index < 204; // 16:30-17:00 服务器时间
+      return {
+        time: dayStart + index * step,
+        open: 100,
+        high: inWindow ? 105 : 101,
+        low: inWindow ? 95 : 99,
+        close: 100,
+        volume: 1,
+      };
+    });
+
+    const source = `//@version=6
+indicator('session box', overlay = true)
+session_time = input.session("0930-1000", "window")
+session_tz = input.string("America/New_York", "tz")
+in_session = not na(time(timeframe.period, session_time, session_tz))
+new_session = in_session and not in_session[1]
+session_ended = not in_session and in_session[1]
+var float hi = na
+var float lo = na
+var int started = na
+if new_session
+    hi := high
+    lo := low
+    started := time
+else if in_session
+    hi := math.max(hi, high)
+    lo := math.min(lo, low)
+if session_ended
+    box.new(started, hi, time, lo, xloc = xloc.bar_time)
+    label.new(bar_index, hi, 'end')
+`;
+
+    const fixed = await runPine({
+      source,
+      bars: list,
+      symbol: 'XAUUSD',
+      resolution: '5',
+      serverOffset: 7200,
+    });
+    const box = fixed.visuals.drawings.find(
+      (drawing): drawing is Extract<typeof drawing, { kind: 'box' }> => drawing.kind === 'box',
+    );
+    // 箱体覆盖的是真 UTC 的美东开盘 30 分钟，绘图时间换回服务器时间
+    expect(box?.top.time).toBe(dayStart + 16.5 * 3600);
+    expect(box?.bottom.time).toBe(dayStart + 17 * 3600);
+    expect(box?.top.price).toBe(105);
+    expect(box?.bottom.price).toBe(95);
+
+    // bar_index 的绘图时间来自原 bar，不能再加一次偏移
+    const label = fixed.visuals.drawings.find(
+      (drawing): drawing is Extract<typeof drawing, { kind: 'label' }> =>
+        drawing.kind === 'label',
+    );
+    expect(label?.time).toBe(list[204].time);
+
+    // 不传 serverOffset 时服务器时间被当成 UTC，窗口落到服务器 14:30-15:00，
+    // 抓到的是普通时段的高低点——这正是修复前的错误行为。
+    const naive = await runPine({ source, bars: list, symbol: 'XAUUSD', resolution: '5' });
+    const wrong = naive.visuals.drawings.find(
+      (drawing): drawing is Extract<typeof drawing, { kind: 'box' }> => drawing.kind === 'box',
+    );
+    expect(wrong?.top.time).toBe(dayStart + 14.5 * 3600);
+    expect(wrong?.top.price).toBe(101);
+    expect(wrong?.bottom.price).toBe(99);
+  });
 });

@@ -36,6 +36,12 @@ export interface PineRunOptions {
   inputs?: Record<string, unknown>;
   /** 品种最小跳动；不传时 Piner 用 0.01，会影响 syminfo.mintick 相关的过滤 */
   mintick?: number;
+  /**
+   * 券商服务器时间与真 UTC 的差（秒）。图表 bar 时间是「服务器时间当 UTC」，
+   * 而 Pine 的 time()/session/dayofweek 都按真 UTC 解释；喂引擎前要减掉它，
+   * 绘图对象的时间再加回来，否则带时区的 session 会整体偏移。
+   */
+  serverOffset?: number;
   /** 保存时记录的输入元信息；用来把 id 映射成 Piner 需要的 title */
   inputMeta?: PineInputMeta[];
   /** 取 HTF/外部品种数据；不传则跳过 request.security 注入 */
@@ -232,12 +238,13 @@ function firstColor(colors: (string | null)[] | undefined): string | undefined {
   return undefined;
 }
 
-function toPinerBars(bars: Bar[]): PinerBar[] {
+function toPinerBars(bars: Bar[], serverOffsetSec = 0): PinerBar[] {
   return bars
     .filter((bar) => Number.isFinite(bar.time))
     .map((bar) => ({
       // Piner 的时间轴是 epoch milliseconds；项目 Bar.time 是秒。
-      time: Math.round(bar.time * 1000),
+      // 图表 bar 是服务器时间，先换成真 UTC 再给 Pine。
+      time: Math.round((bar.time - serverOffsetSec) * 1000),
       open: Number(bar.open),
       high: Number(bar.high),
       low: Number(bar.low),
@@ -358,7 +365,9 @@ async function fetchSecurityBars(
         requestedSymbol.toUpperCase() === currentSymbol
           ? `${requestedSymbol}@${timeframe}`
           : requestedSymbol;
-      injected.set(key, toPinerBars(bars));
+      // 外部周期的 K 线也是服务器时间，和主图一样换成真 UTC，
+      // 否则 request.security 里的 session/hour 同样会偏。
+      injected.set(key, toPinerBars(bars, Number(options.serverOffset) || 0));
       fetched += 1;
     } catch (error) {
       warnings.push(
@@ -408,10 +417,19 @@ function asText(value: unknown): string | undefined {
  * 超出最后一根 K 线的 bar_index 是脚本有意向未来投影（例如「关键价位」把标签
  * 放在最新一根右边），按最后一根的时间步长外推；只丢弃负下标。
  */
-function barTimeAt(bars: Bar[], value: unknown, xloc?: unknown): number | undefined {
+function barTimeAt(
+  bars: Bar[],
+  value: unknown,
+  xloc?: unknown,
+  serverOffsetSec = 0,
+): number | undefined {
   const number = asNumber(value);
   if (number == null) return undefined;
-  if (xloc === 'bar_time') return number > 1e11 ? Math.round(number / 1000) : Math.round(number);
+  if (xloc === 'bar_time') {
+    // Pine 看到的 bar_time 是真 UTC；图表坐标要换回服务器时间。
+    const seconds = number > 1e11 ? Math.round(number / 1000) : Math.round(number);
+    return seconds + serverOffsetSec;
+  }
   const index = Math.round(number);
   if (index < 0 || bars.length === 0) return undefined;
   if (index < bars.length) return bars[index].time;
@@ -497,12 +515,13 @@ function normalizeDrawing(
   object: RawDrawObject,
   bars: Bar[],
   unsupported: string[],
+  serverOffsetSec = 0,
 ): PineDrawingVisual | undefined {
   const props = object.props ?? {};
   const id = String(object.id);
   switch (object.type) {
     case 'label': {
-      const time = barTimeAt(bars, props.x, props.xloc);
+      const time = barTimeAt(bars, props.x, props.xloc, serverOffsetSec);
       const price = asNumber(props.y);
       if (time == null || price == null) return undefined;
       return {
@@ -519,11 +538,11 @@ function normalizeDrawing(
     }
     case 'line': {
       const from: PineVisualPoint = {
-        time: barTimeAt(bars, props.x1, props.xloc) ?? Number.NaN,
+        time: barTimeAt(bars, props.x1, props.xloc, serverOffsetSec) ?? Number.NaN,
         price: asNumber(props.y1) ?? Number.NaN,
       };
       const to: PineVisualPoint = {
-        time: barTimeAt(bars, props.x2, props.xloc) ?? Number.NaN,
+        time: barTimeAt(bars, props.x2, props.xloc, serverOffsetSec) ?? Number.NaN,
         price: asNumber(props.y2) ?? Number.NaN,
       };
       if (!Number.isFinite(from.time) || !Number.isFinite(to.time)) return undefined;
@@ -539,8 +558,8 @@ function normalizeDrawing(
       };
     }
     case 'box': {
-      const leftTime = barTimeAt(bars, props.left, props.xloc);
-      const rightTime = barTimeAt(bars, props.right, props.xloc);
+      const leftTime = barTimeAt(bars, props.left, props.xloc, serverOffsetSec);
+      const rightTime = barTimeAt(bars, props.right, props.xloc, serverOffsetSec);
       const top = asNumber(props.top);
       const bottom = asNumber(props.bottom);
       if (leftTime == null || rightTime == null) return undefined;
@@ -561,7 +580,8 @@ function normalizeDrawing(
       const points: PineVisualPoint[] = [];
       for (const point of raw) {
         const time =
-          barTimeAt(bars, point.time, 'bar_time') ?? barTimeAt(bars, point.index, props.xloc);
+          barTimeAt(bars, point.time, 'bar_time', serverOffsetSec) ??
+          barTimeAt(bars, point.index, props.xloc, serverOffsetSec);
         const price = asNumber(point.price);
         if (time == null || price == null) continue;
         points.push({ time, price });
@@ -632,6 +652,7 @@ function collectVisuals(
     drawings: RawDrawObject[];
   },
   bars: Bar[],
+  serverOffsetSec = 0,
 ): PineVisuals {
   const visuals = emptyVisuals();
   const step = barStepSeconds(bars);
@@ -679,7 +700,7 @@ function collectVisuals(
 
   for (const object of engine.drawings) {
     if (visuals.drawings.length >= 600) break;
-    const drawing = normalizeDrawing(object, bars, visuals.unsupported);
+    const drawing = normalizeDrawing(object, bars, visuals.unsupported, serverOffsetSec);
     if (drawing) visuals.drawings.push(drawing);
   }
 
@@ -769,7 +790,8 @@ async function runPiner(options: PineRunOptions, warnings: string[]): Promise<Pi
   const started = Date.now();
   const { compile, Engine, ArrayFeed } = await import('@heyphat/piner');
   const compiled = compile(options.source);
-  const pinerBars = toPinerBars(options.bars);
+  const serverOffsetSec = Number(options.serverOffset) || 0;
+  const pinerBars = toPinerBars(options.bars, serverOffsetSec);
   if (pinerBars.length === 0) throw new Error('没有可用的 K 线');
 
   const inputs = pinerInputs(options.inputMeta, options.inputs);
@@ -831,7 +853,7 @@ async function runPiner(options: PineRunOptions, warnings: string[]): Promise<Pi
 
   return {
     series,
-    visuals: collectVisuals(engine, options.bars),
+    visuals: collectVisuals(engine, options.bars, serverOffsetSec),
     warnings,
     engine: 'piner',
     durationMs: Date.now() - started,

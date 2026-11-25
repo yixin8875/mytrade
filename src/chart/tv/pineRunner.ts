@@ -532,6 +532,11 @@ export class PineRunner {
         overrides[meta.id] = toInputValue(meta, inputs[meta.id]);
       }
 
+      // 图表 bar 是券商服务器时间；Pine 的 time()/session 按真 UTC 解释，
+      // 不把偏移减掉，带时区的时段判断会整体偏 serverOffset（见 datafeed.ts）。
+      const state = useApp.getState();
+      const serverOffset = state.quote?.serverOffset ?? state.health?.serverOffset ?? 0;
+
       const result = await runPine({
         source: script.source,
         bars,
@@ -541,6 +546,7 @@ export class PineRunner {
         inputMeta: script.inputs,
         fetchBars: loadBars,
         mintick: this.getTickSize(),
+        serverOffset,
       });
       if (this.disposed) return;
 
