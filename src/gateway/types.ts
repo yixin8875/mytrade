@@ -533,6 +533,15 @@ export interface Toast {
   action?: ToastAction | null;
 }
 
+/** 一笔交易的逐笔成交：side = in 入场 / out 出场 */
+export interface JournalFill {
+  side: 'in' | 'out';
+  /** 成交时间，券商服务器时钟的 epoch 秒 */
+  time: number;
+  price: number;
+  volume: number;
+}
+
 export interface JournalRecord {
   /** 该交易所属的 MT5 账户号 */
   login: number;
@@ -563,6 +572,8 @@ export interface JournalRecord {
   risk_source: string | null;
   /** 同步这笔交易时的服务器时区差（服务器时间 - UTC，秒）；老记录可能为空 */
   server_offset?: number | null;
+  /** 逐笔入场/出场成交；老记录或未回填时为空 */
+  fills?: JournalFill[] | null;
   /** 复盘标记时间；未复盘为空 */
   reviewed_at?: number | null;
   has_shot: number;

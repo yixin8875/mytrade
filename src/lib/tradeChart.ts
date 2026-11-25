@@ -8,6 +8,13 @@ export interface TradeChartBar {
   close: number;
 }
 
+export interface TradeChartFill {
+  side: 'in' | 'out';
+  time: number;
+  price: number;
+  volume?: number;
+}
+
 export interface TradeChartInput {
   bars: TradeChartBar[];
   entry: number;
@@ -18,6 +25,18 @@ export interface TradeChartInput {
   closeTime: number;
   width: number;
   height: number;
+  /** 逐笔成交；没有明细时退回 openTime/closeTime 的单点 */
+  fills?: TradeChartFill[] | null;
+  /** 服务器时钟与 UTC 的差（秒），时间轴标签按本地时间换算 */
+  serverOffset?: number;
+}
+
+export interface ChartMarker {
+  time: number;
+  price: number;
+  x: number;
+  y: number;
+  volume: number | null;
 }
 
 export interface ChartCandle {
@@ -48,6 +67,10 @@ export interface TradeChartLayout {
   entryY: number;
   exitX: number;
   exitY: number;
+  /** 逐笔入场成交点；没有明细时是 openTime/entry 的单点 */
+  entryPoints: ChartMarker[];
+  /** 逐笔出场成交点；没有明细时是 closeTime/exit 的单点 */
+  exitPoints: ChartMarker[];
   slY: number | null;
   tpY: number | null;
   holdX0: number;
@@ -149,9 +172,10 @@ function pad2(value: number): string {
   return String(value).padStart(2, '0');
 }
 
-/** 时间轴标签：两天内只给时:分，一个月内带日期 */
-export function timeTickLabel(time: number, spanSec: number): string {
-  const date = new Date(time * 1000);
+/** 时间轴标签：两天内只给时:分，一个月内带日期；bars 是服务器时钟，展示前换成本地时间 */
+export function timeTickLabel(time: number, spanSec: number, serverOffset = 0): string {
+  const offset = Number.isFinite(serverOffset) ? serverOffset : 0;
+  const date = new Date((time - offset) * 1000);
   const clock = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
   if (spanSec <= 2 * 86400) return clock;
   const day = `${pad2(date.getMonth() + 1)}/${pad2(date.getDate())}`;
@@ -205,11 +229,19 @@ export function buildTradeChart(input: TradeChartInput, digits?: number): TradeC
   };
   const precision = clamp(digits ?? priceDigits(input.entry), 0, 8);
   const bars = Array.isArray(input.bars) ? input.bars : [];
+  const fills = (Array.isArray(input.fills) ? input.fills : []).filter(
+    (fill) =>
+      fill &&
+      (fill.side === 'in' || fill.side === 'out') &&
+      Number.isFinite(fill.time) &&
+      Number.isFinite(fill.price),
+  );
 
-  // 价格范围：K 线的最高最低 + 四个成交价位
+  // 价格范围：K 线的最高最低 + 加权成交价 + 每一笔实际成交价
   const prices: number[] = [input.entry, input.exit];
   if (isPositive(input.sl)) prices.push(input.sl);
   if (isPositive(input.tp)) prices.push(input.tp);
+  for (const fill of fills) prices.push(fill.price);
   for (const bar of bars) {
     if (Number.isFinite(bar.high)) prices.push(bar.high);
     if (Number.isFinite(bar.low)) prices.push(bar.low);
@@ -270,8 +302,32 @@ export function buildTradeChart(input: TradeChartInput, digits?: number): TradeC
   const timeTicks: { time: number; x: number; label: string }[] = [];
   for (let index = 0; index < tickCount; index += 1) {
     const time = timeMin + (timeSpan * index) / Math.max(1, tickCount - 1);
-    timeTicks.push({ time, x: xForTime(time), label: timeTickLabel(time, timeSpan) });
+    timeTicks.push({
+      time,
+      x: xForTime(time),
+      label: timeTickLabel(time, timeSpan, input.serverOffset ?? 0),
+    });
   }
+
+  const marker = (time: number, price: number, volume: number | null): ChartMarker => ({
+    time,
+    price,
+    x: xForTime(time),
+    y: yForPrice(price),
+    volume,
+  });
+  const volumeOf = (fill: TradeChartFill) =>
+    Number.isFinite(fill.volume) ? Number(fill.volume) : null;
+  const entryPoints = fills.some((fill) => fill.side === 'in')
+    ? fills
+        .filter((fill) => fill.side === 'in')
+        .map((fill) => marker(fill.time, fill.price, volumeOf(fill)))
+    : [marker(input.openTime, input.entry, null)];
+  const exitPoints = fills.some((fill) => fill.side === 'out')
+    ? fills
+        .filter((fill) => fill.side === 'out')
+        .map((fill) => marker(fill.time, fill.price, volumeOf(fill)))
+    : [marker(input.closeTime, input.exit, null)];
 
   return {
     plot,
@@ -282,6 +338,8 @@ export function buildTradeChart(input: TradeChartInput, digits?: number): TradeC
     entryY: yForPrice(input.entry),
     exitX: xForTime(input.closeTime),
     exitY: yForPrice(input.exit),
+    entryPoints,
+    exitPoints,
     slY: isPositive(input.sl) ? yForPrice(input.sl) : null,
     tpY: isPositive(input.tp) ? yForPrice(input.tp) : null,
     holdX0: Math.min(holdX0, holdX1),

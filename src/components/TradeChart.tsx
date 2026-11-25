@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { gateway } from '../gateway/client';
 import { useApp } from '../store/useApp';
-import { fmtMoney, fmtPrice, fmtSigned, signedClass } from '../lib/format';
+import { fmtMoney, fmtPrice, fmtSigned, fmtVolume, signedClass } from '../lib/format';
 import { fmtLocalTime, rowOffset } from '../lib/time';
 import {
   buildTradeChart,
@@ -111,6 +111,8 @@ export function TradeChart({ record }: { record: JournalRecord }) {
           closeTime: record.close_time,
           width: size.width,
           height: size.height,
+          fills: record.fills ?? null,
+          serverOffset: offset,
         },
         digits ?? undefined,
       ),
@@ -120,9 +122,21 @@ export function TradeChart({ record }: { record: JournalRecord }) {
   const profitTone = record.profit >= 0 ? 'var(--color-console-gain)' : 'var(--color-console-loss)';
   const rMultiple = record.risk && record.risk > 0 ? record.profit / record.risk : null;
 
+  const entryMany = layout.entryPoints.length > 1;
+  const exitMany = layout.exitPoints.length > 1;
   const levels = [
-    { key: 'entry', y: layout.entryY, color: '#1f5fd6', label: `入 ${price(record.entry_price)}` },
-    { key: 'exit', y: layout.exitY, color: profitTone, label: `出 ${price(record.exit_price)}` },
+    {
+      key: 'entry',
+      y: layout.entryY,
+      color: '#1f5fd6',
+      label: `${entryMany ? '入均价' : '入'} ${price(record.entry_price)}`,
+    },
+    {
+      key: 'exit',
+      y: layout.exitY,
+      color: profitTone,
+      label: `${exitMany ? '出均价' : '出'} ${price(record.exit_price)}`,
+    },
     ...(layout.slY != null
       ? [{ key: 'sl', y: layout.slY, color: '#9a4a44', label: `损 ${price(record.sl)}` }]
       : []),
@@ -271,22 +285,32 @@ export function TradeChart({ record }: { record: JournalRecord }) {
             />
           ))}
 
-          <circle
-            cx={layout.entryX}
-            cy={layout.entryY}
-            r={3}
-            fill="#1f5fd6"
-            stroke="#fff"
-            strokeWidth={1}
-          />
-          <circle
-            cx={layout.exitX}
-            cy={layout.exitY}
-            r={3}
-            fill={profitTone}
-            stroke="#fff"
-            strokeWidth={1}
-          />
+          {layout.entryPoints.map((point, index) => (
+            <FillArrow
+              key={`entry-${point.time}-${index}`}
+              x={point.x}
+              y={point.y}
+              color="#1f5fd6"
+              up={record.side === 'buy'}
+              side="entry"
+              label={`入场 ${price(point.price)} · ${fmtLocalTime(point.time, offset)}${
+                point.volume != null ? ` · ${fmtVolume(point.volume)} 手` : ''
+              }`}
+            />
+          ))}
+          {layout.exitPoints.map((point, index) => (
+            <FillArrow
+              key={`exit-${point.time}-${index}`}
+              x={point.x}
+              y={point.y}
+              color={profitTone}
+              up={record.side !== 'buy'}
+              side="exit"
+              label={`出场 ${price(point.price)} · ${fmtLocalTime(point.time, offset)}${
+                point.volume != null ? ` · ${fmtVolume(point.volume)} 手` : ''
+              }`}
+            />
+          ))}
 
           {levels.map((level, index) => {
             const pillWidth = 84;
@@ -341,8 +365,24 @@ export function TradeChart({ record }: { record: JournalRecord }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px]">
-        <Metric label="入场" value={price(record.entry_price)} hint={fmtLocalTime(record.open_time, offset)} />
-        <Metric label="出场" value={price(record.exit_price)} hint={fmtLocalTime(record.close_time, offset)} />
+        <Metric
+          label={entryMany ? '入场均价' : '入场'}
+          value={price(record.entry_price)}
+          hint={
+            entryMany
+              ? `${layout.entryPoints.length} 笔 · ${fmtLocalTime(record.open_time, offset)}`
+              : fmtLocalTime(record.open_time, offset)
+          }
+        />
+        <Metric
+          label={exitMany ? '出场均价' : '出场'}
+          value={price(record.exit_price)}
+          hint={
+            exitMany
+              ? `${layout.exitPoints.length} 笔 · ${fmtLocalTime(record.close_time, offset)}`
+              : fmtLocalTime(record.close_time, offset)
+          }
+        />
         <Metric label="持仓" value={fmtDuration(record.duration_sec)} />
         <Metric
           label="盈亏"
@@ -354,6 +394,42 @@ export function TradeChart({ record }: { record: JournalRecord }) {
         {record.mae != null && <Metric label="最大浮亏" value={fmtMoney(record.mae)} />}
       </div>
     </div>
+  );
+}
+
+/** 成交点画成箭头：尖端对准成交价，方向表示开/平仓，比 3px 圆点好认 */
+function FillArrow({
+  x,
+  y,
+  color,
+  up,
+  side,
+  label,
+}: {
+  x: number;
+  y: number;
+  color: string;
+  up: boolean;
+  side: 'entry' | 'exit';
+  label: string;
+}) {
+  const half = 8.5;
+  const height = 20;
+  const d = up
+    ? `M ${x} ${y} L ${x - half} ${y + height} L ${x + half} ${y + height} Z`
+    : `M ${x} ${y} L ${x - half} ${y - height} L ${x + half} ${y - height} Z`;
+  return (
+    <path
+      d={d}
+      fill={color}
+      stroke="#fff"
+      strokeWidth={1.5}
+      strokeLinejoin="round"
+      data-role="fill-point"
+      data-side={side}
+    >
+      <title>{label}</title>
+    </path>
   );
 }
 

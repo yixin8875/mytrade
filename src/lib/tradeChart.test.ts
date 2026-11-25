@@ -109,6 +109,13 @@ describe('timeTickLabel', () => {
     expect(timeTickLabel(localTime(9, 30, 2), 5 * 86400)).toBe('01/02 09:30');
     expect(timeTickLabel(localTime(9, 30, 2), 60 * 86400)).toBe('01/02');
   });
+
+  it('serverOffset 把服务器时钟换算成本地时间', () => {
+    const noon = localTime(12);
+    expect(timeTickLabel(noon, 3600, 0)).toBe('12:00');
+    expect(timeTickLabel(noon, 3600, 3600)).toBe('11:00');
+    expect(timeTickLabel(noon, 3600, -1800)).toBe('12:30');
+  });
 });
 
 describe('spreadLabelY', () => {
@@ -242,5 +249,72 @@ describe('buildTradeChart', () => {
     expect(Number.isFinite(layout.entryY)).toBe(true);
     expect(Number.isFinite(layout.exitY)).toBe(true);
     expect(layout.priceMax).toBeGreaterThan(layout.priceMin);
+  });
+});
+
+describe('逐笔成交点', () => {
+  const bars = [
+    bar(1000, 1.1, 1.2, 1.05, 1.15),
+    bar(1060, 1.15, 1.3, 1.12, 1.25),
+    bar(1120, 1.25, 1.32, 1.18, 1.22),
+  ];
+
+  it('每笔入场/出场各画一个点，按成交时间定位', () => {
+    const layout = buildTradeChart({
+      bars,
+      entry: 1.15,
+      exit: 1.25,
+      openTime: 1000,
+      closeTime: 1180,
+      width: 800,
+      height: 400,
+      fills: [
+        { side: 'in', time: 1000, price: 1.15, volume: 0.1 },
+        { side: 'out', time: 1060, price: 1.2, volume: 0.05 },
+        { side: 'out', time: 1180, price: 1.25, volume: 0.05 },
+      ],
+    });
+    expect(layout.entryPoints).toHaveLength(1);
+    expect(layout.exitPoints).toHaveLength(2);
+    expect(layout.exitPoints[0].time).toBe(1060);
+    expect(layout.exitPoints[1].time).toBe(1180);
+    expect(layout.exitPoints[0].x).toBeLessThan(layout.exitPoints[1].x);
+    expect(layout.exitPoints[0].y).toBeGreaterThan(layout.exitPoints[1].y);
+    expect(layout.exitPoints[1].price).toBe(1.25);
+    expect(layout.entryPoints[0].volume).toBe(0.1);
+  });
+
+  it('每一笔成交价都进入价格范围', () => {
+    const layout = buildTradeChart({
+      bars: [bar(1000, 1.1, 1.2, 1.05, 1.15)],
+      entry: 1.1,
+      exit: 1.2,
+      openTime: 1000,
+      closeTime: 1060,
+      width: 800,
+      height: 400,
+      fills: [{ side: 'out', time: 1060, price: 1.4, volume: 0.1 }],
+    });
+    expect(layout.priceMax).toBeGreaterThanOrEqual(1.4);
+    expect(layout.exitPoints[0].price).toBe(1.4);
+    expect(layout.exitPoints[0].y).toBeGreaterThanOrEqual(layout.plot.top);
+  });
+
+  it('没有明细时退回单点', () => {
+    const layout = buildTradeChart({
+      bars,
+      entry: 1.15,
+      exit: 1.25,
+      openTime: 1000,
+      closeTime: 1120,
+      width: 800,
+      height: 400,
+    });
+    expect(layout.entryPoints).toEqual([
+      expect.objectContaining({ time: 1000, price: 1.15 }),
+    ]);
+    expect(layout.exitPoints).toEqual([
+      expect.objectContaining({ time: 1120, price: 1.25 }),
+    ]);
   });
 });

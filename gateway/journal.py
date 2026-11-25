@@ -19,6 +19,28 @@ def _weighted(pairs: list[tuple[float, float]]) -> float:
     return sum(volume * price for volume, price in pairs) / total if total else 0.0
 
 
+def _fills(deals: list[Any]) -> list[dict[str, Any]]:
+    """逐笔入场/出场成交，按时间排序；交易图据此画每一笔成交点。"""
+    out: list[dict[str, Any]] = []
+    for deal in deals:
+        entry = int(getattr(deal, "entry", 0) or 0)
+        if entry not in (0, 1, 3):
+            continue
+        try:
+            out.append(
+                {
+                    "side": "in" if entry == 0 else "out",
+                    "time": int(deal.time),
+                    "price": float(deal.price),
+                    "volume": float(deal.volume),
+                }
+            )
+        except (AttributeError, TypeError, ValueError):
+            continue
+    out.sort(key=lambda item: (item["time"], 0 if item["side"] == "in" else 1))
+    return out
+
+
 def _close_kind(comment: str) -> str:
     text = comment.strip().lower()
     # 模板分批止盈的成交注释是 "tpl-partial"，开头的 tp 不是止盈单
@@ -243,6 +265,7 @@ class TradeJournal:
         order_levels = self._order_levels(login)
         backfill: dict[int, tuple[float, str]] = {}
         level_backfill: dict[int, tuple[float | None, float | None]] = {}
+        fills_backfill: dict[int, list[dict[str, Any]]] = {}
         written = 0
         for position_id, deals in groups.items():
             existing = self.store.journal_get(position_id, login)
@@ -252,6 +275,11 @@ class TradeJournal:
                     login, position_id
                 ).is_file():
                     self.store.journal_set_shot(position_id, login)
+                # 老记录没有逐笔成交：趁历史还在补一次，交易图才能画出每一笔
+                if not existing.get("fills"):
+                    fills = _fills(deals)
+                    if fills:
+                        fills_backfill[position_id] = fills
                 levels = order_levels.get(position_id)
                 if levels:
                     # 老记录没有止损/止盈价时补一次，交易图才有计划价位可画
@@ -282,6 +310,7 @@ class TradeJournal:
 
             entry_price = _weighted([(float(d.volume), float(d.price)) for d in entries])
             exit_price = _weighted([(float(d.volume), float(d.price)) for d in exits])
+            fills = _fills([*entries, *exits])
             open_time = min(int(d.time) for d in entries)
             close_time = max(int(d.time) for d in exits)
             profit = sum(
@@ -327,6 +356,7 @@ class TradeJournal:
                     "sl": order_sl,
                     "tp": order_tp,
                     "server_offset": server_offset,
+                    "fills": fills,
                 }
             )
             # 截图可能在日志记录之前就上传了（成交后立刻截图，收盘后才配对完成），
@@ -338,6 +368,8 @@ class TradeJournal:
             self.store.journal_set_risks(login, backfill)
         if level_backfill:
             self.store.journal_set_levels(login, level_backfill)
+        if fills_backfill:
+            self.store.journal_set_fills(login, fills_backfill)
         return written
 
     def _order_levels(

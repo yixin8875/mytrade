@@ -96,6 +96,41 @@ def test_journal_risk_is_written_only_when_missing(tmp_path):
     assert row["risk_source"] == "intent"
 
 
+def test_journal_fills_round_trip_and_backfill_once(tmp_path):
+    store = Store(tmp_path)
+    record = {
+        "login": 1,
+        "position_id": 9,
+        "symbol": "EURUSD",
+        "side": "buy",
+        "volume": 0.1,
+        "entry_price": 1.08,
+        "exit_price": 1.085,
+        "profit": 50.0,
+        "open_time": 100,
+        "close_time": 200,
+        "duration_sec": 100,
+    }
+    fills = [
+        {"side": "in", "time": 100, "price": 1.08, "volume": 0.1},
+        {"side": "out", "time": 200, "price": 1.085, "volume": 0.1},
+    ]
+    store.upsert_journal({**record, "fills": fills})
+
+    assert (store.journal_get(9, 1) or {})["fills"] == fills
+    assert store.journal_list(login=1)[0]["fills"] == fills
+
+    # 已有明细不被补写覆盖
+    store.journal_set_fills(1, {9: [{"side": "out", "time": 300, "price": 1.1, "volume": 0.1}]})
+    assert (store.journal_get(9, 1) or {})["fills"] == fills
+
+    # 老记录没有明细时读成空数组，批量补写生效
+    store.upsert_journal({**record, "position_id": 10})
+    assert (store.journal_get(10, 1) or {})["fills"] == []
+    store.journal_set_fills(1, {10: fills})
+    assert (store.journal_get(10, 1) or {})["fills"] == fills
+
+
 def test_pre_trade_gate_snapshots_rules_and_is_idempotent(tmp_path):
     store = Store(tmp_path)
     first = store.pre_trade_gate_start(1, "cid", "pb", "confirm", ["A", "B"])

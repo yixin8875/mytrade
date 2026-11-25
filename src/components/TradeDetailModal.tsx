@@ -53,6 +53,8 @@ export function TradeDetailModal({
 
   const digits = meta?.digits ?? (Math.abs(record.entry_price) >= 100 ? 2 : 5);
   const closedBy = record.closed_by ? CLOSED_BY[record.closed_by] ?? record.closed_by : null;
+  const entryLabel = fillCount(record, 'in') > 1 ? '入场均价' : '入场';
+  const exitLabel = fillCount(record, 'out') > 1 ? '出场均价' : '出场';
 
   return (
     <Dialog
@@ -153,9 +155,9 @@ export function TradeDetailModal({
               {meta && <ShotAnnotations meta={meta} record={record} />}
               {!meta && (
                 <div className="absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-black/75 px-3 py-1.5 text-[11px] text-white/90">
-                  入场 <span className="num">{fmtPrice(record.entry_price, digits)}</span>
+                  {entryLabel} <span className="num">{fmtPrice(record.entry_price, digits)}</span>
                   <span className="mx-1.5 text-white/40">·</span>
-                  出场 <span className="num">{fmtPrice(record.exit_price, digits)}</span>
+                  {exitLabel} <span className="num">{fmtPrice(record.exit_price, digits)}</span>
                   <span className="ml-2 text-white/60">旧截图没有坐标信息，无法在图上定位</span>
                 </div>
               )}
@@ -172,6 +174,8 @@ function ShotAnnotations({ meta, record }: { meta: ShotMeta; record: JournalReco
   const entry = shotY(record.entry_price, meta);
   const exit = shotY(record.exit_price, meta);
   if (!entry || !exit) return null;
+  const entryLabel = fillCount(record, 'in') > 1 ? '入场均价' : '入场';
+  const exitLabel = fillCount(record, 'out') > 1 ? '出场均价' : '出场';
 
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg">
@@ -180,17 +184,22 @@ function ShotAnnotations({ meta, record }: { meta: ShotMeta; record: JournalReco
         edge={entry.edge}
         color="#1f5fd6"
         side="left"
-        label={`入场 ${fmtPrice(record.entry_price, meta.digits)}`}
+        label={`${entryLabel} ${fmtPrice(record.entry_price, meta.digits)}`}
       />
       <PriceMarker
         y={exit.y}
         edge={exit.edge}
         color={record.profit >= 0 ? '#059669' : '#dc2626'}
         side="right"
-        label={`出场 ${fmtPrice(record.exit_price, meta.digits)}`}
+        label={`${exitLabel} ${fmtPrice(record.exit_price, meta.digits)}`}
       />
     </div>
   );
+}
+
+/** 多笔成交时文案改标“均价”，避免把加权价当成某一次成交价 */
+function fillCount(record: JournalRecord, side: 'in' | 'out'): number {
+  return record.fills?.filter((fill) => fill.side === side).length ?? 0;
 }
 
 function PriceMarker({

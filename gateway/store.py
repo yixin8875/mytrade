@@ -32,6 +32,38 @@ def _json_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _fills_json(value: Any) -> str | None:
+    """逐笔入场/出场成交：只存可用的 {side,time,price,volume}，坏数据丢弃。"""
+    if not isinstance(value, list) or not value:
+        return None
+    out: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict) or item.get("side") not in ("in", "out"):
+            continue
+        try:
+            out.append(
+                {
+                    "side": item["side"],
+                    "time": int(item["time"]),
+                    "price": float(item["price"]),
+                    "volume": float(item.get("volume") or 0),
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not out:
+        return None
+    return json.dumps(out, ensure_ascii=False, separators=(",", ":"))
+
+
+def _journal_row(row: Any) -> dict[str, Any]:
+    """journal 行 → 前端结构：fills 列是 JSON 文本，读取时还原成数组。"""
+    data = dict(row)
+    if "fills" in data:
+        data["fills"] = _json_list(data.get("fills"))
+    return data
+
+
 def _journal_filter_sql(filters: dict[str, Any] | None) -> tuple[list[str], list[Any]]:
     """交易日志的统一筛选：列表与统计共用，保证两处行集合一致。"""
     clauses: list[str] = []
@@ -124,6 +156,7 @@ class Store:
                     has_shot INTEGER NOT NULL DEFAULT 0,
                     risk REAL,
                     risk_source TEXT,
+                    fills TEXT,
                     recorded_at INTEGER NOT NULL,
                     PRIMARY KEY (login, position_id)
                 )
@@ -430,6 +463,9 @@ class Store:
         # 同步这笔交易时券商服务器与本机的时间差；展示时用它换成本地时间
         if "server_offset" not in journal_columns:
             self._db.execute("ALTER TABLE journal ADD COLUMN server_offset INTEGER")
+        # 逐笔入场/出场成交：交易图按每笔成交画点，不再只画加权均价
+        if "fills" not in journal_columns:
+            self._db.execute("ALTER TABLE journal ADD COLUMN fills TEXT")
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_journal_login ON journal(login, close_time)"
         )
@@ -474,6 +510,7 @@ class Store:
                     has_shot INTEGER NOT NULL DEFAULT 0,
                     risk REAL,
                     risk_source TEXT,
+                    fills TEXT,
                     recorded_at INTEGER NOT NULL,
                     PRIMARY KEY (login, position_id)
                 )
@@ -484,11 +521,11 @@ class Store:
                 INSERT INTO journal
                     (login, position_id, symbol, side, volume, entry_price, exit_price, profit,
                      swap, commission, open_time, close_time, duration_sec, mfe, mae, tag,
-                     closed_by, has_shot, risk, risk_source, recorded_at)
+                     closed_by, has_shot, risk, risk_source, fills, recorded_at)
                 SELECT 0, position_id, symbol, side, volume, entry_price, exit_price, profit,
                        swap, commission, open_time, close_time, duration_sec, mfe, mae, tag,
                        closed_by, has_shot,
-                       NULL, NULL,
+                       NULL, NULL, NULL,
                        recorded_at
                 FROM journal_legacy
                 """
@@ -649,8 +686,8 @@ class Store:
                 INSERT INTO journal
                     (login, position_id, symbol, side, volume, entry_price, exit_price, profit,
                      swap, commission, open_time, close_time, duration_sec, mfe, mae,
-                     tag, closed_by, risk, risk_source, sl, tp, recorded_at, server_offset)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     tag, closed_by, risk, risk_source, sl, tp, recorded_at, server_offset, fills)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(login, position_id) DO UPDATE SET
                     exit_price=excluded.exit_price,
                     profit=excluded.profit,
@@ -671,7 +708,8 @@ class Store:
                     sl=COALESCE(journal.sl, excluded.sl),
                     tp=COALESCE(journal.tp, excluded.tp),
                     tag=COALESCE(journal.tag, excluded.tag),
-                    server_offset=COALESCE(journal.server_offset, excluded.server_offset)
+                    server_offset=COALESCE(journal.server_offset, excluded.server_offset),
+                    fills=COALESCE(journal.fills, excluded.fills)
                 """,
                 (
                     int(record.get("login") or 0),
@@ -701,6 +739,7 @@ class Store:
                         if record.get("server_offset") is not None
                         else None
                     ),
+                    _fills_json(record.get("fills")),
                 ),
             )
             self._db.commit()
@@ -724,7 +763,7 @@ class Store:
                    ORDER BY j.close_time DESC LIMIT ?""",
                 (int(login), int(since), *args, int(limit)),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [_journal_row(r) for r in rows]
 
     def journal_get(self, position_id: int, login: int = 0) -> dict[str, Any] | None:
         with self._lock:
@@ -732,7 +771,7 @@ class Store:
                 "SELECT * FROM journal WHERE login=? AND position_id=?",
                 (int(login), int(position_id)),
             ).fetchone()
-        return dict(row) if row else None
+        return _journal_row(row) if row else None
 
     def journal_set_tag(self, position_id: int, tag: str | None, login: int = 0) -> None:
         with self._lock:
@@ -835,6 +874,28 @@ class Store:
                     (_positive_or_none(sl), _positive_or_none(tp), int(login), int(ticket))
                     for ticket, (sl, tp) in values.items()
                 ],
+            )
+            self._db.commit()
+
+    def journal_set_fills(
+        self, login: int, values: dict[int, list[dict[str, Any]]]
+    ) -> None:
+        """批量补写逐笔成交：只填还没有明细的老记录，不覆盖新记录的。"""
+        if not values:
+            return
+        rows = []
+        for ticket, fills in values.items():
+            stored = _fills_json(fills)
+            if stored is None:
+                continue
+            rows.append((stored, int(login), int(ticket)))
+        if not rows:
+            return
+        with self._lock:
+            self._db.executemany(
+                """UPDATE journal SET fills=?
+                   WHERE login=? AND position_id=? AND fills IS NULL""",
+                rows,
             )
             self._db.commit()
 

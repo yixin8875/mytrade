@@ -1,6 +1,7 @@
 """日志侧的纯函数：加权成交价、平仓分类、截图标注清洗。"""
 
 import time
+import types
 
 import journal as journal_module
 from journal import (
@@ -301,6 +302,75 @@ def test_stats_all_range_passes_filters_through(tmp_path):
     # 「全部」= 不设时间下限；筛选原样交给 store，保证列表与统计口径一致
     assert store.since == 0
     assert store.filters == {"symbol": "EURUSD"}
+
+
+def _deal(
+    position_id=7,
+    *,
+    entry=0,
+    time=100,
+    price=1.08,
+    volume=0.1,
+    profit=0.0,
+    comment="",
+    deal_type=0,
+):
+    return types.SimpleNamespace(
+        position_id=position_id,
+        type=deal_type,
+        entry=entry,
+        time=time,
+        price=price,
+        volume=volume,
+        profit=profit,
+        swap=0.0,
+        commission=0.0,
+        fee=0.0,
+        comment=comment,
+        symbol="EURUSD",
+    )
+
+
+def test_sync_stores_each_fill_in_time_order(tmp_path, monkeypatch):
+    deals = [
+        _deal(entry=1, time=300, price=1.09, volume=0.2, profit=20.0, comment="tp"),
+        _deal(entry=0, time=100, price=1.08, volume=0.2),
+        _deal(entry=1, time=200, price=1.085, volume=0.1, profit=10.0),
+    ]
+    monkeypatch.setattr(journal_module.mt5, "history_deals_get", lambda *a, **k: deals)
+    monkeypatch.setattr(journal_module.mt5, "history_orders_get", lambda *a, **k: [])
+    monkeypatch.setattr(journal_module.mt5, "copy_rates_range", lambda *a, **k: None)
+    store = Store(tmp_path)
+
+    assert TradeJournal(store).sync(1, force=True, server_offset=0) == 1
+
+    row = store.journal_get(7, 1) or {}
+    assert [
+        (fill["side"], fill["time"], fill["price"], fill["volume"]) for fill in row["fills"]
+    ] == [
+        ("in", 100, 1.08, 0.2),
+        ("out", 200, 1.085, 0.1),
+        ("out", 300, 1.09, 0.2),
+    ]
+    assert row["entry_price"] == 1.08
+    assert abs(row["exit_price"] - (1.085 * 0.1 + 1.09 * 0.2) / 0.3) < 1e-9
+
+
+def test_sync_backfills_fills_for_existing_record(tmp_path, monkeypatch):
+    store = Store(tmp_path)
+    store.upsert_journal(_journal_record(9))
+    deals = [
+        _deal(position_id=9, entry=0, time=100, price=1.08, volume=0.1),
+        _deal(position_id=9, entry=1, time=200, price=1.085, volume=0.1),
+    ]
+    monkeypatch.setattr(journal_module.mt5, "history_deals_get", lambda *a, **k: deals)
+    monkeypatch.setattr(journal_module.mt5, "history_orders_get", lambda *a, **k: [])
+    monkeypatch.setattr(journal_module.mt5, "copy_rates_range", lambda *a, **k: None)
+
+    assert TradeJournal(store).sync(1, force=True, server_offset=0) == 0
+
+    row = store.journal_get(9, 1) or {}
+    assert [(fill["side"], fill["time"]) for fill in row["fills"]] == [("in", 100), ("out", 200)]
 
 
 def _journal_record(position_id=9, server_offset=None):
