@@ -4,6 +4,7 @@ import type {
   PineJS,
 } from '../../../public/charting_library/charting_library';
 import {
+  PALETTE,
   readPineScripts,
   type PineInputMeta,
   type PinePlotMeta,
@@ -353,35 +354,82 @@ function migrateInputColors(inputs: unknown): void {
   }
 }
 
+type TemplatePlotStyles = Record<string, Record<string, unknown>>;
+
+/**
+ * 旧版本保存时试跑数据太短，时段类脚本的曲线全是 na，样式退回源码兜底，
+ * 于是存进模板的 plottype 都是 0（普通折线，跨时段连线）和兜底调色板颜色。
+ * 这里按当前脚本记录把过期值改回来；只在「旧值确实是兜底值」时才动，
+ * 免得把用户在设置里自己改过的样式/颜色每次启动都覆盖掉。
+ */
+function patchPlotStyles(
+  item: {
+    defaults?: { styles?: TemplatePlotStyles };
+    styles?: TemplatePlotStyles;
+  },
+  script: PineScriptRecord,
+): void {
+  const targets = [item.defaults?.styles, item.styles];
+  script.plots.forEach((plot, index) => {
+    const key = `plot_${index}`;
+    const wanted = libraryPlotType(plot.style);
+    const fallback = PALETTE[index % PALETTE.length];
+    for (const styles of targets) {
+      const style = styles?.[key];
+      if (!style || typeof style !== 'object') continue;
+      // 旧模板里错误的样式就是折线；用户改成别的样式时保留
+      if (style.plottype === 0 && wanted !== 0) style.plottype = wanted;
+      const color = String(style.color ?? '');
+      if (plot.color && color.toLowerCase() === fallback.toLowerCase()) {
+        style.color = plot.color;
+      }
+    }
+  });
+}
+
 /**
  * 旧版本把 Piner 的 #RRGGBBAA 直接存进了指标模板，图表库解析不了会让「设置」打不开。
  * 模板里有三份需要一起改（少改一份，恢复出来的指标仍然打不开设置）：
  *   - state.inputs：当前输入值
  *   - metaInfo.inputs[].defval：保存时的指标元信息快照
  *   - metaInfo.defaults.inputs：快照里的默认值
+ * 同时修掉旧版本存下的错误曲线样式（plottype/兜底色），见 patchPlotStyles。
  * 非 Pine 指标不动。
  */
 export function migratePineTemplate(state: unknown): void {
   const panes = (state as { panes?: unknown })?.panes;
   if (!Array.isArray(panes)) return;
+  const scripts = new Map(readPineScripts().map((script) => [script.id, script]));
   for (const pane of panes) {
     const sources = (pane as { sources?: unknown })?.sources;
     if (!Array.isArray(sources)) continue;
     for (const source of sources) {
       const item = source as {
         metaInfo?: {
+          id?: string;
           name?: string;
           inputs?: { defval?: unknown }[];
-          defaults?: { inputs?: unknown };
+          defaults?: { inputs?: unknown; styles?: TemplatePlotStyles };
         };
-        state?: { inputs?: unknown };
+        state?: { inputs?: unknown; styles?: TemplatePlotStyles };
       };
-      if (!String(item.metaInfo?.name ?? '').startsWith('mt-pine-')) continue;
+      const name = String(item.metaInfo?.name ?? '');
+      if (!name.startsWith('mt-pine-')) continue;
       migrateInputColors(item.state?.inputs);
       for (const input of item.metaInfo?.inputs ?? []) {
         if (typeof input.defval === 'string') input.defval = libraryColor(input.defval);
       }
       migrateInputColors(item.metaInfo?.defaults?.inputs);
+      // 指标 id 是 mt-pine-<scriptId>@tv-basicstudies-1，name 是 mt-pine-<scriptId>
+      const script = scripts.get(name.slice('mt-pine-'.length));
+      if (!script) continue;
+      patchPlotStyles(
+        {
+          defaults: item.metaInfo?.defaults,
+          styles: item.state?.styles,
+        },
+        script,
+      );
     }
   }
 }

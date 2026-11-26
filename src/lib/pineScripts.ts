@@ -79,7 +79,7 @@ export interface PineScriptRecord {
 }
 
 const STORAGE_KEY = 'mytrade.pineScripts';
-const PALETTE = [
+export const PALETTE = [
   '#2962FF',
   '#FF6D00',
   '#AB47BC',
@@ -92,13 +92,55 @@ const PALETTE = [
   '#42A5F5',
 ];
 
+/**
+ * 旧版本用 10 小时模拟数据扫描，时段类脚本的曲线全是 na，元信息退回源码兜底，
+ * 丢掉了 plot.style_linebr 这类样式（图上时段之间的线会连起来）。
+ * 读取时按源码补一次样式：只动「全部缺样式、且源码里确实写了 style」的记录，
+ * 避免把本来就没有样式的普通 plot 反复当成待修复。
+ */
+function repairPlotStyles(records: PineScriptRecord[]): PineScriptRecord[] {
+  let changed = false;
+  const next = records.map((record) => {
+    if (record.plots.length === 0 || record.plots.some((plot) => plot.style)) return record;
+    const parsed = regexPlots(record.source);
+    if (!parsed.some((plot) => plot.style)) return record;
+    const byTitle = new Map(parsed.map((plot) => [plot.title, plot]));
+    let recordChanged = false;
+    const plots = record.plots.map((plot, index) => {
+      const parsedPlot = byTitle.get(plot.title) ?? parsed[index];
+      if (!parsedPlot) return plot;
+      const fallback = PALETTE[index % PALETTE.length];
+      let next = plot;
+      if (parsedPlot.style) {
+        next = {
+          ...next,
+          style: parsedPlot.style,
+          ...(parsedPlot.width ? { width: parsedPlot.width } : {}),
+        };
+      }
+      // 旧记录的兜底颜色同样是错的；解析结果也是兜底色说明源码没写颜色，跳过
+      const parsedColor = parsedPlot.color ?? '';
+      const staleColor = String(plot.color ?? '').toLowerCase() === fallback.toLowerCase();
+      if (parsedColor && parsedColor.toLowerCase() !== fallback.toLowerCase() && staleColor) {
+        next = { ...next, color: parsedColor };
+      }
+      if (next !== plot) recordChanged = true;
+      return next;
+    });
+    if (!recordChanged) return record;
+    changed = true;
+    return { ...record, plots };
+  });
+  return changed ? next : records;
+}
+
 export function readPineScripts(): PineScriptRecord[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
+    const records = parsed.filter(
       (item): item is PineScriptRecord =>
         !!item &&
         typeof item === 'object' &&
@@ -106,6 +148,9 @@ export function readPineScripts(): PineScriptRecord[] {
         typeof (item as PineScriptRecord).source === 'string' &&
         Array.isArray((item as PineScriptRecord).plots),
     );
+    const repaired = repairPlotStyles(records);
+    if (repaired !== records) writePineScripts(repaired);
+    return repaired;
   } catch {
     return [];
   }
@@ -174,7 +219,23 @@ const NAMED_COLORS: Record<string, string> = {
   teal: '#00897B',
 };
 
-/** 试跑失败时的兜底：从源码里找 plot/hline 的标题和颜色 */
+/**
+ * 从 plot(...) 的参数里认出颜色。常见写法是 color=color.green 或
+ * color=color.new(color.green, 40)；直接匹配 color\.(\w+) 会把 "new" 当成颜色名。
+ */
+function parsePlotColor(body: string): string | undefined {
+  const insideNew = body.match(
+    /color\s*=\s*color\.new\s*\(\s*(?:color\.(\w+)|(#[0-9a-fA-F]{6,8}))/,
+  );
+  if (insideNew?.[2]) return insideNew[2].slice(0, 7);
+  if (insideNew?.[1]) return NAMED_COLORS[insideNew[1].toLowerCase()];
+  const named = body.match(/color\s*=\s*color\.(\w+)/)?.[1];
+  if (named) return NAMED_COLORS[named.toLowerCase()];
+  const hex = body.match(/color\s*=\s*(#[0-9a-fA-F]{6,8})/)?.[1];
+  return hex ? hex.slice(0, 7) : undefined;
+}
+
+/** 试跑失败时的兜底：从源码里找 plot/hline 的标题、颜色和样式 */
 function regexPlots(source: string): PinePlotMeta[] {
   const plots: PinePlotMeta[] = [];
   const callRe = /\b(plot|hline)\s*\(([\s\S]*?)\)\s*(?:\/\/[^\n]*)?$/gm;
@@ -184,16 +245,18 @@ function regexPlots(source: string): PinePlotMeta[] {
     const titleMatch = body.match(/,\s*(['"])((?:\\.|(?!\1).)*)\1/);
     const title = titleMatch?.[2]?.trim();
     if (!title) continue;
-    const named =
-      body.match(/color\s*=\s*color\.(\w+)/)?.[1] ??
-      body.match(/color\s*=\s*(#[0-9a-fA-F]{6,8})/)?.[1];
-    let color = PALETTE[plots.length % PALETTE.length];
-    if (named?.startsWith('#')) color = named;
-    else if (named) {
-      const namedColor = NAMED_COLORS[named.toLowerCase()];
-      if (namedColor) color = namedColor;
-    }
-    plots.push({ key: title, title, color });
+    const color = parsePlotColor(body) ?? PALETTE[plots.length % PALETTE.length];
+    const style = body.match(/style\s*=\s*plot\.style_(\w+)/)?.[1];
+    const width = Number(body.match(/linewidth\s*=\s*(\d+)/)?.[1]);
+    plots.push({
+      key: title,
+      title,
+      color,
+      ...(style ? { style } : {}),
+      ...(Number.isFinite(width) && width > 0
+        ? { width: Math.min(4, Math.max(1, width)) }
+        : {}),
+    });
   }
   return plots;
 }
@@ -209,7 +272,11 @@ function syntheticCandles(): {
   const candles = [];
   let price = 100;
   const start = Date.UTC(2024, 0, 1, 0, 0, 0);
-  for (let index = 0; index < 120; index += 1) {
+  // 试跑数据必须跨几天：时段类脚本（session / IVB / PDH）在当天开盘前全是 na，
+  // 只跑 10 小时会让它们的曲线元信息全部丢失，连带丢掉 plot.style_linebr
+  // 这类样式（图上时段之间的线就会连起来）。3 天 5 分钟足够覆盖常见时段。
+  const count = 3 * 24 * 12;
+  for (let index = 0; index < count; index += 1) {
     const open = price;
     const close = price + Math.sin(index / 6) * 1.2 + (index % 5 === 0 ? -0.9 : 0.6);
     candles.push({
@@ -362,7 +429,7 @@ async function scanWithPiner(source: string): Promise<PineScanResult> {
 }
 
 /**
- * 解析并保存一个 Pine 脚本。会先用 Piner 试跑 120 根模拟 K 线，确认能出图并拿到
+ * 解析并保存一个 Pine 脚本。会先用 Piner 试跑 3 天模拟 K 线，确认能出图并拿到
  * 曲线标题/颜色/样式；Piner 跑不了时直接报错，只有「0 曲线」才退回源码解析。
  */
 export async function savePineScript(source: string): Promise<PineScriptRecord> {

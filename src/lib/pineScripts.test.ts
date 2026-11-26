@@ -44,6 +44,91 @@ hline(100, 'Mid')
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '[]')).toHaveLength(1);
   });
 
+  it('captures linebr styles for session plots on multi-day synthetic bars', async () => {
+    const record = await savePineScript(`//@version=6
+indicator('时段区间', overlay=true)
+ses = input.session('0930-1000', '时段')
+in_ses = not na(time(timeframe.period, ses, 'America/New_York'))
+plot(in_ses ? high : na, '上沿', style=plot.style_linebr, color=color.green)
+plot(in_ses ? low : na, '下沿', style=plot.style_linebr, color=color.red)
+`);
+
+    // 时段类脚本当天开盘前全是 na；试跑数据不够长就只剩 na，样式会退化回折线，
+    // 图上各时段之间就会连起来（TradingView 是断开的）
+    expect(record.warning).toBeUndefined();
+    expect(record.plots.map((plot) => plot.title)).toEqual(['上沿', '下沿']);
+    expect(record.plots.map((plot) => plot.style)).toEqual(['linebr', 'linebr']);
+  });
+
+  it('keeps plot styles when falling back to source parsing', async () => {
+    const record = await savePineScript(`//@version=6
+indicator('全空曲线', overlay=true)
+plot(na, '空曲线', style=plot.style_linebr, color=color.new(color.green, 70))
+`);
+
+    // 试跑扫不出数值时退回源码解析，样式/颜色也必须从源码里带出来；
+    // color.new(color.green, 70) 不能被当成颜色名 "new"
+    expect(record.plots[0]).toMatchObject({
+      title: '空曲线',
+      style: 'linebr',
+      color: '#089981',
+    });
+  });
+
+  it('repairs plot styles in records saved before multi-day scanning', () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: 'legacy01',
+          title: 'IVB',
+          source: `//@version=6
+indicator('IVB', overlay=true)
+plot(close, '上沿', style=plot.style_linebr, color=color.new(color.green, 40))
+plot(close, '下沿', style=plot.style_linebr, color=color.new(color.red, 40))
+`,
+          savedAt: 1700000000000,
+          overlay: true,
+          plots: [
+            { key: '上沿', title: '上沿', color: '#2962FF' },
+            { key: '下沿', title: '下沿', color: '#FF6D00' },
+          ],
+          inputs: [],
+        },
+      ]),
+    );
+
+    const [record] = readPineScripts();
+    expect(record.plots.map((plot) => plot.style)).toEqual(['linebr', 'linebr']);
+    // 兜底调色板的颜色也要换回源码声明的颜色
+    expect(record.plots.map((plot) => plot.color)).toEqual(['#089981', '#F23645']);
+    // 修复结果写回存储，别每次读取都重算
+    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '[]');
+    expect(stored[0].plots[0].style).toBe('linebr');
+  });
+
+  it('leaves records alone when the source declares no plot style', () => {
+    const raw = JSON.stringify([
+      {
+        id: 'plain001',
+        title: 'SMA',
+        source: `//@version=6
+indicator('SMA')
+plot(close, 'Close')
+`,
+        savedAt: 1700000000000,
+        overlay: false,
+        plots: [{ key: 'plot_0', title: 'Close', color: '#2962FF' }],
+        inputs: [],
+      },
+    ]);
+    window.localStorage.setItem(STORAGE_KEY, raw);
+
+    // 普通 plot 本来就没有 style，不能被反复当成「待修复」写回
+    expect(readPineScripts()[0].plots[0].style).toBeUndefined();
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe(raw);
+  });
+
   it('keeps plot styles, widths and per-bar colors from the scan', async () => {
     const record = await savePineScript(`//@version=6
 indicator('样式扫描', overlay=false)

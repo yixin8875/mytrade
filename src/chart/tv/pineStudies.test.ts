@@ -99,6 +99,58 @@ plot(close, 'Close', color=fillCol)
     expect(state.panes[0].sources[1].state.inputs.颜色).toBe('#4CAF5033');
   });
 
+  it('repairs stale plot types saved by old chart templates', async () => {
+    const record = await savePineScript(`//@version=6
+indicator('时段线', overlay=true)
+ses = input.session('0930-1000', '时段')
+in_ses = not na(time(timeframe.period, ses, 'America/New_York'))
+plot(in_ses ? high : na, '上沿', style=plot.style_linebr, color=color.green)
+`);
+    const name = `mt-pine-${record.id}`;
+    const state = {
+      panes: [
+        {
+          sources: [
+            {
+              metaInfo: {
+                name,
+                defaults: {
+                  styles: { plot_0: { plottype: 0, linewidth: 1, color: '#2962FF' } },
+                },
+              },
+              state: { styles: { plot_0: { plottype: 0, color: '#2962FF' } } },
+            },
+            {
+              // 用户在设置里把样式改成柱状（1）的那一份不能被改回去
+              metaInfo: {
+                name,
+                defaults: {
+                  styles: { plot_0: { plottype: 1, linewidth: 2, color: '#FF6D00' } },
+                },
+              },
+              state: { styles: { plot_0: { plottype: 1, color: '#FF6D00' } } },
+            },
+          ],
+        },
+      ],
+    };
+
+    migratePineTemplate(state);
+    // 旧模板把 linebr 存成了普通折线（0），跨时段会连起来，要改回带断点折线（7）
+    expect(state.panes[0].sources[0].metaInfo.defaults.styles.plot_0.plottype).toBe(7);
+    expect(state.panes[0].sources[0].state.styles.plot_0.plottype).toBe(7);
+    // 兜底调色板的颜色也换回脚本声明的颜色
+    expect(state.panes[0].sources[0].metaInfo.defaults.styles.plot_0.color).toBe(
+      record.plots[0].color,
+    );
+    expect(state.panes[0].sources[0].state.styles.plot_0.color).toBe(record.plots[0].color);
+    // 用户自己选过的样式/颜色保持不变
+    expect(state.panes[0].sources[1].metaInfo.defaults.styles.plot_0).toMatchObject({
+      plottype: 1,
+      color: '#FF6D00',
+    });
+  });
+
   it('maps Pine sessions, timeframes and symbols to native library inputs', async () => {
     await savePineScript(`//@version=6
 indicator('原生输入', shorttitle='NATIVE', overlay=true)
