@@ -334,6 +334,9 @@ export function ChartPanel({
   const lastCrosshairStore = useRef(0);
   /** 指标自动保存轮询的定时器 */
   const saveTimerRef = useRef(0);
+  /** 指标快照的即时落盘：卸载/关闭窗口前补写一次，避免卡在轮询窗口里 */
+  const flushStudiesRef = useRef<(() => void) | null>(null);
+  const flushCleanupRef = useRef<(() => void) | null>(null);
 
   const [chart, setChart] = useState<IChartWidgetApi | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1178,13 +1181,21 @@ export function ChartPanel({
           last = readState()?.json ?? '';
         }
         // 指标增删/改参数没有稳定的公开事件，轮询快照即可（约 15KB，开销很小）
-        saveTimerRef.current = window.setInterval(() => {
+        const persistStudies = () => {
           if (applying || widgetRef.current !== widget) return;
           const next = readState();
           if (!next || next.json === last) return;
           last = next.json;
           writeChartState(slot, next.state);
-        }, 1500);
+        };
+        flushStudiesRef.current = persistStudies;
+        // 关闭窗口前补写一次：最后一次改动可能还卡在 1.5s 的轮询窗口里
+        const onPageHide = () => persistStudies();
+        window.addEventListener('pagehide', onPageHide);
+        flushCleanupRef.current = () => {
+          window.removeEventListener('pagehide', onPageHide);
+        };
+        saveTimerRef.current = window.setInterval(persistStudies, 1500);
 
         active.crossHairMoved().subscribe(null, (params) => {
           if (!params || typeof params.price !== 'number') return;
@@ -1292,6 +1303,11 @@ export function ChartPanel({
     () => () => {
       window.clearInterval(saveTimerRef.current);
       saveTimerRef.current = 0;
+      // 卸载（关窗口 / 切账户）前把最新指标组合写一次，别丢在轮询窗口里
+      flushCleanupRef.current?.();
+      flushCleanupRef.current = null;
+      flushStudiesRef.current?.();
+      flushStudiesRef.current = null;
       layerRef.current?.dispose();
       layerRef.current = null;
       sessionBoxesRef.current?.dispose();

@@ -436,11 +436,17 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
     </aside>
   );
 
-  if (tradePage) {
-    return (
-      <div className="relative flex h-full min-h-0 bg-background text-foreground">
-        {rail}
-        {railPinned && (
+  // 交易台和其它页共用同一套骨架，只换导航样式。
+  // 之前分两个 return：交易台分支多了一个浮层节点，children 容器的下标
+  // 在交易台是 2、其它页是 1，React 按位置复用不了节点，切页会把整个
+  // 交易台（含图表 widget）卸载重建，图上指标也就没了。
+  // 现在浮层收进固定占位里，children 容器始终是同一个位置的同一个节点。
+  return (
+    <div className="relative flex h-full min-h-0 bg-background text-foreground">
+      {tradePage ? rail : sidebar}
+      {/* 固定占位：导航浮层开合不改变 children 容器的下标 */}
+      <div className="contents">
+        {tradePage && railPinned && (
           <>
             <button
               className="absolute inset-0 z-30 cursor-default bg-black/20"
@@ -448,19 +454,10 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
               aria-label="收起导航"
               tabIndex={-1}
             />
-            <div className="absolute inset-y-0 left-14 z-40 shadow-lg">
-              {sidebar}
-            </div>
+            <div className="absolute inset-y-0 left-14 z-40 shadow-lg">{sidebar}</div>
           </>
         )}
-        <div className="flex min-w-0 flex-1 flex-col">{children}</div>
       </div>
-    );
-  }
-
-  return (
-    <div className="flex h-full min-h-0 bg-background text-foreground">
-      {sidebar}
       <div className="flex min-w-0 flex-1 flex-col">{children}</div>
     </div>
   );

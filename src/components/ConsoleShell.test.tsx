@@ -1,4 +1,5 @@
-import { render, screen, within } from '@testing-library/react';
+import { useEffect } from 'react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Position } from '../gateway/types';
@@ -70,6 +71,34 @@ describe('ConsoleShell', () => {
       await user.click(screen.getByRole('button', { name: new RegExp(label) }));
       expect(useApp.getState().page).toBe(page);
     }
+  });
+
+  // 概览 ↔ 交易台来回切时，图表所在的子树必须保持挂载：
+  // 一旦被卸载重建，图表 widget 会重新创建，指标/画线跟着丢。
+  it('切页与导航浮层开合都不卸载内容容器', () => {
+    let mounts = 0;
+    function ChartStub() {
+      useEffect(() => {
+        mounts += 1;
+      }, []);
+      return <div>chart-stub</div>;
+    }
+
+    render(
+      <ConsoleShell>
+        <ChartStub />
+      </ConsoleShell>,
+    );
+    expect(mounts).toBe(1);
+
+    act(() => useApp.getState().setPage('trade'));
+    act(() => useApp.getState().setPage('overview'));
+    act(() => useApp.getState().setPage('trade'));
+    act(() => useApp.getState().setRailPinned(true));
+    act(() => useApp.getState().setRailPinned(false));
+
+    expect(mounts).toBe(1);
+    expect(screen.getByText('chart-stub')).toBeInTheDocument();
   });
 
   it('复盘页侧栏显示「复盘模式 · 不连接实盘」', () => {
