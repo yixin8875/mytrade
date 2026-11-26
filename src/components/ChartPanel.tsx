@@ -27,7 +27,13 @@ import {
   alertsOnChart,
   drawingAlertPrice,
 } from '../lib/chartAlerts';
-import { templateStore } from '../chart/tv/templateStore';
+import {
+  chartSaveAdapter,
+  deserializeLineTools,
+  readSlotLineToolsRaw,
+  serializeLineTools,
+  writeSlotLineTools,
+} from '../chart/tv/lineToolStore';
 import { mountFloatingToolbarButtons, templatePanelSpot } from '../chart/tv/floatingTemplates';
 import {
   alertPanelSpot,
@@ -44,6 +50,7 @@ import type {
   IChartingLibraryWidget,
   IChartWidgetApi,
   LibrarySymbolInfo,
+  LineToolsAndGroupsState,
   PineJS,
   ResolutionString,
 } from '../../public/charting_library/charting_library';
@@ -336,6 +343,9 @@ export function ChartPanel({
   const saveTimerRef = useRef(0);
   /** 指标快照的即时落盘：卸载/关闭窗口前补写一次，避免卡在轮询窗口里 */
   const flushStudiesRef = useRef<(() => void) | null>(null);
+  /** 画线轮询的定时器与即时落盘 */
+  const lineTimerRef = useRef(0);
+  const flushLinesRef = useRef<(() => void) | null>(null);
   const flushCleanupRef = useRef<(() => void) | null>(null);
 
   const [chart, setChart] = useState<IChartWidgetApi | null>(null);
@@ -1007,14 +1017,38 @@ export function ChartPanel({
         // custom_resolutions：允许「添加自定义周期」；
         // study_templates：显示库自带的「指标模板」按钮（保存指标模板… / 我的模板），
         // 模板内容由 templateStore 存进 localStorage。
-        save_load_adapter: templateStore,
-        enabled_features: ['custom_resolutions', 'study_templates'],
+        // 画线（绘图对象）单独按图表保存：每张图一个适配器，库里传的
+        // layoutId/chartId 每次启动都会变，适配器改按 slot 落盘。
+        save_load_adapter: chartSaveAdapter(slot),
+        // custom_resolutions：允许在周期菜单里「添加自定义周期」；
+        // study_templates：显示库自带的「指标模板」按钮；
+        // saveload_separate_drawings_storage：画线与布局分开存，交给适配器。
+        enabled_features: [
+          'custom_resolutions',
+          'study_templates',
+          'saveload_separate_drawings_storage',
+        ],
+        // 用户改动图表后最多隔多久提示一次自动保存（秒），配合下面的订阅
+        auto_save_delay: 1,
         disabled_features:
           slot === 'main'
             ? []
             : ['use_localstorage_for_settings', 'save_chart_properties_to_local_storage'],
       });
       widgetRef.current = widget;
+      // 画线、指标参数等可撤销改动不会自己落盘：库只发 onAutoSaveNeeded，
+      // 收到后把指标快照和画线状态各补写一次（见 chartReady 里的 persist*）。
+      widget.subscribe('onAutoSaveNeeded', () => {
+        flushStudiesRef.current?.();
+        flushLinesRef.current?.();
+      });
+      // 关闭窗口前也补写一次，别让最后一次改动卡在轮询窗口里
+      const flushOnHide = () => {
+        flushStudiesRef.current?.();
+        flushLinesRef.current?.();
+      };
+      window.addEventListener('pagehide', flushOnHide);
+      flushCleanupRef.current = () => window.removeEventListener('pagehide', flushOnHide);
       // 模板 / 告警入口跟着选中画线的浮动工具栏出现，和 TradingView 原生位置一致
       floatingTemplateRef.current = mountFloatingToolbarButtons(
         host,
@@ -1189,13 +1223,45 @@ export function ChartPanel({
           writeChartState(slot, next.state);
         };
         flushStudiesRef.current = persistStudies;
-        // 关闭窗口前补写一次：最后一次改动可能还卡在 1.5s 的轮询窗口里
-        const onPageHide = () => persistStudies();
-        window.addEventListener('pagehide', onPageHide);
-        flushCleanupRef.current = () => {
-          window.removeEventListener('pagehide', onPageHide);
-        };
         saveTimerRef.current = window.setInterval(persistStudies, 1500);
+
+        // ---- 画线持久化：库需要布局服务才会调适配器保存，这里按 slot 自己快照 ----
+        const readLines = () => {
+          try {
+            return serializeLineTools(active.getLineToolsState());
+          } catch {
+            return null;
+          }
+        };
+        const savedLines = readSlotLineToolsRaw(slot);
+        if (savedLines) {
+          const state = deserializeLineTools(savedLines);
+          if (state?.sources && state.sources.size > 0) {
+            active
+              .applyLineToolsState(state as LineToolsAndGroupsState)
+              .catch(() => {
+                /* 旧格式/不兼容时从空白图开始 */
+              });
+          }
+        }
+        // 恢复期间别把还没贴上的画线当成「用户删光了」写回去
+        let applyingLines = true;
+        let linesJson = JSON.stringify(readLines());
+        window.setTimeout(() => {
+          applyingLines = false;
+          linesJson = JSON.stringify(readLines());
+        }, 800);
+        const persistLines = () => {
+          if (applyingLines || widgetRef.current !== widget) return;
+          const next = readLines();
+          if (!next) return;
+          const json = JSON.stringify(next);
+          if (json === linesJson) return;
+          linesJson = json;
+          writeSlotLineTools(slot, next);
+        };
+        flushLinesRef.current = persistLines;
+        lineTimerRef.current = window.setInterval(persistLines, 2000);
 
         active.crossHairMoved().subscribe(null, (params) => {
           if (!params || typeof params.price !== 'number') return;
@@ -1303,11 +1369,15 @@ export function ChartPanel({
     () => () => {
       window.clearInterval(saveTimerRef.current);
       saveTimerRef.current = 0;
-      // 卸载（关窗口 / 切账户）前把最新指标组合写一次，别丢在轮询窗口里
+      window.clearInterval(lineTimerRef.current);
+      lineTimerRef.current = 0;
+      // 卸载（关窗口 / 切账户）前把最新指标组合和画线写一次，别丢在轮询窗口里
       flushCleanupRef.current?.();
       flushCleanupRef.current = null;
       flushStudiesRef.current?.();
       flushStudiesRef.current = null;
+      flushLinesRef.current?.();
+      flushLinesRef.current = null;
       layerRef.current?.dispose();
       layerRef.current = null;
       sessionBoxesRef.current?.dispose();
