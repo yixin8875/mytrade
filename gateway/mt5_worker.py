@@ -382,7 +382,7 @@ class Mt5Worker(
             "risk": self._risk,
             "serverTime": int(time.time()),
             "serverOffset": int(self._server_offset),
-            "version": "0.9.9",
+            "version": "0.9.10",
             # 启动时的 SQLite 完整性自检结果（后台线程执行）
             "database": self.database_status(),
             # 运行观测：队列积压、慢命令、当前正在执行的命令、事件循环上一轮耗时
