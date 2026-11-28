@@ -90,13 +90,13 @@ export interface TrailingPlan {
   activatedAt: number;
 }
 
-/** 分批止盈的一档：价格触及时平掉当时剩余仓位的百分比 */
+/** 分批止盈的一档：价格触及时平掉开仓手数的百分比（旧计划按当时剩余仓位） */
 export interface PositionPlanStep {
   /** 稳定 id，拖拽/删除按它定位 */
   id: string;
   /** 触发价（服务端已按 tick 对齐） */
   price: number;
-  /** 占当时剩余仓位的百分比（1–99） */
+  /** 占开仓手数的百分比（1–99）；旧计划占当时剩余仓位 */
   closePercent: number | null;
   /** 平仓后把止损移到开仓价 */
   moveBreakeven: boolean;
@@ -113,6 +113,13 @@ export interface PositionPlan {
   /** 1R 的价格距离（|入场 - 初始止损|）；0 表示没有止损基准 */
   risk: number;
   side: Side;
+  /** 建计划时的开仓手数；旧计划没有记录时为 null */
+  initialVolume?: number | null;
+  /**
+   * initial = 每档比例占开仓手数（新计划）；
+   * remaining = 旧口径，占当时剩余仓位。
+   */
+  volumeBase?: 'initial' | 'remaining';
   steps: PositionPlanStep[];
   templateId?: string | null;
   templateName?: string | null;

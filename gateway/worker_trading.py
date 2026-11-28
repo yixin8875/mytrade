@@ -500,6 +500,8 @@ class WorkerTrading:
                         "entry": entry,
                         "risk": risk,
                         "side": a["side"],
+                        "initialVolume": float(payload.get("volume") or a["volume"] or 0),
+                        "volumeBase": "initial",
                         "steps": steps,
                         "next": 0.0,
                         "breakevenOffsetPoints": self._plan_offset_points(
@@ -928,6 +930,9 @@ class WorkerTrading:
             # 旧版 autoBreakeven 都来自模板；手动计划一定会带 source 落盘
             plan.setdefault("source", "template")
             plan.setdefault("breakevenOffsetPoints", 0.0)
+            # 升级前的计划按「占当时剩余仓位」执行，保持原有行为
+            plan.setdefault("volumeBase", "remaining")
+            plan.setdefault("initialVolume", None)
             steps = plan.get("steps")
             if isinstance(steps, list):
                 for index, step in enumerate(steps):
@@ -983,7 +988,20 @@ class WorkerTrading:
                     }
                 )
         out.sort(key=lambda step: step["atR"])
-        return out[:MAX_PLAN_STEPS]
+        out = out[:MAX_PLAN_STEPS]
+        total = sum(
+            float(step["closePercent"])
+            for step in out
+            if step.get("closePercent") is not None
+        )
+        if total > 100.0:
+            # 旧模板按「占剩余」配置时合计可能超过 100%；新口径按开仓手数，
+            # 这里按比例缩放到 100%，保留各档的相对份额。
+            factor = 100.0 / total
+            for step in out:
+                if step.get("closePercent") is not None:
+                    step["closePercent"] = round(float(step["closePercent"]) * factor, 2)
+        return out
 
     @staticmethod
     def _clean_step_id(raw: Any) -> str:
@@ -1060,9 +1078,16 @@ class WorkerTrading:
         return sorted(steps, key=key)
 
     def _auto_partial_close(
-        self, ticket: int, percent: Any, comment: str = "tpl-partial"
+        self,
+        ticket: int,
+        percent: Any,
+        comment: str = "tpl-partial",
+        plan: dict | None = None,
     ) -> float | None:
-        """按当前剩余仓位的百分比平仓；仓位小到拆不开时返回 None（只做止损动作）。"""
+        """按比例平仓：新计划占开仓手数，旧计划仍占当时剩余仓位。
+
+        仓位小到拆不开时返回 None（只做止损动作）。
+        """
         try:
             pct = float(percent)
         except (TypeError, ValueError):
@@ -1080,9 +1105,26 @@ class WorkerTrading:
         volume = float(position.volume)
         step = float(getattr(info, "volume_step", 0) or 0.01)
         min_vol = max(float(getattr(info, "volume_min", 0) or 0), step)
-        target = round_volume(volume * pct / 100.0, step)
-        if target < min_vol - 1e-9 or target > volume - min_vol + 1e-9:
+        base = volume
+        initial_based = False
+        if isinstance(plan, dict):
+            try:
+                initial = float(plan.get("initialVolume") or 0)
+            except (TypeError, ValueError):
+                initial = 0.0
+            if str(plan.get("volumeBase") or "remaining") == "initial" and initial > 0:
+                base = initial
+                initial_based = True
+        target = min(round_volume(base * pct / 100.0, step), volume)
+        if target < min_vol - 1e-9:
             return None
+        if volume - target < min_vol - 1e-9:
+            if initial_based:
+                # 剩下的不足最小手数：这一档把余量一起平掉，避免留一个平不掉的尾巴
+                target = volume
+            else:
+                # 旧计划保持原有行为：平不干净就不平
+                return None
         buy = int(position.type) == 0
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -1149,6 +1191,8 @@ class WorkerTrading:
                 "entry": entry,
                 "risk": risk,
                 "side": side,
+                "initialVolume": float(position.get("volume") or 0),
+                "volumeBase": "initial",
                 "steps": steps,
                 "next": 0.0,
                 "breakevenOffsetPoints": self._plan_offset_points(
@@ -1407,6 +1451,9 @@ class WorkerTrading:
             "entry": entry,
             "risk": risk,
             "side": "buy" if int(getattr(position, "type", 0)) == 0 else "sell",
+            # 新计划按开仓手数记比例；旧计划恢复时补 volumeBase=remaining
+            "initialVolume": float(getattr(position, "volume", 0) or 0),
+            "volumeBase": "initial",
             "steps": [],
             "next": 0.0,
             "breakevenOffsetPoints": 0.0,
@@ -1482,6 +1529,29 @@ class WorkerTrading:
             raise GatewayError("BAD_PERCENT", "平仓比例需在 1–99% 之间")
         return round(percent, 2)
 
+    @staticmethod
+    def _validate_plan_total(
+        plan: dict, percent: float, exclude_step_id: str | None = None
+    ) -> None:
+        """新口径下未完成档位的比例合计不能超过 100%；旧计划按剩余仓位，不限制。"""
+        if str(plan.get("volumeBase") or "remaining") != "initial":
+            return
+        total = percent
+        for step in WorkerTrading._plan_steps(plan):
+            if exclude_step_id and str(step.get("id")) == exclude_step_id:
+                continue
+            if step.get("done") or step.get("skipped"):
+                continue
+            other = step.get("closePercent")
+            if other is None:
+                continue
+            try:
+                total += float(other)
+            except (TypeError, ValueError):
+                continue
+        if total > 100.0001:
+            raise GatewayError("PLAN_PERCENT_SUM", "各档合计不能超过 100%")
+
     def _plan_for_edit(self, ticket: int, *, require: bool = False) -> tuple[Any, dict]:
         position = self._plan_position(ticket)
         plan = self._auto_be.get(ticket)
@@ -1514,6 +1584,9 @@ class WorkerTrading:
             "entry": float(plan.get("entry") or 0),
             "risk": float(plan.get("risk") or 0),
             "side": str(plan.get("side") or "buy"),
+            # initialVolume/volumeBase 决定前端预览与执行口径；旧计划没有时为 null/remaining
+            "initialVolume": float(plan.get("initialVolume") or 0) or None,
+            "volumeBase": str(plan.get("volumeBase") or "remaining"),
             "steps": out,
             "breakevenOffsetPoints": self._plan_offset_points(
                 plan.get("breakevenOffsetPoints")
@@ -1543,6 +1616,7 @@ class WorkerTrading:
         info = self._ensure_symbol(position.symbol)
         price = self._validate_plan_price(plan, position, info, p.get("price"))
         percent = self._validate_plan_percent(p.get("closePercent"))
+        self._validate_plan_total(plan, percent)
         step = {
             "id": uuid.uuid4().hex[:8],
             "price": price,
@@ -1588,7 +1662,9 @@ class WorkerTrading:
                 plan, position, info, p.get("price"), step_id=step_id
             )
         if "closePercent" in p and p.get("closePercent") is not None:
-            step["closePercent"] = self._validate_plan_percent(p.get("closePercent"))
+            percent = self._validate_plan_percent(p.get("closePercent"))
+            self._validate_plan_total(plan, percent, step_id)
+            step["closePercent"] = percent
         if "moveBreakeven" in p:
             step["moveBreakeven"] = bool(p.get("moveBreakeven"))
         plan["steps"] = self._sort_plan_steps(steps, plan)

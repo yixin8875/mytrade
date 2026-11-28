@@ -603,3 +603,46 @@ if (buy and price < trigger) or (not buy and price > trigger):
 - 命令面板里的「分批止盈」入口。
 - 第 11 节第 1 条（只读模式是否放行只减仓动作）仍未确认。
 - 真实账户上的手工验收（模拟账户到价、重启恢复、拖拽回执）尚未执行。
+
+---
+
+## 14. 分批止盈改为「按开仓手数计比例」（2026-11-28）
+
+### 14.1 问题
+
+第 13 节里 `closePercent` 作用于**当时剩余仓位**，所以 1 手、两档都填 50% 时实际是 0.5 → 0.25 → 余下 0.25，越往后每档越小；用户想要的是「分批两档 + 最终止盈 = 三份，每份 1/3」。
+
+### 14.2 新口径
+
+- 每档 `closePercent` 是**开仓手数**（`initialVolume`）的百分比，不再按剩余手数递减。
+- 最终止盈仍是全平出口，拿走剩下的部分，并在均分时**算一份**（两档 + 止盈 → 每档 1/3）。
+- 各档合计不得超过 100%；模板与旧数据的合计超过 100% 时按比例缩放（保留两位小数）。
+- 单档目标手数向下取整到 `volume_step`；若取整后低于 `volume_min` 则跳过该档；若剩余不足 `volume_min`，该档把余量一起平掉（新口径），旧口径保持「平不干净就不平」。
+- 兼容：已在跑的旧计划恢复时标记 `volumeBase: "remaining"`、`initialVolume: null`，继续按剩余仓位计算；回放里没有 `initialVolume` 的持仓同样走旧算法。
+
+### 14.3 改动位置
+
+| 层 | 文件 | 内容 |
+| --- | --- | --- |
+| 网关 | `gateway/worker_trading.py` | `_auto_partial_close` 增加 `plan` 参数与 `initial_based` 余量合并；`_plan_base`/市价单/挂单计划补 `initialVolume`、`volumeBase`；`_restore_auto_be` 旧计划补默认值；`_normalize_plan_steps` 合计 > 100 时缩放；新增 `_validate_plan_total`（`PLAN_PERCENT_SUM`），`_plan_add`/`_plan_update` 调用 |
+| 网关 | `gateway/worker_risk.py` | 执行循环把 `plan` 传给 `_auto_partial_close` |
+| 前端 | `src/gateway/types.ts` | `PositionPlan.initialVolume`、`volumeBase` |
+| 前端 | `src/lib/plan.ts` | `equalSharePercent`；`validatePlanStep` 合计校验（仅新口径）；`estimateStepLots` 按 `initialVolume` 预估并支持余量合并 |
+| 前端 | `src/components/TradeDock.tsx` | 「加一档」按份数均分并同步旧档，「均分」按钮，标题提示比例口径 |
+| 前端 | `src/components/TemplateEditor.tsx` | 「均分」按钮；添加阶段时把已有平仓阶段一起均分；说明文案 |
+| 前端 | `src/lib/template.ts` | `normalizeTemplateSteps` 合计 > 100 时按比例缩放 |
+| 回放 | `src/replay/types.ts`、`src/replay/engine.ts` | 开仓记录 `initialVolume`，阶段执行按开仓手数计算；旧持仓保持旧行为 |
+| 测试 | `gateway/tests/test_ladder.py`、`test_plans.py`、`src/lib/plan.test.ts`、`src/lib/template.test.ts`、`src/replay/engine.test.ts` | 1/3 均分、合计校验、缩放、余量合并、旧计划兼容 |
+| 文档 | `README.md`、`docs/USER_GUIDE.md` | 功能清单与操作规则改为新口径 |
+
+### 14.4 验证结果
+
+- `npx tsc --noEmit`：通过。
+- 后端 `pytest -q`：711 项通过。
+- 前端 `vitest run`：833 项通过（89 个文件）。
+
+### 14.5 语义边界
+
+- 新口径下「均分」只在**未完成**的档位上操作；已完成/已跳过的档不参与份数，也不会被改写。
+- 模板编辑器里的份数 = 设置了比例的平仓阶段数 +（止盈 R > 0 ? 1 : 0）。
+- 面板里份数 = 未完成档位数 +（持仓有 TP ? 1 : 0）。

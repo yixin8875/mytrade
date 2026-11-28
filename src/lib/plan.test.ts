@@ -3,6 +3,7 @@ import { GOLD_INFO } from '../replay/testUtils';
 import type { Position, PositionPlan, PositionPlanStep } from '../gateway/types';
 import {
   MAX_PLAN_STEPS,
+  equalSharePercent,
   estimateStepLots,
   nextStepPrice,
   planSummary,
@@ -137,6 +138,30 @@ describe('validatePlanStep', () => {
       validatePlanStep({ price: 110, closePercent: 100 }, makePosition(), null, GOLD_INFO),
     ).toBe('平仓比例需在 1–99% 之间');
   });
+
+  it('新口径下各档合计不能超过 100%', () => {
+    const plan = makePlan([makeStep({ closePercent: 60 })], {
+      volumeBase: 'initial',
+      initialVolume: 1,
+    });
+    expect(
+      validatePlanStep({ price: 120, closePercent: 50 }, makePosition(), plan, GOLD_INFO),
+    ).toBe('各档合计不能超过 100%');
+  });
+
+  it('旧计划不受合计限制', () => {
+    const plan = makePlan([makeStep({ closePercent: 60 })], { volumeBase: 'remaining' });
+    expect(
+      validatePlanStep({ price: 120, closePercent: 50 }, makePosition(), plan, GOLD_INFO),
+    ).toBeNull();
+  });
+});
+
+describe('equalSharePercent', () => {
+  it('两档 + 最终止盈按三份均分', () => {
+    expect(equalSharePercent(3)).toBe(33.33);
+    expect(equalSharePercent(4)).toBe(25);
+  });
 });
 
 describe('estimateStepLots', () => {
@@ -173,6 +198,36 @@ describe('estimateStepLots', () => {
     expect(rows[0].lots).toBe(0);
     expect(rows[1].lots).toBe(0.5);
     expect(remaining).toBe(0.5);
+  });
+
+  it('新口径按开仓手数均分：1 手两档各 0.33', () => {
+    const plan = makePlan(
+      [
+        makeStep({ id: 'a', price: 110, closePercent: 33.33 }),
+        makeStep({ id: 'b', price: 120, closePercent: 33.33 }),
+      ],
+      { volumeBase: 'initial', initialVolume: 1 },
+    );
+
+    const { rows, remaining } = estimateStepLots(1, plan.steps, GOLD_INFO, 'buy', plan);
+
+    expect(rows.map((row) => [row.id, row.lots])).toEqual([
+      ['a', 0.33],
+      ['b', 0.33],
+    ]);
+    expect(remaining).toBeCloseTo(0.34, 6);
+  });
+
+  it('手动减过仓后按剩余封顶', () => {
+    const plan = makePlan([makeStep({ closePercent: 50 })], {
+      volumeBase: 'initial',
+      initialVolume: 1,
+    });
+
+    const { rows, remaining } = estimateStepLots(0.2, plan.steps, GOLD_INFO, 'buy', plan);
+
+    expect(rows[0].lots).toBeCloseTo(0.2, 6);
+    expect(remaining).toBe(0);
   });
 });
 

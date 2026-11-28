@@ -8,6 +8,7 @@ import {
   fmtNum,
   normalizeTemplateSteps,
 } from '../lib/template';
+import { equalSharePercent } from '../lib/plan';
 import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
 import { SegmentedControl, SegmentedControlItem } from './ui/segmented-control';
@@ -192,11 +193,28 @@ export function TemplateEditor({
     });
   };
 
+  /** 有最终止盈时它也算一份：两档 + 止盈 = 每档 1/3 */
+  const equalizeSteps = () => {
+    const closing = template.steps.filter((step) => step.closePercent != null).length;
+    if (closing === 0) return;
+    const percent = equalSharePercent(closing + (template.rewardR > 0 ? 1 : 0));
+    updateTemplate(template.id, {
+      steps: template.steps.map((step) =>
+        step.closePercent == null ? step : { ...step, closePercent: percent },
+      ),
+    });
+  };
+
   const addStep = () => {
+    const closing = template.steps.filter((step) => step.closePercent != null).length;
+    const shares = closing + 1 + (template.rewardR > 0 ? 1 : 0);
+    const percent = equalSharePercent(shares);
     const last = template.steps[template.steps.length - 1];
     const steps = normalizeTemplateSteps([
-      ...template.steps,
-      { atR: last ? last.atR + 1 : 1, closePercent: 50, moveBreakeven: true },
+      ...template.steps.map((step) =>
+        step.closePercent == null ? step : { ...step, closePercent: percent },
+      ),
+      { atR: last ? last.atR + 1 : 1, closePercent: percent, moveBreakeven: true },
     ]);
     updateTemplate(template.id, { steps });
   };
@@ -323,25 +341,38 @@ export function TemplateEditor({
             <div className={cn('text-[12px]', styles.ink)}>分批止盈</div>
             {!compact && (
               <div className={cn('mt-1 text-[11px] leading-relaxed', styles.muted)}>
-                到某个 R 时平掉当时剩余仓位的一部分，再按需把止损移到开仓价；按 R 从小到大执行。
+                到某个 R 时平掉开仓手数的一部分（最终止盈算一份），再按需把止损移到开仓价；
+                按 R 从小到大执行；合计超过 100% 时按比例缩放。
               </div>
             )}
           </div>
-          <Button
-            variant="outline"
-            size="xs"
-            onClick={addStep}
-            disabled={template.steps.length >= MAX_TEMPLATE_STEPS}
-            title={
-              template.steps.length >= MAX_TEMPLATE_STEPS
-                ? `最多 ${MAX_TEMPLATE_STEPS} 个阶段`
-                : '添加一个阶段'
-            }
-            className="h-7 shrink-0 gap-1 px-2.5 text-[11px] font-normal"
-          >
-            <Plus size={12} strokeWidth={1.8} className="size-3" />
-            添加阶段
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={equalizeSteps}
+              disabled={!template.steps.some((step) => step.closePercent != null)}
+              title="按开仓手数均分；有最终止盈时它也占一份"
+              className="h-7 px-2 text-[11px] font-normal text-muted-foreground"
+            >
+              均分
+            </Button>
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={addStep}
+              disabled={template.steps.length >= MAX_TEMPLATE_STEPS}
+              title={
+                template.steps.length >= MAX_TEMPLATE_STEPS
+                  ? `最多 ${MAX_TEMPLATE_STEPS} 个阶段`
+                  : '添加一个阶段'
+              }
+              className="h-7 shrink-0 gap-1 px-2.5 text-[11px] font-normal"
+            >
+              <Plus size={12} strokeWidth={1.8} className="size-3" />
+              添加阶段
+            </Button>
+          </div>
         </div>
 
         <div className={cn('mt-3', compact ? 'space-y-1.5' : 'space-y-2')}>
@@ -389,7 +420,7 @@ export function TemplateEditor({
                 step={5}
                 value={draft.closePercent}
                 placeholder="—"
-                title="平掉当时剩余仓位的百分比；留空 = 只动止损"
+                title="占开仓手数的百分比；留空 = 只动止损"
                 onChange={(event) => {
                   const value = event.target.value;
                   setDrafts((list) =>

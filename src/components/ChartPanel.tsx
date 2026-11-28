@@ -863,7 +863,13 @@ export function ChartPanel({
     // 分批止盈：每档一个绿色小块，可直接上下拖动或点 ✕ 删除
     const planSteps = activeSteps(position.plan);
     if (planSteps.length > 0) {
-      const lots = estimateStepLots(position.volume, planSteps, info, position.side);
+      const lots = estimateStepLots(
+        position.volume,
+        planSteps,
+        info,
+        position.side,
+        position.plan,
+      );
       const lotsById = new Map(lots.rows.map((row) => [row.id, row]));
       for (const planStep of planSteps) {
         const key = `plan:${position.ticket}:${planStep.id}`;

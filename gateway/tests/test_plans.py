@@ -131,10 +131,30 @@ def test_normalize_clamps_close_percent():
         {"atR": 3, "closePercent": -5},
         {"atR": 4, "closePercent": "abc"},
         {"atR": 5, "closePercent": "50"},
-        {"atR": 6, "closePercent": 99.9},
+        {"atR": 6, "closePercent": 49.9},
     ]
     steps = Mt5Worker._normalize_plan_steps(raw)
-    assert [step["closePercent"] for step in steps] == [None, None, None, None, 50.0, 99.9]
+    assert [step["closePercent"] for step in steps] == [None, None, None, None, 50.0, 49.9]
+
+
+def test_normalize_scales_percents_above_100():
+    """旧模板按剩余仓位配置，合计可能超过 100%；新口径按开仓手数，按比例缩放。"""
+    steps = Mt5Worker._normalize_plan_steps(
+        [
+            {"atR": 1, "closePercent": 50},
+            {"atR": 2, "closePercent": 50},
+            {"atR": 3, "closePercent": 50},
+        ]
+    )
+    assert [step["closePercent"] for step in steps] == [33.33, 33.33, 33.33]
+
+
+def test_restore_marks_old_plans_as_remaining_base():
+    plans = Mt5Worker._restore_auto_be(
+        {"11": {"entry": 1.1, "risk": 0.1, "side": "buy", "steps": []}}
+    )
+    assert plans[11]["volumeBase"] == "remaining"
+    assert plans[11]["initialVolume"] is None
 
 
 def test_normalize_rounds_r_and_caps_at_eight_steps():

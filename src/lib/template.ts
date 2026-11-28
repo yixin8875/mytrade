@@ -63,7 +63,7 @@ export function templateSummary(template: TradeTemplate, currency = ''): string 
  */
 export function normalizeTemplateSteps(raw: unknown): TemplateStep[] {
   if (!Array.isArray(raw)) return [];
-  return raw
+  const steps = raw
     .map((item) => {
       const source = (item ?? {}) as Record<string, unknown>;
       const atR = Number(source.atR);
@@ -74,6 +74,18 @@ export function normalizeTemplateSteps(raw: unknown): TemplateStep[] {
     .filter((item): item is TemplateStep => item !== null)
     .sort((a, b) => a.atR - b.atR)
     .slice(0, MAX_TEMPLATE_STEPS);
+  // 旧模板按「占剩余仓位」配置，合计可能超过 100%；新口径占开仓手数，
+  // 按比例缩放到 100%，保留各档的相对份额。
+  const total = steps.reduce((sum, step) => sum + (step.closePercent ?? 0), 0);
+  if (total > 100) {
+    const factor = 100 / total;
+    for (const step of steps) {
+      if (step.closePercent != null) {
+        step.closePercent = Number((step.closePercent * factor).toFixed(2));
+      }
+    }
+  }
+  return steps;
 }
 
 export interface TpTargetInput {

@@ -12,7 +12,13 @@ import {
   signedClass,
 } from '../lib/format';
 import { validateStops } from '../lib/stops';
-import { MAX_PLAN_STEPS, nextStepPrice, validatePlanStep } from '../lib/plan';
+import {
+  activeSteps,
+  equalSharePercent,
+  MAX_PLAN_STEPS,
+  nextStepPrice,
+  validatePlanStep,
+} from '../lib/plan';
 import { cancelOrderWithUndo } from '../lib/orderActions';
 import type {
   BreakevenResult,
@@ -343,16 +349,63 @@ export function TradeDock() {
     }
   };
 
+  /** 把未完成的档位改成等分：有最终止盈时它也算一份 */
+  const equalizePlan = async (position: Position) => {
+    const active = activeSteps(position.plan);
+    if (active.length === 0) {
+      notify('info', '还没有分批档位');
+      return;
+    }
+    const shares = active.length + (position.tp != null ? 1 : 0);
+    const percent = equalSharePercent(shares);
+    setBusy(position.ticket);
+    try {
+      for (const step of active) {
+        if (
+          step.closePercent == null ||
+          Math.abs(step.closePercent - percent) < 0.005
+        ) {
+          continue;
+        }
+        await gateway.call('position.plan.update', {
+          ticket: position.ticket,
+          stepId: step.id,
+          closePercent: percent,
+        });
+      }
+      notify(
+        'success',
+        `已均分：每档 ${percent}%${position.tp != null ? '，最终止盈拿剩余' : ''}`,
+      );
+    } catch (error) {
+      notify('error', (error as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const addPlanStep = async (position: Position) => {
     const info = infoOf(position.symbol);
     const plan = position.plan ?? null;
-    const active = (plan?.steps ?? []).filter((item) => !item.done && !item.skipped).length;
-    if (active >= MAX_PLAN_STEPS) {
+    const active = activeSteps(plan);
+    if (active.length >= MAX_PLAN_STEPS) {
       notify('info', `最多添加 ${MAX_PLAN_STEPS} 档分批止盈`);
       return;
     }
     const price = nextStepPrice(position, plan, info);
-    const problem = validatePlanStep({ price, closePercent: 50 }, position, plan, info);
+    // 新增后按「档位 + 最终止盈」均分：两档 + 止盈就是每档 1/3
+    const shares = active.length + 1 + (position.tp != null ? 1 : 0);
+    const percent = equalSharePercent(shares);
+    // 校验时把现有档位虚拟成目标比例，否则合计会误判超过 100%
+    const draftPlan = plan
+      ? {
+          ...plan,
+          steps: plan.steps.map((step) =>
+            step.done || step.skipped ? step : { ...step, closePercent: percent },
+          ),
+        }
+      : null;
+    const problem = validatePlanStep({ price, closePercent: percent }, position, draftPlan, info);
     if (problem) {
       notify('error', problem);
       return;
@@ -362,10 +415,27 @@ export function TradeDock() {
       await gateway.call('position.plan.add', {
         ticket: position.ticket,
         price,
-        closePercent: 50,
+        closePercent: percent,
         breakevenOffsetPoints: breakevenOffset,
       });
-      notify('success', `已添加分批：${fmtPrice(price, info?.digits ?? 5)} 平 50%`);
+      // 新增一档后把已有档位一起均分，避免新档按 1/3、旧档还停在 50%
+      for (const step of active) {
+        if (
+          step.closePercent == null ||
+          Math.abs(step.closePercent - percent) < 0.005
+        ) {
+          continue;
+        }
+        await gateway.call('position.plan.update', {
+          ticket: position.ticket,
+          stepId: step.id,
+          closePercent: percent,
+        });
+      }
+      notify(
+        'success',
+        `已添加分批：${fmtPrice(price, info?.digits ?? 5)}，每档 ${percent}%`,
+      );
     } catch (error) {
       notify('error', (error as Error).message);
     } finally {
@@ -739,7 +809,10 @@ export function TradeDock() {
                         </div>
 
                         <div>
-                          <div className="mb-1 flex items-center gap-1.5 text-[10px] text-muted-foreground/60">
+                          <div
+                            className="mb-1 flex items-center gap-1.5 text-[10px] text-muted-foreground/60"
+                            title="比例按开仓手数计；有最终止盈时它也算一份"
+                          >
                             分批止盈
                             {position.plan && position.plan.steps.length > 0 && (
                               <span className="text-muted-foreground">
@@ -760,6 +833,19 @@ export function TradeDock() {
                               className="px-2 text-[10px]"
                             >
                               ＋ 加一档
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              onClick={() => void equalizePlan(position)}
+                              disabled={
+                                busy === position.ticket ||
+                                !position.plan?.steps.some((step) => !step.done && !step.skipped)
+                              }
+                              title="按开仓手数均分；有最终止盈时它也占一份"
+                              className="px-1.5 text-[10px] text-muted-foreground"
+                            >
+                              均分
                             </Button>
                             {position.plan && position.plan.steps.length > 0 && (
                               <Button
@@ -785,7 +871,8 @@ export function TradeDock() {
                                   step.done ? '已执行' : step.skipped ? '已跳过' : '等待触发'
                                 }
                               >
-                                {fmtPrice(step.price, digits)} · {step.closePercent ?? 50}%
+                                {fmtPrice(step.price, digits)} ·{' '}
+                                {Number((step.closePercent ?? 50).toFixed(2))}%
                                 {!step.done && !step.skipped && (
                                   <button
                                     onClick={() => void removePlanStep(position, step)}

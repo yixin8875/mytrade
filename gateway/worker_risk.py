@@ -522,7 +522,7 @@ class WorkerRisk:
                         else None
                     )
                     if percent is not None:
-                        closed = self._auto_partial_close(ticket, percent, comment)
+                        closed = self._auto_partial_close(ticket, percent, comment, plan)
             except Exception as exc:  # noqa: BLE001 - 单条计划失败不能中断整轮轮询
                 plan["next"] = time.monotonic() + 3.0
                 self.store.audit(

@@ -131,6 +131,7 @@ function openPosition(
     id: replayId('pos'),
     side: order.side,
     volume,
+    initialVolume: volume,
     entry,
     sl: order.sl,
     tp: order.tp,
@@ -259,10 +260,23 @@ function applyTemplateSteps(
     const ts = bar.time + 60;
     if (step.closePercent != null) {
       const before = position.volume;
-      const closeVolume = Math.min(
-        roundVolume((before * step.closePercent) / 100, info),
-        before,
-      );
+      let closeVolume: number;
+      if (position.initialVolume != null && position.initialVolume > 0) {
+        // 新口径按开仓手数计比例，和实盘网关保持一致
+        const stepSize = info.volumeStep || 0.01;
+        const decimals = stepSize >= 1 ? 0 : stepSize >= 0.1 ? 1 : stepSize >= 0.01 ? 2 : 3;
+        const raw =
+          Math.floor((position.initialVolume * step.closePercent) / 100 / stepSize + 1e-9) *
+          stepSize;
+        closeVolume = Number(Math.min(raw, before).toFixed(decimals));
+        if (closeVolume < info.minVolume - 1e-9) closeVolume = 0; // 拆不开，本档跳过
+        if (closeVolume > 0 && before - closeVolume < info.minVolume - 1e-9) {
+          closeVolume = before; // 余量不足最小手数，一档平掉
+        }
+      } else {
+        // 升级前创建的仓位沿用「占当时剩余」的旧口径
+        closeVolume = Math.min(roundVolume((before * step.closePercent) / 100, info), before);
+      }
       if (closeVolume > 0) {
         closePosition(session, position.id, closeVolume, trigger, ts, 'template');
         events.push(`模板 ${step.atR}R 平 ${step.closePercent}%`);

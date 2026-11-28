@@ -966,6 +966,28 @@ describe('模板阶段的更多交易路径', () => {
     expect(session.trades.map((item) => item.volume)).toEqual([0.5, 0.25]);
   });
 
+  it('按开仓手数均分：两档 + 止盈各 1/3', () => {
+    const session = makeSession();
+    addPosition(session, {
+      volume: 1,
+      initialVolume: 1,
+      entry: 2000,
+      initialRisk: 1000,
+      initialRiskPrice: 10,
+      steps: [
+        { atR: 1, closePercent: 33.33, moveBreakeven: false },
+        { atR: 2, closePercent: 33.33, moveBreakeven: false },
+      ],
+    });
+
+    stepSession(session, makeBar(T0, 2000, 2011, 1999, 2010));
+    expect(session.trades.map((item) => item.volume)).toEqual([0.33]);
+
+    stepSession(session, makeBar(T0 + 60, 2010, 2021, 2009, 2020));
+    expect(session.trades.map((item) => item.volume)).toEqual([0.33, 0.33]);
+    expect(session.positions[0].volume).toBeCloseTo(0.34, 2);
+  });
+
   it('平仓比例换算后不足最小手数时按最小手数平光', () => {
     const session = makeSession();
     addPosition(session, {

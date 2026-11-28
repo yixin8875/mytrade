@@ -137,6 +137,13 @@ export function validatePlanStep(
   if (!beforeTp(input.price, position, side, info)) {
     return '该档在最终止盈之后，不会触发';
   }
+  // 新口径按开仓手数计比例，各档合计不能超过 100%；旧计划保持原有语义
+  if (plan?.volumeBase !== 'remaining') {
+    const used = activeSteps(plan)
+      .filter((step) => step.id !== excludeStepId && step.closePercent != null)
+      .reduce((sum, step) => sum + (step.closePercent ?? 0), 0);
+    if (used + percent > 100.0001) return '各档合计不能超过 100%';
+  }
   const duplicate = activeSteps(plan).some(
     (step) =>
       step.id !== excludeStepId &&
@@ -146,17 +153,30 @@ export function validatePlanStep(
   return null;
 }
 
-/** 按执行顺序演示每一档的手数与剩余；比例作用在当时剩余仓位上 */
+/** N 份等分的每份比例；有最终止盈时份数要把它算进去 */
+export function equalSharePercent(shares: number): number {
+  return Number((100 / Math.max(1, Math.floor(shares))).toFixed(2));
+}
+
+/**
+ * 按执行顺序演示每一档的手数与剩余。
+ * 新计划的比例占开仓手数（plan 传入时），旧计划仍按当时剩余仓位推进。
+ */
 export function estimateStepLots(
   volume: number,
   steps: PositionPlanStep[],
   info?: SymbolInfo,
   side: Side = 'buy',
+  plan?: PositionPlan | null,
 ): { rows: PlanLotEstimate[]; remaining: number } {
   const step = info?.volumeStep && info.volumeStep > 0 ? info.volumeStep : 0.01;
   const min = Math.max(info?.minVolume ?? 0, step);
   const decimals = step >= 1 ? 0 : step >= 0.1 ? 1 : step >= 0.01 ? 2 : 3;
   const round = (value: number) => Number(value.toFixed(decimals));
+  const initial =
+    plan?.volumeBase === 'initial' && plan.initialVolume != null && plan.initialVolume > 0
+      ? plan.initialVolume
+      : null;
 
   // 多单从低价档先触发，空单从高价档先触发
   const ordered = [...steps].sort((a, b) => (side === 'sell' ? b.price - a.price : a.price - b.price));
@@ -165,10 +185,19 @@ export function estimateStepLots(
     if (item.done || item.skipped || item.closePercent == null) {
       return { id: item.id, lots: 0, remaining, skipped: !!item.skipped };
     }
-    const raw = Math.floor((remaining * item.closePercent) / 100 / step + 1e-9) * step;
-    const lots = round(raw);
-    if (lots < min - 1e-9 || remaining - lots < min - 1e-9) {
+    const basis = initial ?? remaining;
+    const raw = Math.min(
+      Math.floor((basis * item.closePercent) / 100 / step + 1e-9) * step,
+      remaining,
+    );
+    let lots = round(raw);
+    if (lots < min - 1e-9) {
       return { id: item.id, lots: 0, remaining, skipped: true };
+    }
+    // 新口径下剩下的不足最小手数时，这一档把余量一起平掉；旧口径保持「平不干净就不平」
+    if (remaining - lots < min - 1e-9) {
+      if (initial == null) return { id: item.id, lots: 0, remaining, skipped: true };
+      lots = round(remaining);
     }
     remaining = round(remaining - lots);
     return { id: item.id, lots, remaining, skipped: false };

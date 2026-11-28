@@ -92,6 +92,8 @@ export interface ReplayPosition {
   id: string;
   side: Side;
   volume: number;
+  /** 开仓手数：模板阶段的比例按它计算；旧仓位没有时退回当前 volume */
+  initialVolume?: number;
   entry: number;
   sl: number | null;
   tp: number | null;

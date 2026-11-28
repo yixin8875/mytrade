@@ -323,6 +323,56 @@ def test_trigger_closes_percent_and_marks_done(monkeypatch):
     assert 11 in worker._auto_be
 
 
+def test_initial_volume_thirds_across_two_tiers(monkeypatch):
+    """两档 + 最终止盈共三份：每档按开仓手数的 1/3 平仓。"""
+    worker, sent, positions = make_worker(monkeypatch)
+    worker._plan_add({"ticket": 11, "price": 1.15, "closePercent": 33.33})
+    worker._plan_add({"ticket": 11, "price": 1.17, "closePercent": 33.33})
+
+    plan = worker._auto_be[11]
+    assert plan["initialVolume"] == pytest.approx(1.0)
+    assert plan["volumeBase"] == "initial"
+    payload = worker._plan_payload(plan)
+    assert payload["initialVolume"] == pytest.approx(1.0)
+    assert payload["volumeBase"] == "initial"
+
+    worker._auto_breakeven()
+    assert [item["volume"] for item in sent] == [pytest.approx(0.33)]
+
+    positions[0].volume = 0.67
+    worker._auto_breakeven()
+    assert [item["volume"] for item in sent] == [
+        pytest.approx(0.33),
+        pytest.approx(0.33),
+    ]
+
+
+def test_percent_sum_cannot_exceed_100(monkeypatch):
+    worker, _, _ = make_worker(monkeypatch)
+    worker._plan_add({"ticket": 11, "price": 1.12, "closePercent": 60})
+
+    with pytest.raises(GatewayError) as exc:
+        worker._plan_add({"ticket": 11, "price": 1.14, "closePercent": 50})
+
+    assert exc.value.code == "PLAN_PERCENT_SUM"
+
+
+def test_initial_base_eats_sub_min_remainder(monkeypatch):
+    info = symbol_info(volume_step=0.1, volume_min=0.1)
+    worker, sent, _ = make_worker(monkeypatch, info=info, positions=[position(volume=0.25)])
+    seed_plan(
+        worker,
+        initialVolume=0.25,
+        volumeBase="initial",
+        step={"price": 1.15, "closePercent": 99},
+    )
+
+    worker._auto_breakeven()
+
+    # 99% 取整后 0.2，剩 0.05 不足最小手数，这一档把余量一起平掉
+    assert [item["volume"] for item in sent] == [pytest.approx(0.25)]
+
+
 def test_no_execution_before_trigger(monkeypatch):
     worker, sent, _ = make_worker(monkeypatch)
     seed_plan(worker, step={"price": 1.25})

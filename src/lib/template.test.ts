@@ -196,6 +196,15 @@ describe('模板清洗的边界', () => {
       { atR: 1, closePercent: 50, moveBreakeven: false },
     ]);
   });
+
+  it('合计超过 100% 时按比例缩放', () => {
+    const steps = normalizeTemplateSteps([
+      { atR: 1, closePercent: 50 },
+      { atR: 2, closePercent: 50 },
+      { atR: 3, closePercent: 50 },
+    ]);
+    expect(steps.map((step) => step.closePercent)).toEqual([33.33, 33.33, 33.33]);
+  });
 });
 
 describe('templateTpTarget 的取整边界', () => {
